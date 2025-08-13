@@ -1,4 +1,3 @@
-from datetime import timedelta
 
 def run_construction_dashboard():
     import streamlit as st
@@ -6,6 +5,7 @@ def run_construction_dashboard():
     import plotly.express as px
     import json
     import requests
+from datetime import timedelta
 
     # Pioneer theme styling
     st.markdown(
@@ -54,10 +54,9 @@ def run_construction_dashboard():
     min_date = df["Submission Date"].min().date()
     max_date = df["Submission Date"].max().date()
 
-    default_start = max_date - timedelta(days=29)
-    if default_start < min_date:
-        default_start = min_date
-    start_date, end_date = st.date_input("📅 Select date range", value=(default_start, max_date), min_value=min_date, max_value=max_date)
+    start_date, end_date = st.date_input(
+        "📅 Select date range",
+        value=(min_date, max_date),
         min_value=min_date,
         max_value=max_date
     )

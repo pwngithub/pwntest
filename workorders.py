@@ -1,9 +1,9 @@
-from datetime import timedelta
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
+from datetime import timedelta
 
 def run_workorders_dashboard():
     st.set_page_config(page_title="Technician Dashboard", layout="wide")
@@ -66,6 +66,7 @@ def run_workorders_dashboard():
     if default_start < min_date:
         default_start = min_date
     start_date, end_date = st.date_input("📅 Select date range", value=(default_start, max_date), min_value=min_date, max_value=max_date)
+    df = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
     
     total_jobs = df["WO#"].nunique()

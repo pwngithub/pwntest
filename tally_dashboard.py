@@ -1,8 +1,8 @@
-from datetime import timedelta
 
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+from datetime import timedelta
 
 def run(df):
     st.set_page_config(page_title="Customer Activity Report", layout="wide")
@@ -27,10 +27,9 @@ def run(df):
     # --- Date Range Filter ---
     st.sidebar.header("🔍 Filters")
     min_date, max_date = df["Submission Date"].min(), df["Submission Date"].max()
-    default_start = max_date - timedelta(days=29)
-    if default_start < min_date:
-        default_start = min_date
-    start_date, end_date = st.sidebar.date_input("Submission Date Range", [default_start, max_date], min_value=min_date, max_value=max_date)
+    start_date, end_date = st.sidebar.date_input("Submission Date Range", [min_date, max_date])
+    df = df[
+        (df["Submission Date"] >= pd.Timestamp(start_date)) &
         (df["Submission Date"] <= pd.Timestamp(end_date))
     ]
 
