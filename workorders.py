@@ -62,6 +62,8 @@ def run_workorders_dashboard():
 
     min_day = df["Day"].min()
     max_day = df["Day"].max()
+    min_date = df['Submission Date'].min().date()
+    max_date = df['Submission Date'].max().date()
     default_start = max_date - timedelta(days=29)
     if default_start < min_date:
         default_start = min_date
