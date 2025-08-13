@@ -1,3 +1,4 @@
+from datetime import timedelta
 
 import streamlit as st
 import pandas as pd
@@ -61,8 +62,10 @@ def run_workorders_dashboard():
 
     min_day = df["Day"].min()
     max_day = df["Day"].max()
-    start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
-    df = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
+    default_start = max_date - timedelta(days=29)
+    if default_start < min_date:
+        default_start = min_date
+    start_date, end_date = st.date_input("📅 Select date range", value=(default_start, max_date), min_value=min_date, max_value=max_date)
 
     
     total_jobs = df["WO#"].nunique()

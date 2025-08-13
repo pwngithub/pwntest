@@ -1,3 +1,4 @@
+from datetime import timedelta
 
 import pandas as pd
 import streamlit as st
@@ -26,9 +27,10 @@ def run(df):
     # --- Date Range Filter ---
     st.sidebar.header("🔍 Filters")
     min_date, max_date = df["Submission Date"].min(), df["Submission Date"].max()
-    start_date, end_date = st.sidebar.date_input("Submission Date Range", [min_date, max_date])
-    df = df[
-        (df["Submission Date"] >= pd.Timestamp(start_date)) &
+    default_start = max_date - timedelta(days=29)
+    if default_start < min_date:
+        default_start = min_date
+    start_date, end_date = st.sidebar.date_input("Submission Date Range", [default_start, max_date], min_value=min_date, max_value=max_date)
         (df["Submission Date"] <= pd.Timestamp(end_date))
     ]
 
