@@ -54,12 +54,12 @@ from datetime import timedelta
     min_date = df["Submission Date"].min().date()
     max_date = df["Submission Date"].max().date()
 
-    start_date, end_date = st.date_input(
-        "📅 Select date range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
-    )
+    min_date = df['Submission Date'].min().date()
+    max_date = df['Submission Date'].max().date()
+    default_start = max_date - timedelta(days=29)
+    if default_start < min_date:
+        default_start = min_date
+    start_date, end_date = st.date_input("📅 Select date range", value=(default_start, max_date), min_value=min_date, max_value=max_date)
 
     df = df[(df["Submission Date"].dt.date >= start_date) & (df["Submission Date"].dt.date <= end_date)]
 
