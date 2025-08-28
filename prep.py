@@ -37,13 +37,12 @@ def extract_drop_size(text):
     match = re.search(r"(\d{2,4})['’]\s?Drop", str(text))
     return match.group(1) + "'" if match else "Unknown"
 
-# Fetch data and rename fields
 df = fetch_prep_data()
 st.expander("🛠 Raw Data Preview (before filters)").dataframe(df.head(20))
 st.write(f"📅 Available data range: {df['Date'].min()} to {df['Date'].max()}")
+
 df.rename(columns={"tech": "Tech", "inventoryItems": "INVENTORY ITEMS"}, inplace=True)
 
-# Check for required columns
 required_columns = ['Date', 'Tech', 'INVENTORY ITEMS']
 if not all(col in df.columns for col in required_columns):
     st.error("❌ Missing required columns: 'Date', 'Tech', 'INVENTORY ITEMS'")
@@ -52,20 +51,19 @@ else:
     df['Drop Size'] = df['INVENTORY ITEMS'].apply(extract_drop_size)
     df['Tech'] = df['Tech'].astype(str).str.strip()
 
-    # ✅ Date filter - after confirming Date exists
     min_date = df["Date"].min()
     max_date = df["Date"].max()
     selected_dates = st.sidebar.date_input("📅 Select Date Range", [min_date, max_date], min_value=min_date, max_value=max_date)
 
     filtered_df = df.copy()
-if isinstance(selected_dates, list) and len(selected_dates) == 2:
-    start_date, end_date = selected_dates
-    if start_date and end_date:
-        filtered_df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
     if isinstance(selected_dates, list) and len(selected_dates) == 2:
-        filtered_df = filtered_df[(filtered_df["Date"] >= selected_dates[0]) & (filtered_df["Date"] <= selected_dates[1])]
+        start_date, end_date = selected_dates
+        if start_date and end_date:
+            filtered_df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
+    else:
+        st.warning("⚠️ Please select both a start and end date for filtering.")
 
-    # Other sidebar filters
+    # Sidebar filters
     st.sidebar.header("🔍 Filter Data")
     selected_techs = st.sidebar.multiselect("Select Tech(s)", sorted(filtered_df['Tech'].dropna().unique()))
     selected_drops = st.sidebar.multiselect("Select Drop Size(s)", sorted(filtered_df['Drop Size'].dropna().unique()))
@@ -127,4 +125,4 @@ if isinstance(selected_dates, list) and len(selected_dates) == 2:
         ).properties(title='Prep Trend Over Time')
         st.altair_chart(line_chart, use_container_width=True)
     else:
-        st.info("No data to display for the selected filters.")
+        st.info("ℹ️ No data to display for the selected filters.")
