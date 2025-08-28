@@ -51,7 +51,13 @@ else:
     df['Tech'] = df['Tech'].astype(str).str.strip()
 
     st.sidebar.header("🔍 Filter Data")
-    selected_dates = st.sidebar.multiselect("Select Date(s)", sorted(df['Date'].dropna().unique()))
+    
+min_date = df["Date"].min()
+max_date = df["Date"].max()
+selected_dates = st.sidebar.date_input("📅 Select Date Range", [min_date, max_date], min_value=min_date, max_value=max_date)
+if isinstance(selected_dates, list) and len(selected_dates) == 2:
+    df = df[(df["Date"] >= selected_dates[0]) & (df["Date"] <= selected_dates[1])]
+
     selected_techs = st.sidebar.multiselect("Select Tech(s)", sorted(df['Tech'].dropna().unique()))
     selected_drops = st.sidebar.multiselect("Select Drop Size(s)", sorted(df['Drop Size'].dropna().unique()))
 
