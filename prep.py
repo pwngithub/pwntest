@@ -39,13 +39,13 @@ def extract_drop_size(text):
 
 df = fetch_prep_data()
 
-st.subheader("🧪 Available Columns")
-st.write(df.columns.tolist())
+# Rename to match expected names
+df.rename(columns={"tech": "Tech", "inventoryItems": "INVENTORY ITEMS"}, inplace=True)
 
 required_columns = ['Date', 'Tech', 'INVENTORY ITEMS']
 if not all(col in df.columns for col in required_columns):
-    st.error("❌ Missing one or more required columns: 'Date', 'Tech', 'INVENTORY ITEMS'")
-    st.warning("Check the column list above and update the field names accordingly.")
+    st.error("❌ Missing required columns: 'Date', 'Tech', 'INVENTORY ITEMS'")
+    st.warning("Check the available columns and adjust field mappings.")
 else:
     df['Drop Size'] = df['INVENTORY ITEMS'].apply(extract_drop_size)
     df['Tech'] = df['Tech'].astype(str).str.strip()
