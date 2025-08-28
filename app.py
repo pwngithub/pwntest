@@ -5,7 +5,7 @@ import requests
 
 report = st.sidebar.selectbox(
     "📊 Select Report",
-    ["Home", "Tally", "Construction", "Work Orders"]
+    ["Home", "Tally", "Construction", "Work Orders", "Preps"]
 )
 
 if report == "Home":
@@ -49,3 +49,6 @@ elif report == "Construction":
 elif report == "Work Orders":
     import workorders
     workorders.run_workorders_dashboard()
+
+elif report == "Preps":
+    import prep

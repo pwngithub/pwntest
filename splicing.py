@@ -20,7 +20,7 @@ def run_construction_dashboard():
     )
 
     st.image("https://www.pioneerbroadband.net/sites/all/themes/pioneer/images/logo.png", width=300)
-    st.title("Construction Dashboard")
+    st.title("Splicing Dashboard")
 
     def load_from_jotform():
         api_key = "22179825a79dba61013e4fc3b9d30fa4"

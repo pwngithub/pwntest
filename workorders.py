@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
-from datetime import timedelta
 
 def run_workorders_dashboard():
     st.set_page_config(page_title="Technician Dashboard", layout="wide")
@@ -62,12 +61,7 @@ def run_workorders_dashboard():
 
     min_day = df["Day"].min()
     max_day = df["Day"].max()
-    min_date = df['Submission Date'].min().date()
-    max_date = df['Submission Date'].max().date()
-    default_start = max_date - timedelta(days=29)
-    if default_start < min_date:
-        default_start = min_date
-    start_date, end_date = st.date_input("📅 Select date range", value=(default_start, max_date), min_value=min_date, max_value=max_date)
+    start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
     df = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
     
