@@ -39,6 +39,8 @@ def extract_drop_size(text):
 
 # Fetch data and rename fields
 df = fetch_prep_data()
+st.expander("🛠 Raw Data Preview (before filters)").dataframe(df.head(20))
+st.write(f"📅 Available data range: {df['Date'].min()} to {df['Date'].max()}")
 df.rename(columns={"tech": "Tech", "inventoryItems": "INVENTORY ITEMS"}, inplace=True)
 
 # Check for required columns
@@ -56,6 +58,10 @@ else:
     selected_dates = st.sidebar.date_input("📅 Select Date Range", [min_date, max_date], min_value=min_date, max_value=max_date)
 
     filtered_df = df.copy()
+if isinstance(selected_dates, list) and len(selected_dates) == 2:
+    start_date, end_date = selected_dates
+    if start_date and end_date:
+        filtered_df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
     if isinstance(selected_dates, list) and len(selected_dates) == 2:
         filtered_df = filtered_df[(filtered_df["Date"] >= selected_dates[0]) & (filtered_df["Date"] <= selected_dates[1])]
 
