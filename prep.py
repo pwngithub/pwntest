@@ -34,14 +34,18 @@ def fetch_prep_data():
     return df
 
 def extract_drop_size(text):
-    match = re.search(r"(\d{{2,4}})['’]\s?Drop", str(text))
+    match = re.search(r"(\d{2,4})['’]\s?Drop", str(text))
     return match.group(1) + "'" if match else "Unknown"
 
 df = fetch_prep_data()
 
+st.subheader("🧪 Available Columns")
+st.write(df.columns.tolist())
+
 required_columns = ['Date', 'Tech', 'INVENTORY ITEMS']
 if not all(col in df.columns for col in required_columns):
-    st.error("Missing required columns: 'Date', 'Tech', or 'INVENTORY ITEMS'")
+    st.error("❌ Missing one or more required columns: 'Date', 'Tech', 'INVENTORY ITEMS'")
+    st.warning("Check the column list above and update the field names accordingly.")
 else:
     df['Drop Size'] = df['INVENTORY ITEMS'].apply(extract_drop_size)
     df['Tech'] = df['Tech'].astype(str).str.strip()
