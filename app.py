@@ -4,7 +4,7 @@ from dashboard import run_dashboard
 from construction import run_construction_dashboard as run_construction
 from workorders import run_workorders_dashboard
 from prep import run_preps_dashboard
-from tally_dashboard import run_tally_dashboard
+from tally_dashboard import run as run_tally_dashboard
 
 st.set_page_config(page_title="Pioneer Dashboards", layout="wide")
 
