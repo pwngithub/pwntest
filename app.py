@@ -27,7 +27,7 @@ elif report == "Construction":
 
 elif report == "Preps":
     try:
-        df = fetch_jotform_data(form_id="232136783361054", min_cols=5)
+        df = fetch_jotform_data(form_id="232136783361054")
         st.sidebar.success(f"Loaded Preps data: {df.shape[0]} rows")
         run_preps_dashboard()
     except Exception as e:
@@ -36,7 +36,7 @@ elif report == "Preps":
 
 elif report == "Tally":
     try:
-        df = fetch_jotform_data(form_id="231867872328063", min_cols=5)
+        df = fetch_jotform_data(form_id="231867872328063")
         st.sidebar.success(f"Loaded Tally data: {df.shape[0]} rows")
         run_tally_dashboard(df)
     except Exception as e:
