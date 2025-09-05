@@ -1,10 +1,9 @@
 
-import os
 import requests
 import pandas as pd
 import streamlit as st
 
-API_KEY = os.getenv("JOTFORM_API_KEY") or "your_api_key_here"
+API_KEY = "ba9013143bfda3a448297144c0527f7e"
 
 def fetch_jotform_data(form_id):
     try:
@@ -20,7 +19,6 @@ def fetch_jotform_data(form_id):
         if not submissions:
             return pd.DataFrame()
 
-        # Extract question labels
         fields = submissions[0]["answers"]
         columns = {key: val["text"] for key, val in fields.items()}
 
