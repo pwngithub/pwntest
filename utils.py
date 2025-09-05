@@ -6,17 +6,20 @@ import streamlit as st
 API_KEY = "ba9013143bfda3a448297144c0527f7e"
 
 def fetch_jotform_data(form_id):
+    st.sidebar.write("Fetching data for Form ID:", form_id)
     try:
         url = f"https://api.jotform.com/form/{form_id}/submissions?apiKey={API_KEY}"
         response = requests.get(url)
         st.sidebar.write("JotForm API Status:", response.status_code)
 
         if response.status_code != 200:
+            st.sidebar.error("Failed to fetch data from JotForm")
             return None
 
         content = response.json()
         submissions = content.get("content", [])
         if not submissions:
+            st.sidebar.warning("No submissions found")
             return pd.DataFrame()
 
         fields = submissions[0]["answers"]
@@ -30,7 +33,10 @@ def fetch_jotform_data(form_id):
                     row[columns.get(key, key)] = val["answer"]
             data.append(row)
 
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+        st.sidebar.write(f"Loaded {len(df)} rows with {len(df.columns)} columns")
+        st.sidebar.write("Columns:", list(df.columns))
+        return df
 
     except Exception as e:
         st.sidebar.error(f"Error fetching data: {e}")
