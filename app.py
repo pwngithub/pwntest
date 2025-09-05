@@ -1,54 +1,38 @@
 
 import streamlit as st
-import pandas as pd
-import requests
+from dashboard import run_dashboard
+from construction import run_construction
+from workorders import run_workorders_dashboard
+from tally_dashboard import run as run_tally
+from utils import fetch_jotform_data
 
-report = st.sidebar.selectbox(
-    "📊 Select Report",
-    ["Home", "Tally", "Construction", "Work Orders", "Preps"]
-)
+st.set_page_config(page_title="PWNTEST Dashboard", layout="wide")
+report = st.sidebar.selectbox("Select Report", ["Dashboard", "Construction", "Work Orders", "Tally", "Preps"])
 
-if report == "Home":
-    st.title("🏠 Welcome to Pioneer Dashboard")
-    st.markdown("Use the sidebar to select a specific report.")
-
-elif report == "Tally":
-    import tally_dashboard
-
-    api_key = "22179825a79dba61013e4fc3b9d30fa4"
-    form_id = "240073839937062"
-    url = f"https://api.jotform.com/form/{form_id}/submissions?apiKey={api_key}&limit=1000"
-    response = requests.get(url)
-    response.raise_for_status()
-    data = response.json()
-
-    submissions = []
-    for item in data.get("content", []):
-        answers = item.get("answers", {})
-        record = {}
-        for ans in answers.values():
-            name = ans.get("name")
-            answer = ans.get("answer")
-            if name == "date" and isinstance(answer, dict) and "datetime" in answer:
-                record["date"] = answer["datetime"]
-            elif name == "customerName" and isinstance(answer, dict):
-                record[name] = f"{answer.get('first','')} {answer.get('last','')}".strip()
-            elif isinstance(answer, dict):
-                record[name] = str(answer)
-            elif name and answer is not None:
-                record[name] = answer
-        submissions.append(record)
-
-    df = pd.DataFrame(submissions)
-    tally_dashboard.run(df)
-
+if report == "Dashboard":
+    run_dashboard()
 elif report == "Construction":
-    import construction
-    construction.run_construction_dashboard()
-
+    run_construction()
 elif report == "Work Orders":
-    import workorders
-    workorders.run_workorders_dashboard()
-
+    run_workorders_dashboard()
+elif report == "Tally":
+    try:
+        form_id = "251684170301146"
+        df = fetch_jotform_data(form_id)
+        if df is not None:
+            run_tally(df)
+        else:
+            st.error("Failed to load data for Tally.")
+    except Exception as e:
+        st.exception(e)
 elif report == "Preps":
-    import prep
+    try:
+        form_id = "251721096441149"
+        df = fetch_jotform_data(form_id)
+        if df is not None:
+            import prep
+            prep.run(df)
+        else:
+            st.error("Failed to load data for Preps.")
+    except Exception as e:
+        st.exception(e)
