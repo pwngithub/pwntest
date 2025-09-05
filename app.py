@@ -10,7 +10,7 @@ from utils import fetch_jotform_data
 st.set_page_config(page_title="Pioneer Dashboards", layout="wide")
 
 st.sidebar.title("📊 Report Selector")
-report = st.sidebar.selectbox("Select Report", ["Welcome", "Construction", "Preps", "Tally"], index=0)
+report = st.sidebar.selectbox("Select Report", ["Welcome", "Dashboard", "Construction", "Preps", "Tally"], index=0)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Debug Info")
@@ -18,6 +18,9 @@ st.sidebar.markdown("### Debug Info")
 if report == "Welcome":
     st.title("Welcome to Pioneer Dashboard")
     st.write("Please select a report from the sidebar.")
+
+elif report == "Dashboard":
+    run_dashboard()
 
 elif report == "Construction":
     run_construction()
