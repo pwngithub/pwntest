@@ -1,43 +1,34 @@
 
 import requests
 import pandas as pd
-import streamlit as st
 
-API_KEY = "ba9013143bfda3a448297144c0527f7e"
-
-def fetch_jotform_data(form_id):
-    st.sidebar.write("Fetching data for Form ID:", form_id)
+def fetch_jotform_data(form_id: str, api_key: str) -> pd.DataFrame:
+    url = f"https://api.jotform.com/form/{form_id}/submissions?apiKey={api_key}&limit=1000"
     try:
-        url = f"https://api.jotform.com/form/{form_id}/submissions?apiKey={API_KEY}"
         response = requests.get(url)
-        st.sidebar.write("JotForm API Status:", response.status_code)
-
-        if response.status_code != 200:
-            st.sidebar.error("Failed to fetch data from JotForm")
-            return None
-
-        content = response.json()
-        submissions = content.get("content", [])
-        if not submissions:
-            st.sidebar.warning("No submissions found")
+        response.raise_for_status()
+        data = response.json()
+        if "content" not in data:
             return pd.DataFrame()
-
-        fields = submissions[0]["answers"]
-        columns = {key: val["text"] for key, val in fields.items()}
-
-        data = []
-        for submission in submissions:
-            row = {}
-            for key, val in submission["answers"].items():
-                if "answer" in val:
-                    row[columns.get(key, key)] = val["answer"]
-            data.append(row)
-
-        df = pd.DataFrame(data)
-        st.sidebar.write(f"Loaded {len(df)} rows with {len(df.columns)} columns")
-        st.sidebar.write("Columns:", list(df.columns))
-        return df
-
+        records = []
+        for submission in data["content"]:
+            answers = submission.get("answers", {})
+            record = {}
+            for qid, answer in answers.items():
+                name = answer.get("name")
+                value = answer.get("answer")
+                if isinstance(value, dict):
+                    value = " ".join(str(v) for v in value.values() if v)
+                record[name] = value
+            records.append(record)
+        return pd.DataFrame(records)
     except Exception as e:
-        st.sidebar.error(f"Error fetching data: {e}")
-        return None
+        print(f"Error fetching JotForm data: {e}")
+        return pd.DataFrame()
+
+def preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
+    df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].fillna("").astype(str)
+    return df
