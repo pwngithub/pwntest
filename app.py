@@ -1,3 +1,4 @@
+from dashboard import run_dashboard
 
 import streamlit as st
 from construction import run_construction_dashboard as run_construction
@@ -19,13 +20,7 @@ if report == "Welcome":
     st.write("Please select a report from the sidebar.")
 
 elif report == "Talley":
-    try:
-        df = fetch_jotform_data(form_id="231867872328063", api_key="YOUR_API_KEY")
-        st.sidebar.success(f"Loaded Talley data: {df.shape[0]} rows")
-        run_talley_dashboard(df)
-    except Exception as e:
-        st.sidebar.error(f"Failed to load data for Talley: {e}")
-        st.error("Unable to load Talley dashboard.")
+    run_dashboard()
 elif report == "Construction":
     run_construction()
 
