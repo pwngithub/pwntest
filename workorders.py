@@ -52,6 +52,15 @@ def run_workorders_dashboard():
         avg_by_type = df.groupby('Type').size().mean()
         st.metric("📊 Avg per Type", f"{avg_by_type:.1f}")
 
+        # --- Export Processed File ---
+    csv_export = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="💾 Download Processed Work Orders CSV",
+        data=csv_export,
+        file_name="workorders_processed.csv",
+        mime="text/csv",
+    )
+
     st.markdown("---")
 
     # --- Visualizations ---
