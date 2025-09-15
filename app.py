@@ -4,7 +4,7 @@ from dashboard import run_dashboard
 from construction import run_construction_dashboard as run_construction
 from workorders import run_workorders_dashboard
 from prep import run_preps_dashboard
-from tally_dashboard import run as run_tally_dashboard
+from talley import run as run_talley_dashboard
 from utils import fetch_jotform_data
 
 st.set_page_config(page_title="Pioneer Dashboards", layout="wide")
@@ -23,11 +23,10 @@ elif report == "Talley":
     try:
         df = fetch_jotform_data(form_id="231867872328063", api_key="32c62a1b6c1a350caed2f989c1be4e48")
         st.sidebar.success(f"Loaded Talley data: {df.shape[0]} rows")
-        run_tally_dashboard(df)
+        run_talley_dashboard(df)
     except Exception as e:
         st.sidebar.error(f"Failed to load data for Talley: {e}")
         st.error("Unable to load Talley dashboard.")
-
 elif report == "Construction":
     run_construction()
 
