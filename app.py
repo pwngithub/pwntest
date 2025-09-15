@@ -1,4 +1,4 @@
-from dashboard import run_dashboard
+from talley import run_talley
 
 import streamlit as st
 from construction import run_construction_dashboard as run_construction
@@ -20,7 +20,7 @@ if report == "Welcome":
     st.write("Please select a report from the sidebar.")
 
 elif report == "Talley":
-    run_dashboard()
+    run_talley()
 elif report == "Construction":
     run_construction()
 
