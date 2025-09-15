@@ -5,6 +5,19 @@ import plotly.express as px
 import os
 
 def run_workorders_dashboard():
+    # --- Handle Date Column Robustly ---
+    date_col = None
+    for candidate in ["Date When", "Date", "Submission Date", "Created At"]:
+        if candidate in df.columns:
+            date_col = candidate
+            break
+
+    if date_col:
+        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+        df = df.dropna(subset=[date_col])
+        df["Month"] = df[date_col].dt.to_period("M").astype(str)
+    else:
+        st.warning("⚠️ No recognizable date column found in Work Orders data.")
     st.set_page_config(page_title="Technician Dashboard", layout="wide")
 
     st.markdown("""
@@ -55,20 +68,7 @@ def run_workorders_dashboard():
 
         df = pd.read_csv(os.path.join(saved_folder, selected_file))
 
-        # --- Handle Date Column Robustly ---
-    date_col = None
-    for candidate in ["Date When", "Date", "Submission Date", "Created At"]:
-        if candidate in df.columns:
-            date_col = candidate
-            break
-
-    if date_col:
-        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-        df = df.dropna(subset=[date_col])
-        df["Month"] = df[date_col].dt.to_period("M").astype(str)
-    else:
-        st.warning("⚠️ No recognizable date column found in Work Orders data.")
-    df = df.dropna(subset=[date_col] if date_col else [])
+            df = df.dropna(subset=[date_col] if date_col else [])
     df["Day"] = 
     min_day = df["Day"].min()
     max_day = df["Day"].max()
