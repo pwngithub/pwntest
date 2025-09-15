@@ -4,7 +4,22 @@ import pandas as pd
 import plotly.express as px
 import os
 
+
 def run_workorders_dashboard():
+    import streamlit as st
+    import pandas as pd
+    import plotly.express as px
+
+    st.markdown("<h1 style='color:#405C88;'>📋 Work Orders Dashboard</h1>", unsafe_allow_html=True)
+    st.markdown("This dashboard provides insights into work order activity, including totals, status by type, and overall averages.")
+
+    # --- Load Data ---
+    # Expect df to be set from file uploader or context; if not, handle gracefully
+    if "df" not in globals():
+        st.warning("⚠️ No data loaded for Work Orders.")
+        return
+    df = globals()["df"]
+
     # --- Handle Date Column Robustly ---
     date_col = None
     for candidate in ["Date When", "Date", "Submission Date", "Created At"]:
@@ -18,136 +33,45 @@ def run_workorders_dashboard():
         df["Month"] = df[date_col].dt.to_period("M").astype(str)
     else:
         st.warning("⚠️ No recognizable date column found in Work Orders data.")
-    st.set_page_config(page_title="Technician Dashboard", layout="wide")
-
-    st.markdown("""
-    <div style='text-align:center;'>
-    <img src='https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w' width='500'>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<h1 style='color:#4A648C;text-align:center;'>🛠 Pioneer Broadband Work Orders Dashboard</h1>", unsafe_allow_html=True)
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    # Create folder for saved uploads
-    saved_folder = "saved_uploads"
-    os.makedirs(saved_folder, exist_ok=True)
-
-    mode = st.radio("Select Mode", ["Upload New File", "Load Existing File"])
-
-    if mode == "Upload New File":
-        uploaded_file = st.file_uploader("Upload Technician Workflow CSV", type=["csv"])
-        custom_filename = st.text_input("Enter a name to save this file as (without extension):")
-
-        if uploaded_file and custom_filename:
-            save_path = os.path.join(saved_folder, custom_filename + ".csv")
-            with open(save_path, "wb") as f:
-                f.write(uploaded_file.read())
-            st.success(f"File saved as: {save_path}")
-            df = pd.read_csv(save_path)
-
-        elif uploaded_file and not custom_filename:
-            st.warning("Please enter a file name to save.")
-
-        else:
-            return
-
-    else:  # Load from existing saved files
-        saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
-        if not saved_files:
-            st.warning("No saved files found. Please upload one first.")
-            return
-        selected_file = st.selectbox("Select a saved file to load", saved_files)
-
-        st.markdown("### 🗑 Delete a Saved File")
-        file_to_delete = st.selectbox("Select a file to delete", saved_files, key="delete_file")
-        if st.button("Delete Selected File"):
-            os.remove(os.path.join(saved_folder, file_to_delete))
-            st.success(f"{file_to_delete} has been deleted.")
-            st.experimental_rerun()
-
-        df = pd.read_csv(os.path.join(saved_folder, selected_file))
-
-            df = df.dropna(subset=[date_col] if date_col else [])
-    df["Day"] = 
-    min_day = df["Day"].min()
-    max_day = df["Day"].max()
-    start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
-    df = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
-
-    
-    total_jobs = df["WO#"].nunique()
-    avg_duration = pd.to_numeric(df["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean() or 0
-    unique_statuses = df["Tech Status"].nunique()
-    tech_count = df["Techinician"].nunique()
-    avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
-    num_days = (end_date - start_date).days + 1
-
-    st.markdown("### 📌 Key Performance Indicators")
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    k1.metric("🔧 Total Jobs", total_jobs)
-    k2.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
-    k3.metric("📋 Unique Statuses", unique_statuses)
-    k4.metric("👨‍🔧 Total Technicians", tech_count)
-    k5.metric("📈 Jobs per Technician", f"{avg_jobs_per_tech:.1f}")
-    k6.metric("📆 Days Covered", num_days)
-
-    total_entries = df["WO#"].count()
-    duration_series = pd.to_numeric(df["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
-    max_duration = duration_series.max() or 0
-    min_duration = duration_series.min() or 0
-
-    k7, k8, k9 = st.columns(3)
-    k7.metric("🧾 Total Entries", total_entries)
-    k8.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
-    k9.metric("⏱️ Shortest Duration (hrs)", f"{min_duration:.2f}")
-
-
-    st.markdown("---")
-
-    grouped_overall = (df.groupby(["Techinician", "Work Type"])
-                       .agg(Total_Jobs=("WO#", "nunique"),
-                            Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-                       .reset_index())
-
-    fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
-                  color="Techinician", title="Total Jobs by Work Type",
-                  color_discrete_sequence=["#8BC53F"])
-    fig1.update_layout(plot_bgcolor='white', title_font_color="#4A648C")
-    st.plotly_chart(fig1, use_container_width=True)
-
-    fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
-                  color="Techinician", title="Avg Duration by Work Type",
-                  color_discrete_sequence=["#8BC53F"])
-    fig2.update_layout(plot_bgcolor='white', title_font_color="#4A648C")
-    st.plotly_chart(fig2, use_container_width=True)
-
-    st.markdown("### 🗂 Breakout Table: Daily Summary")
-    df_daily = (df.groupby(["Techinician", "Day", "Work Type"])
-                .agg(Jobs_Completed=("WO#", "nunique"),
-                     Total_Entries=("WO#", "count"),
-                     Avg_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-                .reset_index())
-    st.dataframe(df_daily, use_container_width=True)
-
-    st.markdown("### 📤 Export Overall Summary")
-    csv = grouped_overall.to_csv(index=False).encode('utf-8')
-    st.download_button("Download Summary CSV", data=csv, file_name="workorders_summary.csv", mime="text/csv")
 
     # --- KPIs ---
     total_orders = len(df)
     completed = len(df[df['Status'].str.lower() == 'completed']) if 'Status' in df.columns else 0
     pending = len(df[df['Status'].str.lower() == 'pending']) if 'Status' in df.columns else 0
     cancelled = len(df[df['Status'].str.lower() == 'cancelled']) if 'Status' in df.columns else 0
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric('📑 Total Work Orders', f"{total_orders}", delta_color='off')
-    col2.metric('✅ Completed', f"{completed}", delta_color='normal')
-    col3.metric('⏳ Pending', f"{pending}", delta_color='inverse')
-    col4.metric('❌ Cancelled', f"{cancelled}", delta_color='inverse')
 
-    # --- Average KPI by Work Order Type ---
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("📑 Total", total_orders, delta_color="off")
+    col2.metric("✅ Completed", completed, delta_color="normal")
+    col3.metric("⏳ Pending", pending, delta_color="inverse")
+    col4.metric("❌ Cancelled", cancelled, delta_color="inverse")
+
     if 'Type' in df.columns:
         avg_by_type = df.groupby('Type').size().mean()
-        st.metric('📊 Avg Work Orders per Type', f"{avg_by_type:.1f}")
-        avg_summary = df.groupby('Type').size().reset_index(name='Count')
-        st.bar_chart(avg_summary.set_index('Type'))
+        st.metric("📊 Avg per Type", f"{avg_by_type:.1f}")
+
+    st.markdown("---")
+
+    # --- Visualizations ---
+    if 'Status' in df.columns:
+        status_summary = df['Status'].value_counts().reset_index()
+        status_summary.columns = ['Status', 'Count']
+        fig_status = px.pie(status_summary, names='Status', values='Count',
+                            title='Work Orders by Status', hole=0.4,
+                            color_discrete_sequence=['#405C88','#7CB342','#FF7043'])
+        st.plotly_chart(fig_status, use_container_width=True)
+
+    if 'Type' in df.columns:
+        type_summary = df['Type'].value_counts().reset_index()
+        type_summary.columns = ['Type', 'Count']
+        fig_type = px.bar(type_summary, x='Type', y='Count',
+                          title='Work Orders by Type',
+                          color='Count', color_continuous_scale=['#7CB342','#405C88'])
+        st.plotly_chart(fig_type, use_container_width=True)
+
+    if 'Month' in df.columns:
+        trend = df.groupby('Month').size().reset_index(name='Count')
+        fig_trend = px.line(trend, x='Month', y='Count', markers=True,
+                            title='Work Orders Trend Over Time',
+                            color_discrete_sequence=['#405C88'])
+        st.plotly_chart(fig_trend, use_container_width=True)
