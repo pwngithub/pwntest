@@ -122,3 +122,21 @@ def run_workorders_dashboard():
     st.markdown("### 📤 Export Overall Summary")
     csv = grouped_overall.to_csv(index=False).encode('utf-8')
     st.download_button("Download Summary CSV", data=csv, file_name="workorders_summary.csv", mime="text/csv")
+
+    # --- KPIs ---
+    total_orders = len(df)
+    completed = len(df[df['Status'].str.lower() == 'completed']) if 'Status' in df.columns else 0
+    pending = len(df[df['Status'].str.lower() == 'pending']) if 'Status' in df.columns else 0
+    cancelled = len(df[df['Status'].str.lower() == 'cancelled']) if 'Status' in df.columns else 0
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric('📑 Total Work Orders', f"{total_orders}", delta_color='off')
+    col2.metric('✅ Completed', f"{completed}", delta_color='normal')
+    col3.metric('⏳ Pending', f"{pending}", delta_color='inverse')
+    col4.metric('❌ Cancelled', f"{cancelled}", delta_color='inverse')
+
+    # --- Average KPI by Work Order Type ---
+    if 'Type' in df.columns:
+        avg_by_type = df.groupby('Type').size().mean()
+        st.metric('📊 Avg Work Orders per Type', f"{avg_by_type:.1f}")
+        avg_summary = df.groupby('Type').size().reset_index(name='Count')
+        st.bar_chart(avg_summary.set_index('Type'))
