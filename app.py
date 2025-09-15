@@ -1,6 +1,5 @@
 
 import streamlit as st
-from dashboard import run_dashboard
 from construction import run_construction_dashboard as run_construction
 from workorders import run_workorders_dashboard
 from prep import run_preps_dashboard
@@ -21,7 +20,7 @@ if report == "Welcome":
 
 elif report == "Talley":
     try:
-        df = fetch_jotform_data(form_id="231867872328063", api_key="32c62a1b6c1a350caed2f989c1be4e48")
+        df = fetch_jotform_data(form_id="231867872328063", api_key="YOUR_API_KEY")
         st.sidebar.success(f"Loaded Talley data: {df.shape[0]} rows")
         run_talley_dashboard(df)
     except Exception as e:
