@@ -68,9 +68,8 @@ def run_workorders_dashboard():
         df["Month"] = df[date_col].dt.to_period("M").astype(str)
     else:
         st.warning("⚠️ No recognizable date column found in Work Orders data.")
-    df = df.dropna(subset=["Date When"])
-    df["Day"] = df["Date When"].dt.date
-
+    df = df.dropna(subset=[date_col] if date_col else [])
+    df["Day"] = 
     min_day = df["Day"].min()
     max_day = df["Day"].max()
     start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
