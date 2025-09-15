@@ -7,13 +7,14 @@ import os
 
 
 
+
 def run_workorders_dashboard():
     import streamlit as st
     import pandas as pd
     import plotly.express as px
 
     st.markdown("<h1 style='color:#405C88;'>📋 Work Orders Dashboard</h1>", unsafe_allow_html=True)
-    st.markdown("Enhanced dashboard for analyzing technician workflows, durations, and work order types.")
+    st.markdown("Enhanced dashboard with filters for technicians, work order types, and date range.")
 
     # --- File Uploader ---
     uploaded_file = st.file_uploader("📂 Upload a Work Orders CSV", type=["csv"])
@@ -39,8 +40,22 @@ def run_workorders_dashboard():
         df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
         df = df.dropna(subset=[date_col])
         df["Month"] = df[date_col].dt.to_period("M").astype(str)
-    else:
-        st.warning("⚠️ No recognizable date column found in Work Orders data.")
+
+    # --- Sidebar Filters ---
+    st.sidebar.header("🔎 Filters")
+
+    if date_col:
+        min_date, max_date = df[date_col].min(), df[date_col].max()
+        start_date, end_date = st.sidebar.date_input("Date Range", [min_date, max_date])
+        df = df[(df[date_col] >= pd.to_datetime(start_date)) & (df[date_col] <= pd.to_datetime(end_date))]
+
+    if "Work Type" in df.columns:
+        work_types = st.sidebar.multiselect("Work Type", df["Work Type"].unique(), default=df["Work Type"].unique())
+        df = df[df["Work Type"].isin(work_types)]
+
+    if "Techinician" in df.columns:
+        techs = st.sidebar.multiselect("Technician", df["Techinician"].unique(), default=df["Techinician"].unique())
+        df = df[df["Techinician"].isin(techs)]
 
     # --- KPIs ---
     total_orders = len(df)
@@ -81,23 +96,6 @@ def run_workorders_dashboard():
                           title="Work Orders by Type",
                           color="Count", color_continuous_scale=["#7CB342","#405C88"])
         st.plotly_chart(fig_type, use_container_width=True)
-
-    # Work Orders Trend Over Time (Line Chart)
-    if "Month" in df.columns:
-        trend = df.groupby("Month").size().reset_index(name="Count")
-        fig_trend = px.line(trend, x="Month", y="Count", markers=True,
-                            title="Work Orders Trend Over Time",
-                            color_discrete_sequence=["#405C88"])
-        st.plotly_chart(fig_trend, use_container_width=True)
-
-    # Current State Distribution (Donut Chart)
-    if "Current State" in df.columns:
-        state_summary = df["Current State"].value_counts().reset_index()
-        state_summary.columns = ["State", "Count"]
-        fig_state = px.pie(state_summary, names="State", values="Count",
-                           title="Work Orders by Current State", hole=0.4,
-                           color_discrete_sequence=["#405C88","#7CB342","#FF7043"])
-        st.plotly_chart(fig_state, use_container_width=True)
 
     # Avg Duration by Work Type (Bar Chart)
     if "Work Type" in df.columns and "Duration (mins)" in df.columns:
