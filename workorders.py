@@ -5,16 +5,13 @@ import plotly.express as px
 import os
 
 
-
-
-
 def run_workorders_dashboard():
     import streamlit as st
     import pandas as pd
     import plotly.express as px
 
     st.markdown("<h1 style='color:#405C88;'>📋 Work Orders Dashboard</h1>", unsafe_allow_html=True)
-    st.markdown("Enhanced dashboard with filters for technicians, work order types, and date range.")
+    st.markdown("Enhanced dashboard with KPIs and filters for technicians, work order types, and date range.")
 
     # --- File Uploader ---
     uploaded_file = st.file_uploader("📂 Upload a Work Orders CSV", type=["csv"])
@@ -64,6 +61,11 @@ def run_workorders_dashboard():
     avg_duration = df["Duration (mins)"].mean() if "Duration (mins)" in df.columns else 0
     avg_distance = df["Distance (miles)"].mean() if "Distance (miles)" in df.columns else 0
     avg_per_tech = df.groupby("Techinician").size().mean() if "Techinician" in df.columns else 0
+    max_duration = df["Duration (mins)"].max() if "Duration (mins)" in df.columns else 0
+    top_tech = df["Techinician"].value_counts().idxmax() if "Techinician" in df.columns and not df.empty else "N/A"
+    top_tech_count = df["Techinician"].value_counts().max() if "Techinician" in df.columns and not df.empty else 0
+    common_type = df["Work Type"].value_counts().idxmax() if "Work Type" in df.columns and not df.empty else "N/A"
+    common_type_count = df["Work Type"].value_counts().max() if "Work Type" in df.columns and not df.empty else 0
 
     col1, col2, col3 = st.columns(3)
     col1.metric("📑 Total Orders", total_orders)
@@ -74,6 +76,11 @@ def run_workorders_dashboard():
     col4.metric("⏱️ Avg Duration (mins)", f"{avg_duration:.1f}")
     col5.metric("📍 Avg Distance (miles)", f"{avg_distance:.1f}")
     col6.metric("👷 Avg Orders/Technician", f"{avg_per_tech:.1f}")
+
+    col7, col8, col9 = st.columns(3)
+    col7.metric("📈 Longest Duration (mins)", f"{max_duration:.1f}")
+    col8.metric("🏅 Top Technician", f"{top_tech} ({top_tech_count})")
+    col9.metric("🏷️ Common Work Type", f"{common_type} ({common_type_count})")
 
     # --- Download Processed File ---
     csv_export = df.to_csv(index=False).encode("utf-8")
@@ -113,11 +120,3 @@ def run_workorders_dashboard():
                           title="Work Orders per Technician",
                           color="Count", color_continuous_scale=["#7CB342","#405C88"])
         st.plotly_chart(fig_tech, use_container_width=True)
-
-    # Distance vs Duration Scatter Plot
-    if "Distance (miles)" in df.columns and "Duration (mins)" in df.columns:
-        fig_scatter = px.scatter(df, x="Distance (miles)", y="Duration (mins)",
-                                 title="Distance vs Duration",
-                                 color="Work Type" if "Work Type" in df.columns else None,
-                                 color_discrete_sequence=px.colors.qualitative.Set2)
-        st.plotly_chart(fig_scatter, use_container_width=True)
