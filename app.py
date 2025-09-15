@@ -4,7 +4,6 @@ import streamlit as st
 from construction import run_construction_dashboard as run_construction
 from workorders import run_workorders_dashboard
 from prep import run_preps_dashboard
-from talley import run as run_talley_dashboard
 from utils import fetch_jotform_data
 
 st.set_page_config(page_title="Pioneer Dashboards", layout="wide")
