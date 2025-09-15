@@ -1,4 +1,8 @@
-streamlit
-pandas
-plotly
-requests
+streamlit>=1.32
+pandas>=2.0
+numpy>=1.25
+plotly>=5.20
+requests>=2.31
+openpyxl>=3.1
+python-dateutil>=2.9
+pytz>=2024.1
