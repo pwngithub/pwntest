@@ -5,6 +5,7 @@ import plotly.express as px
 import os
 
 
+
 def run_workorders_dashboard():
     import streamlit as st
     import pandas as pd
@@ -13,12 +14,13 @@ def run_workorders_dashboard():
     st.markdown("<h1 style='color:#405C88;'>📋 Work Orders Dashboard</h1>", unsafe_allow_html=True)
     st.markdown("This dashboard provides insights into work order activity, including totals, status by type, and overall averages.")
 
-    # --- Load Data ---
-    # Expect df to be set from file uploader or context; if not, handle gracefully
-    if "df" not in globals():
-        st.warning("⚠️ No data loaded for Work Orders.")
+    # --- File Uploader ---
+    uploaded_file = st.file_uploader("📂 Upload a Work Orders CSV", type=["csv"])
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    else:
+        st.warning("⚠️ Please upload a Work Orders CSV file.")
         return
-    df = globals()["df"]
 
     # --- Handle Date Column Robustly ---
     date_col = None
