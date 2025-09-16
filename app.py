@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from talley import run_talley
 from construction import run_construction_dashboard as run_construction
 from workorders import run_workorders_dashboard
@@ -31,7 +32,8 @@ elif report == "Construction":
 elif report == "Preps":
     try:
         df = fetch_jotform_data_client(form_id="210823797836164")
-        st.sidebar.success(f"Loaded Preps data: {df.shape[0]} rows")
+        df = pd.DataFrame(df)
+        st.sidebar.success(f"Loaded Preps data: {len(df)} rows")
         run_preps_dashboard(df)
     except Exception as e:
         st.sidebar.error(f"Failed to load data for Preps: {e}")
