@@ -50,7 +50,7 @@ def get_submissions(form_id):
 
 def fetch_jotform_data(form_id, limit=1000):
     """
-    Wrapper to match other dashboards.
-    Uses existing fetch_data() under the hood.
+    Wrapper for dashboards.
+    Uses get_form_submissions() under the hood.
     """
-    return fetch_data(form_id=form_id, limit=limit)
+    return get_form_submissions(form_id=form_id, limit=limit)
