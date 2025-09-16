@@ -4,22 +4,19 @@ def run_preps_dashboard(df=None):
     import pandas as pd
     import plotly.express as px
 
-    if df is None:
+    if df is None or df.empty:
         st.error("No data provided to Preps dashboard.")
         return
 
     st.markdown("<h1 style='color:#405C88;'>📝 Preps Dashboard</h1>", unsafe_allow_html=True)
     st.markdown("This dashboard analyzes Preps submissions from JotForm.")
 
-    st.write("### Data Overview")
-    st.write(df.head())
-
-    # Example KPIs
+    # --- KPIs ---
     st.metric("Total Records", len(df))
     if "Technician" in df.columns:
         st.metric("Unique Technicians", df["Technician"].nunique())
 
-    # Example Visualization
+    # --- Visualization ---
     if "Technician" in df.columns:
         tech_summary = df["Technician"].value_counts().reset_index()
         tech_summary.columns = ["Technician", "Count"]
