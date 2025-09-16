@@ -31,8 +31,8 @@ elif report == "Construction":
 
 elif report == "Preps":
     try:
-        df = fetch_jotform_data_client(form_id="210823797836164")
-        df = pd.DataFrame(df)
+        from jotform_client import fetch_preps_data
+        df = fetch_preps_data(form_id="210823797836164")
         st.sidebar.success(f"Loaded Preps data: {len(df)} rows")
         run_preps_dashboard(df)
     except Exception as e:
