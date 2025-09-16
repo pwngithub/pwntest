@@ -47,3 +47,10 @@ def get_submissions(form_id):
 
     df['Duration'] = pd.to_numeric(df['Duration'], errors='coerce').fillna(0)
     return df
+
+def fetch_jotform_data(form_id, limit=1000):
+    """
+    Wrapper to match other dashboards.
+    Uses existing fetch_data() under the hood.
+    """
+    return fetch_data(form_id=form_id, limit=limit)
