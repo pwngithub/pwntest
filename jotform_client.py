@@ -19,44 +19,15 @@ def fetch_jotform_data(form_id, limit=1000):
 
 import pandas as pd
 
-def fetch_preps_data(form_id, limit=1000):
-    """
-    Specialized fetch for Preps form.
-    Extracts Technician, Prep Type, Location into a clean DataFrame.
-    """
-    try:
-        url = f"https://api.jotform.com/form/{form_id}/submissions"
-        params = {"apiKey": API_KEY, "limit": limit}
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()["content"]
 
-        rows = []
-        for sub in data:
-            answers = sub.get("answers", {})
-            row = {
-                "id": sub.get("id"),
-                "created_at": sub.get("created_at"),
-                "status": sub.get("status"),
-                "technician": answers.get("3", {}).get("answer"),
-                "prep_type": answers.get("4", {}).get("answer"),
-                "location": answers.get("5", {}).get("answer"),
-            }
-            rows.append(row)
-
-        return pd.DataFrame(rows)
-
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch Preps data: {e}")
 
 
 import pandas as pd
-import streamlit as st
 
 def fetch_preps_data(form_id, limit=1000):
     """
-    Specialized fetch for Preps form with debug output.
-    Displays available question IDs and names in the sidebar.
+    Specialized fetch for Preps form.
+    Extracts key fields (date, technician, customer, FAT, card, fiber_connected).
     """
     try:
         url = f"https://api.jotform.com/form/{form_id}/submissions"
@@ -68,21 +39,16 @@ def fetch_preps_data(form_id, limit=1000):
         rows = []
         for sub in data:
             answers = sub.get("answers", {})
-
-            # Debug: show available IDs and names/answers in sidebar
-            st.sidebar.markdown("---")
-            st.sidebar.write(f"Submission {sub.get('id')} created {sub.get('created_at')}")
-            for qid, details in answers.items():
-                st.sidebar.write(f"ID {qid}: {details.get('name')} -> {details.get('answer')}")
-
             row = {
                 "id": sub.get("id"),
                 "created_at": sub.get("created_at"),
                 "status": sub.get("status"),
-                # Placeholders until IDs are confirmed
-                "technician": None,
-                "prep_type": None,
-                "location": None,
+                "date": answers.get("1", {}).get("answer"),
+                "technician": answers.get("2", {}).get("answer"),
+                "customer_name": answers.get("14", {}).get("answer"),
+                "fat": answers.get("32", {}).get("answer"),
+                "card": answers.get("34", {}).get("answer"),
+                "fiber_connected": answers.get("49", {}).get("answer"),
             }
             rows.append(row)
 
