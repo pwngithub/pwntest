@@ -10,7 +10,7 @@ from utils import fetch_jotform_data
 st.set_page_config(page_title="Pioneer Dashboards", layout="wide")
 
 st.sidebar.title("📊 Report Selector")
-report = st.sidebar.selectbox("Select Report", ["Welcome", "Tally", "Construction", "Preps"], index=0)
+report = st.sidebar.selectbox("Select Report", ["Welcome", "Tally", "Construction", "Preps", "Work Orders"], index=0)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Debug Info")
@@ -19,8 +19,14 @@ if report == "Welcome":
     st.title("Welcome to Pioneer Dashboard")
     st.write("Please select a report from the sidebar.")
 
-# Removed duplicate Tally block
-    run_dashboard()
+elif report == "Tally":
+    try:
+        df = fetch_jotform_data(form_id="231867872328063", api_key="32c62a1b6c1a350caed2f989c1be4e48")
+        st.sidebar.success(f"Loaded Tally data: {df.shape[0]} rows")
+        run_tally_dashboard(df)
+    except Exception as e:
+        st.sidebar.error(f"Failed to load data for Tally: {e}")
+        st.error("Unable to load Tally dashboard.")
 
 elif report == "Construction":
     run_construction()
@@ -29,16 +35,10 @@ elif report == "Preps":
     try:
         df = fetch_jotform_data(form_id="232136783361054", api_key="32c62a1b6c1a350caed2f989c1be4e48")
         st.sidebar.success(f"Loaded Preps data: {df.shape[0]} rows")
-        run_preps_dashboard()
+        run_preps_dashboard(df)
     except Exception as e:
         st.sidebar.error(f"Failed to load data for Preps: {e}")
         st.error("Unable to load Preps dashboard.")
 
-# Removed duplicate Tally block
-    try:
-        df = fetch_jotform_data(form_id="231867872328063", api_key="32c62a1b6c1a350caed2f989c1be4e48")
-        st.sidebar.success(f"Loaded Tally data: {df.shape[0]} rows")
-        run_tally_dashboard(df)
-    except Exception as e:
-        st.sidebar.error(f"Failed to load data for Tally: {e}")
-        st.error("Unable to load Tally dashboard.")
+elif report == "Work Orders":
+    run_workorders_dashboard()
