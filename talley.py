@@ -1,5 +1,5 @@
 
-def run_talley():
+def run_dashboard():
     from datetime import timedelta
     import pandas as pd
     import streamlit as st
@@ -29,7 +29,7 @@ def run_talley():
         df = pd.DataFrame(submissions)
         return df
 
-    st.title("Talley Customer Talley")
+    st.title("Talley Customer Dashboard")
 
     df = load_from_jotform()
 
@@ -139,4 +139,4 @@ def run_talley():
         st.plotly_chart(fig_new_loc, use_container_width=True)
 
 if __name__ == "__main__":
-    run_talley()
+    run_dashboard()
