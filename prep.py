@@ -5,67 +5,63 @@ def run_preps_dashboard(df=None):
     import plotly.express as px
     from jotform_client import fetch_preps_data
 
-    # Load directly from API if df not passed
-    if df is None:
+    st.markdown("<h1 style='color:#405C88;'>🧰 Preps (Date · Tech · Drop Size · Count)</h1>", unsafe_allow_html=True)
+
+    # Pull fresh from API if not provided
+    if df is None or df.empty or not set(["date","tech","drop_size","count"]).issubset(set(df.columns)):
         df = fetch_preps_data(form_id="210823797836164")
+
     if df is None or df.empty:
-        st.error("No data loaded for Preps.")
+        st.warning("No Preps data available.")
         return
 
-    st.markdown("<h1 style='color:#405C88;'>📝 Preps Dashboard</h1>", unsafe_allow_html=True)
-
-    # --- Sidebar Filters ---
+    # Sidebar filters
     st.sidebar.header("Filters")
-    date_range = st.sidebar.date_input("Select Date Range", [])
-    tech_filter = st.sidebar.multiselect("Technician", options=df["technician"].dropna().unique() if "technician" in df else [])
-    other_emp_filter = st.sidebar.multiselect("Other Employee", options=df["other_employee"].dropna().unique() if "other_employee" in df else [])
-    closure_type_filter = st.sidebar.multiselect("Closure Type", options=df["closure_type"].dropna().unique() if "closure_type" in df else [])
-    splice_type_filter = st.sidebar.multiselect("Splice Type", options=df["splice_type"].dropna().unique() if "splice_type" in df else [])
-    project_filter = st.sidebar.multiselect("Project", options=df["project"].dropna().unique() if "project" in df else [])
+    # Date filter
+    if "date" in df.columns and not df["date"].isna().all():
+        min_d, max_d = pd.to_datetime(df["date"], errors="coerce").min(), pd.to_datetime(df["date"], errors="coerce").max()
+        date_sel = st.sidebar.date_input("Date range", [min_d.date() if pd.notna(min_d) else None, max_d.date() if pd.notna(max_d) else None])
+        if date_sel and len(date_sel) == 2 and all(date_sel):
+            d0, d1 = pd.to_datetime(date_sel[0]), pd.to_datetime(date_sel[1])
+            df = df[(pd.to_datetime(df["date"], errors="coerce") >= d0) & (pd.to_datetime(df["date"], errors="coerce") <= d1)]
 
-    # --- Apply Filters ---
-    if date_range and "date" in df:
-        df = df[(pd.to_datetime(df["date"]).dt.date >= date_range[0]) & (pd.to_datetime(df["date"]).dt.date <= date_range[-1])]
-    if tech_filter and "technician" in df:
-        df = df[df["technician"].isin(tech_filter)]
-    if other_emp_filter and "other_employee" in df:
-        df = df[df["other_employee"].isin(other_emp_filter)]
-    if closure_type_filter and "closure_type" in df:
-        df = df[df["closure_type"].isin(closure_type_filter)]
-    if splice_type_filter and "splice_type" in df:
-        df = df[df["splice_type"].isin(splice_type_filter)]
-    if project_filter and "project" in df:
-        df = df[df["project"].isin(project_filter)]
+    # Tech filter
+    tech_vals = sorted([t for t in df["tech"].dropna().unique().tolist() if str(t).strip() != ""]) if "tech" in df.columns else []
+    tech_sel = st.sidebar.multiselect("Tech", tech_vals, default=tech_vals)
+    if tech_sel:
+        df = df[df["tech"].isin(tech_sel)]
 
-    # --- KPIs ---
-    total_splices = len(df)
-    total_fiber = df["fiber_count"].sum() if "fiber_count" in df else 0
-    closures_worked = df["closure_type"].nunique() if "closure_type" in df else 0
-    total_fats = df["fat"].nunique() if "fat" in df else 0
-    total_scs = df["card"].nunique() if "card" in df else 0
+    # Drop Size filter
+    drop_vals = sorted([t for t in df["drop_size"].dropna().unique().tolist() if str(t).strip() != ""]) if "drop_size" in df.columns else []
+    drop_sel = st.sidebar.multiselect("Drop Size", drop_vals, default=drop_vals)
+    if drop_sel:
+        df = df[df["drop_size"].isin(drop_sel)]
 
-    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
-    kpi1.metric("Total Splice Events", total_splices)
-    kpi2.metric("Total Fiber Count", total_fiber)
-    kpi3.metric("Closures Worked", closures_worked)
-    kpi4.metric("Total FATs", total_fats)
-    kpi5.metric("Total SCs", total_scs)
+    # KPIs
+    total_rows = len(df)
+    total_count = pd.to_numeric(df["count"], errors="coerce").sum() if "count" in df.columns else 0
+    unique_techs = df["tech"].nunique() if "tech" in df.columns else 0
 
-    # --- Visuals ---
-    if "closure_type" in df and "splice_type" in df:
-        pivot = df.groupby(["closure_type", "splice_type"]).size().reset_index(name="count")
-        st.plotly_chart(px.bar(pivot, x="closure_type", y="count", color="splice_type", barmode="group",
-                               title="Closure Type by Splice Type with Splice Count"), use_container_width=True)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Records", total_rows)
+    c2.metric("Sum of Count", f"{total_count:,.0f}")
+    c3.metric("Unique Techs", unique_techs)
 
-    if "technician" in df and "date" in df:
-        tech_daily = df.groupby([pd.to_datetime(df["date"]).dt.date, "technician"]).size().reset_index(name="count")
-        st.plotly_chart(px.line(tech_daily, x="date", y="count", color="technician",
-                                title="Technician Daily Productivity"), use_container_width=True)
+    st.markdown("---")
 
-    if "project" in df and "technician" in df:
-        proj_tech = df.groupby(["project", "technician"]).size().reset_index(name="count")
-        st.plotly_chart(px.bar(proj_tech, x="project", y="count", color="technician", barmode="stack",
-                               title="Projects by Technician"), use_container_width=True)
+    # Table of the four columns
+    show_df = df[["date","tech","drop_size","count"]].copy()
+    show_df = show_df.sort_values(by=["date","tech"], ascending=[True, True])
+    st.dataframe(show_df, use_container_width=True)
 
-    # --- Export ---
-    st.download_button("Download Filtered Data", data=df.to_csv(index=False), file_name="preps_filtered.csv", mime="text/csv")
+    # Helpful visuals
+    if not show_df.empty:
+        if "drop_size" in show_df.columns:
+            grp = show_df.groupby("drop_size")["count"].sum().reset_index()
+            st.plotly_chart(px.bar(grp, x="drop_size", y="count", title="Total Count by Drop Size"), use_container_width=True)
+        if "tech" in show_df.columns:
+            grp2 = show_df.groupby("tech")["count"].sum().reset_index()
+            st.plotly_chart(px.bar(grp2, x="tech", y="count", title="Total Count by Tech"), use_container_width=True)
+
+    # Download
+    st.download_button("Download (Date-Tech-DropSize-Count)", data=show_df.to_csv(index=False), file_name="preps_date_tech_drop_count.csv", mime="text/csv")
