@@ -9,7 +9,11 @@ from utils import fetch_jotform_data
 st.set_page_config(page_title="Pioneer Dashboards", layout="wide")
 
 st.sidebar.title("📊 Report Selector")
-report = st.sidebar.selectbox("Select Report", ["Welcome", "Talley", "Construction", "Preps"], index=0)
+report = st.sidebar.selectbox(
+    "Select Report",
+    ["Welcome", "Talley", "Construction", "Preps", "Work Orders"],
+    index=0
+)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Debug Info")
@@ -32,3 +36,10 @@ elif report == "Preps":
     except Exception as e:
         st.sidebar.error(f"Failed to load data for Preps: {e}")
         st.error("Unable to load Preps dashboard.")
+
+elif report == "Work Orders":
+    try:
+        run_workorders_dashboard()
+    except Exception as e:
+        st.sidebar.error(f"Failed to load data for Work Orders: {e}")
+        st.error("Unable to load Work Orders dashboard.")
