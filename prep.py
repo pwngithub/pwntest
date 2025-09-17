@@ -1,14 +1,14 @@
 
 import streamlit as st
 import pandas as pd
-from jotform_client import fetch_jotform_data
+from jotform_client import fetch_jotform_data as fetch_jotform_data_client
 
 def run_prep_dashboard():
     st.title("Fiber Prep Report")
 
     form_id = "210823797836164"
     try:
-        data = fetch_jotform_data(form_id)
+        data = fetch_jotform_data_client(form_id)
         if not data or len(data) == 0:
             st.warning("No data available from JotForm.")
             return
