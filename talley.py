@@ -1,5 +1,5 @@
 
-def run_dashboard():
+def run_talley():
     from datetime import timedelta
     import pandas as pd
     import streamlit as st
