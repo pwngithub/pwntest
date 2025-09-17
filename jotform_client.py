@@ -47,3 +47,6 @@ def get_submissions(form_id):
 
     df['Duration'] = pd.to_numeric(df['Duration'], errors='coerce').fillna(0)
     return df
+def fetch_jotform_data(form_id):
+    """Wrapper to match expected import for preps"""
+    return get_submissions(form_id)
