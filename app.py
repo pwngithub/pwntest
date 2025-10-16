@@ -31,13 +31,13 @@ try:
         st.write("Use the sidebar to open a report.")
 
     elif report == "Tally":
-        try:
-            import tally_dashboard as tally_dashboard
-            df = pd.DataFrame()  # Placeholder so tally_dashboard.run(df) works
-            tally_dashboard.run(df)
-        except Exception as e:
-            st.error("⚠️ Could not load Tally report:")
-            st.exception(e)
+    try:
+        import dashboard as dashboard
+        dashboard.run_dashboard()
+    except Exception as e:
+        st.error("⚠️ Could not load Tally report:")
+        st.exception(e)
+
 
     elif report == "Construction":
         try:
