@@ -2,6 +2,7 @@ import streamlit as st
 import importlib
 import traceback
 import pandas as pd
+import sys, os, importlib.util
 
 st.set_page_config(page_title="Pioneer Dashboard", layout="wide")
 
@@ -32,7 +33,7 @@ try:
     elif report == "Tally":
         try:
             import tally_dashboard as tally_dashboard
-            df = pd.DataFrame()
+            df = pd.DataFrame()  # Placeholder so tally_dashboard.run(df) works
             tally_dashboard.run(df)
         except Exception as e:
             st.error("⚠️ Could not load Tally report:")
@@ -79,16 +80,15 @@ try:
             st.exception(e)
 
     elif report == "Accounting":
-    try:
-        import importlib.util, sys, os
-        spec = importlib.util.spec_from_file_location("accounting", os.path.join(os.getcwd(), "accounting.py"))
-        accounting = importlib.util.module_from_spec(spec)
-        sys.modules["accounting"] = accounting
-        spec.loader.exec_module(accounting)
-    except Exception as e:
-        st.error("⚠️ Could not load Accounting report:")
-        st.exception(e)
-
+        try:
+            # Isolated import for Accounting so it doesn't interfere with other dashboards
+            spec = importlib.util.spec_from_file_location("accounting", os.path.join(os.getcwd(), "accounting.py"))
+            accounting = importlib.util.module_from_spec(spec)
+            sys.modules["accounting"] = accounting
+            spec.loader.exec_module(accounting)
+        except Exception as e:
+            st.error("⚠️ Could not load Accounting report:")
+            st.exception(e)
 
 except Exception as global_error:
     st.error("❌ A fatal error occurred while loading the app.")
