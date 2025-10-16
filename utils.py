@@ -1,34 +1,45 @@
-
-import requests
+import streamlit as st
 import pandas as pd
+import requests
+import io
 
-def fetch_jotform_data(form_id: str, api_key: str) -> pd.DataFrame:
-    url = f"https://api.jotform.com/form/{form_id}/submissions?apiKey={api_key}&limit=1000"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
+# Enable Streamlit caching for persistent data
+# Cache lasts for 1 hour (3600 seconds)
+CACHE_TTL = 3600
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def fetch_jotform_data(form_id, api_key):
+    """Fetch submissions from JotForm API with caching."""
+    url = f"https://api.jotform.com/form/{form_id}/submissions?apiKey={api_key}"
+    response = requests.get(url)
+    if response.status_code == 200:
         data = response.json()
-        if "content" not in data:
-            return pd.DataFrame()
-        records = []
-        for submission in data["content"]:
-            answers = submission.get("answers", {})
-            record = {}
-            for qid, answer in answers.items():
-                name = answer.get("name")
-                value = answer.get("answer")
-                if isinstance(value, dict):
-                    value = " ".join(str(v) for v in value.values() if v)
-                record[name] = value
-            records.append(record)
-        return pd.DataFrame(records)
-    except Exception as e:
-        print(f"Error fetching JotForm data: {e}")
+        submissions = data.get("content", [])
+        df = pd.json_normalize(submissions)
+        return df
+    else:
+        st.error(f"Failed to fetch JotForm data. Status code: {response.status_code}")
         return pd.DataFrame()
 
-def preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
-    df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
-    for col in df.columns:
-        if df[col].dtype == object:
-            df[col] = df[col].fillna("").astype(str)
-    return df
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_csv(uploaded_file):
+    """Load a CSV file with caching enabled."""
+    try:
+        return pd.read_csv(uploaded_file)
+    except Exception:
+        uploaded_file.seek(0)
+        return pd.read_excel(uploaded_file)
+
+
+@st.cache_data(ttl=CACHE_TTL)
+def load_google_sheet(sheet_url):
+    """Load Google Sheet data and cache it."""
+    try:
+        csv_url = sheet_url.replace("/edit#gid=", "/export?format=csv&gid=")
+        df = pd.read_csv(csv_url)
+        return df
+    except Exception as e:
+        st.error(f"Error loading Google Sheet: {e}")
+        return pd.DataFrame()
