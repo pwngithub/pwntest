@@ -79,12 +79,16 @@ try:
             st.exception(e)
 
     elif report == "Accounting":
-        try:
-            import accounting
-            importlib.reload(accounting)
-        except Exception as e:
-            st.error("⚠️ Could not load Accounting report:")
-            st.exception(e)
+    try:
+        import importlib.util, sys, os
+        spec = importlib.util.spec_from_file_location("accounting", os.path.join(os.getcwd(), "accounting.py"))
+        accounting = importlib.util.module_from_spec(spec)
+        sys.modules["accounting"] = accounting
+        spec.loader.exec_module(accounting)
+    except Exception as e:
+        st.error("⚠️ Could not load Accounting report:")
+        st.exception(e)
+
 
 except Exception as global_error:
     st.error("❌ A fatal error occurred while loading the app.")
