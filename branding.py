@@ -26,17 +26,55 @@ def toggle_theme():
 def get_colors():
     """Return color palette based on mode."""
     if st.session_state["dark_mode"]:
-        return {
-            "bg": DARK_BG,
-            "text": DARK_TEXT,
-            "accent": PIONEER_GREEN,
-        }
+        return {"bg": DARK_BG, "text": DARK_TEXT, "accent": PIONEER_GREEN}
     else:
-        return {
-            "bg": LIGHT_BG,
-            "text": LIGHT_TEXT,
-            "accent": PIONEER_GREEN,
-        }
+        return {"bg": LIGHT_BG, "text": LIGHT_TEXT, "accent": PIONEER_GREEN}
+
+
+def apply_theme():
+    """Apply global dark/light theme across all Streamlit elements."""
+    colors = get_colors()
+
+    st.markdown(
+        f"""
+        <style>
+            html, body, [class*="css"] {{
+                background-color: {colors['bg']} !important;
+                color: {colors['text']} !important;
+            }}
+            .stApp {{
+                background-color: {colors['bg']} !important;
+                color: {colors['text']} !important;
+            }}
+            div[data-testid="stVerticalBlock"] {{
+                background-color: {colors['bg']} !important;
+                color: {colors['text']} !important;
+            }}
+            div.block-container {{
+                background-color: {colors['bg']} !important;
+                color: {colors['text']} !important;
+            }}
+            .stDataFrame, .stTable {{
+                color: {colors['text']} !important;
+            }}
+            [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {{
+                color: {colors['text']} !important;
+            }}
+            .stButton > button {{
+                background-color: {colors['accent']} !important;
+                color: white !important;
+                border-radius: 8px;
+                border: none;
+                padding: 0.4em 1.2em;
+            }}
+            .stButton > button:hover {{
+                background-color: {PIONEER_BLUE} !important;
+                color: white !important;
+            }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_header():
@@ -55,7 +93,7 @@ def render_header():
         unsafe_allow_html=True,
     )
 
-    # Theme toggle button in the sidebar
+    # Sidebar toggle
     if st.sidebar.button(toggle_label):
         toggle_theme()
 
