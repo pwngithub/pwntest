@@ -82,4 +82,5 @@ elif report == "Accounting":
     except Exception as e:
         st.error(f"Could not load Accounting report: {e}")
         
-"""
+app_code = """
+
