@@ -30,14 +30,13 @@ try:
         st.title("Welcome to Pioneer Dashboard")
         st.write("Use the sidebar to open a report.")
 
-       elif report == "Tally":
+    elif report == "Tally":
         try:
             import dashboard as dashboard
             dashboard.run_dashboard()
         except Exception as e:
             st.error("⚠️ Could not load Tally report:")
             st.exception(e)
-
 
     elif report == "Construction":
         try:
@@ -81,7 +80,7 @@ try:
 
     elif report == "Accounting":
         try:
-            # Isolated import for Accounting so it doesn't interfere with other dashboards
+            # Isolated Accounting import
             spec = importlib.util.spec_from_file_location("accounting", os.path.join(os.getcwd(), "accounting.py"))
             accounting = importlib.util.module_from_spec(spec)
             sys.modules["accounting"] = accounting
