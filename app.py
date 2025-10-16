@@ -34,7 +34,7 @@ try:
         try:
             import tally_dashboard as tally_dashboard
             df = pd.DataFrame()  # Placeholder so tally_dashboard.run(df) works
-            tally_dashboard.run_dashboard()
+            tally_dashboard.run(df)
         except Exception as e:
             st.error("⚠️ Could not load Tally report:")
             st.exception(e)
