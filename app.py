@@ -1,4 +1,5 @@
 import streamlit as st
+import importlib
 
 st.set_page_config(page_title="Pioneer Dashboard", layout="wide")
 
@@ -70,5 +71,6 @@ elif report == "Work Orders":
 elif report == "Accounting":
     try:
         import accounting
+        importlib.reload(accounting)  # Force reload each time
     except Exception as e:
         st.error(f"Could not load Accounting report: {e}")
