@@ -32,7 +32,7 @@ def get_colors():
 
 
 def apply_theme():
-    """Apply global dark/light theme across all Streamlit elements, including sidebar and top bar."""
+    """Apply global dark/light theme across all Streamlit elements, including sidebar and dropdown."""
     colors = get_colors()
 
     st.markdown(
@@ -56,7 +56,7 @@ def apply_theme():
                 color: {colors['text']} !important;
                 border-right: 2px solid {colors['accent']} !important;
             }}
-            /* Top navigation bar */
+            /* Top bar */
             header[data-testid="stHeader"] {{
                 background-color: {colors['bg']} !important;
                 border-bottom: 2px solid {colors['accent']} !important;
@@ -82,7 +82,7 @@ def apply_theme():
                 background-color: {PIONEER_BLUE} !important;
                 color: white !important;
             }}
-            /* Selectbox & Inputs */
+            /* Inputs and selectboxes */
             div[data-baseweb="select"], div[data-baseweb="input"] {{
                 background-color: {colors['bg']} !important;
                 color: {colors['text']} !important;
@@ -90,6 +90,18 @@ def apply_theme():
             }}
             label, span, p, h1, h2, h3, h4, h5 {{
                 color: {colors['text']} !important;
+            }}
+            /* Sidebar selectbox dropdown specifically */
+            div[data-baseweb="select"] > div {{
+                background-color: {colors['bg']} !important;
+                color: {colors['text']} !important;
+                border: 1px solid {colors['accent']} !important;
+            }}
+            div[data-baseweb="select"] span {{
+                color: {colors['text']} !important;
+            }}
+            div[data-baseweb="select"] svg {{
+                fill: {colors['text']} !important;
             }}
         </style>
         """,
@@ -113,7 +125,6 @@ def render_header():
         unsafe_allow_html=True,
     )
 
-    # Sidebar toggle
     if st.sidebar.button(toggle_label):
         toggle_theme()
 
