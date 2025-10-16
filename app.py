@@ -32,6 +32,8 @@ report = st.sidebar.selectbox(
 # MAIN APP LOGIC
 # ----------------------------
 try:
+    branding.init_theme_state()
+    branding.apply_theme()
     branding.render_header()
 
     if report == "Home":
