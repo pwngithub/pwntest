@@ -1,5 +1,11 @@
+import os
+import zipfile
+
+# Update app.py to include Option 1 fix for Tally dashboard
+app_code = """
 import streamlit as st
 import importlib
+import pandas as pd
 
 st.set_page_config(page_title="Pioneer Dashboard", layout="wide")
 
@@ -29,7 +35,8 @@ if report == "Home":
 elif report == "Tally":
     try:
         import tally_dashboard as tally_dashboard
-        tally_dashboard.run()
+        df = pd.DataFrame()  # Placeholder so tally_dashboard.run(df) works
+        tally_dashboard.run(df)
     except Exception as e:
         st.error(f"Could not load Tally report: {e}")
 
