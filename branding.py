@@ -32,7 +32,7 @@ def get_colors():
 
 
 def apply_theme():
-    """Apply global dark/light theme across all Streamlit elements."""
+    """Apply global dark/light theme across all Streamlit elements, including sidebar and top bar."""
     colors = get_colors()
 
     st.markdown(
@@ -46,20 +46,31 @@ def apply_theme():
                 background-color: {colors['bg']} !important;
                 color: {colors['text']} !important;
             }}
-            div[data-testid="stVerticalBlock"] {{
+            div[data-testid="stVerticalBlock"], div.block-container {{
                 background-color: {colors['bg']} !important;
                 color: {colors['text']} !important;
             }}
-            div.block-container {{
+            /* Sidebar */
+            section[data-testid="stSidebar"] {{
                 background-color: {colors['bg']} !important;
                 color: {colors['text']} !important;
+                border-right: 2px solid {colors['accent']} !important;
             }}
-            .stDataFrame, .stTable {{
+            /* Top navigation bar */
+            header[data-testid="stHeader"] {{
+                background-color: {colors['bg']} !important;
+                border-bottom: 2px solid {colors['accent']} !important;
                 color: {colors['text']} !important;
             }}
+            /* Text and DataFrames */
+            .stMarkdown, .stDataFrame, .stTable, .stTextInput > div > div > input {{
+                color: {colors['text']} !important;
+            }}
+            /* Metrics */
             [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {{
                 color: {colors['text']} !important;
             }}
+            /* Buttons */
             .stButton > button {{
                 background-color: {colors['accent']} !important;
                 color: white !important;
@@ -70,6 +81,15 @@ def apply_theme():
             .stButton > button:hover {{
                 background-color: {PIONEER_BLUE} !important;
                 color: white !important;
+            }}
+            /* Selectbox & Inputs */
+            div[data-baseweb="select"], div[data-baseweb="input"] {{
+                background-color: {colors['bg']} !important;
+                color: {colors['text']} !important;
+                border: 1px solid {colors['accent']} !important;
+            }}
+            label, span, p, h1, h2, h3, h4, h5 {{
+                color: {colors['text']} !important;
             }}
         </style>
         """,
