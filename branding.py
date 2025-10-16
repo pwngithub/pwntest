@@ -32,7 +32,7 @@ def get_colors():
 
 
 def apply_theme():
-    """Apply global dark/light theme across all Streamlit elements, including sidebar and dropdown."""
+    """Apply global dark/light theme across all Streamlit elements, including sidebar, top bar, and dropdowns."""
     colors = get_colors()
 
     st.markdown(
@@ -91,7 +91,7 @@ def apply_theme():
             label, span, p, h1, h2, h3, h4, h5 {{
                 color: {colors['text']} !important;
             }}
-            /* Sidebar selectbox dropdown specifically */
+            /* Sidebar selectbox and dropdown override */
             div[data-baseweb="select"] > div {{
                 background-color: {colors['bg']} !important;
                 color: {colors['text']} !important;
@@ -103,10 +103,25 @@ def apply_theme():
             div[data-baseweb="select"] svg {{
                 fill: {colors['text']} !important;
             }}
+            /* Dropdown popup itself */
+            ul[role="listbox"], div[role="listbox"] {{
+                background-color: {colors['bg']} !important;
+                color: {colors['text']} !important;
+                border: 1px solid {colors['accent']} !important;
+            }}
+            ul[role="listbox"] li, div[role="option"] {{
+                background-color: {colors['bg']} !important;
+                color: {colors['text']} !important;
+            }}
+            ul[role="listbox"] li:hover, div[role="option"]:hover {{
+                background-color: {colors['accent']} !important;
+                color: white !important;
+            }}
         </style>
         """,
         unsafe_allow_html=True,
     )
+
 
 
 def render_header():
