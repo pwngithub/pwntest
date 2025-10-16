@@ -89,4 +89,3 @@ try:
 except Exception as global_error:
     st.error("❌ A fatal error occurred while loading the app.")
     st.code(traceback.format_exc())
-"""
