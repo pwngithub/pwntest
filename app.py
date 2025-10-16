@@ -30,13 +30,13 @@ try:
         st.title("Welcome to Pioneer Dashboard")
         st.write("Use the sidebar to open a report.")
 
-    elif report == "Tally":
-    try:
-        import dashboard as dashboard
-        dashboard.run_dashboard()
-    except Exception as e:
-        st.error("⚠️ Could not load Tally report:")
-        st.exception(e)
+       elif report == "Tally":
+        try:
+            import dashboard as dashboard
+            dashboard.run_dashboard()
+        except Exception as e:
+            st.error("⚠️ Could not load Tally report:")
+            st.exception(e)
 
 
     elif report == "Construction":
