@@ -125,23 +125,47 @@ def apply_theme():
 
 
 def render_header():
-    """Render the global Pioneer header with logo, title, and dark mode toggle."""
+    """Render a sleek full-width Pioneer header with logo, title, and dark mode toggle."""
     init_theme_state()
     colors = get_colors()
     toggle_label = "☀️ Light Mode" if st.session_state["dark_mode"] else "🌙 Dark Mode"
 
     st.markdown(
         f"""
-        <div style="background-color:{colors['bg']}; padding:20px; text-align:center; border-bottom:3px solid {PIONEER_GREEN};">
-            <img src="{LOGO_URL}" width="300"><br>
-            <h1 style="color:{colors['text']}; margin-top:10px;">Pioneer Broadband Dashboard</h1>
+        <div style="
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            background-color:{PIONEER_BLUE if not st.session_state['dark_mode'] else '#111111'};
+            padding:14px 40px;
+            border-bottom:3px solid {PIONEER_GREEN};
+            box-shadow:0 2px 6px rgba(0,0,0,0.25);
+        ">
+            <div style="display:flex; align-items:center;">
+                <img src="{LOGO_URL}" alt="Pioneer Broadband Logo" style="height:55px; margin-right:20px;">
+                <h2 style="color:white; margin:0;">Pioneer Broadband Dashboard</h2>
+            </div>
+            <button style="
+                background-color:{PIONEER_GREEN};
+                border:none;
+                color:#fff;
+                font-weight:600;
+                font-size:14px;
+                border-radius:8px;
+                padding:8px 14px;
+                cursor:pointer;
+            " onclick="window.parent.postMessage('toggle-theme','*')">
+                {toggle_label}
+            </button>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    # Sidebar toggle remains for accessibility
     if st.sidebar.button(toggle_label):
         toggle_theme()
+
 
 
 def render_footer():
