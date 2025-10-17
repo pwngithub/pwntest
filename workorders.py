@@ -91,7 +91,7 @@ def run_workorders_dashboard():
         saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
         if not saved_files:
             st.warning("No saved files found. Please upload one first.")
-            return # Stop execution if no files are available
+            return
         
         selected_file = st.sidebar.selectbox("Select a saved file to load", saved_files)
         if selected_file:
@@ -109,7 +109,7 @@ def run_workorders_dashboard():
             if file_to_delete and file_to_delete != "-":
                 os.remove(os.path.join(saved_folder, file_to_delete))
                 st.sidebar.success(f"'{file_to_delete}' has been deleted.")
-                st.experimental_rerun() # Rerun to update file lists
+                st.experimental_rerun()
             else:
                 st.sidebar.warning("Please select a valid file to delete.")
 
@@ -129,27 +129,48 @@ def run_workorders_dashboard():
     min_day = df["Day"].min()
     max_day = df["Day"].max()
 
-    # --- Filters ---
-    st.subheader("📅 Date Range Filter")
-    start_date, end_date = st.date_input("Filter data by date", [min_day, max_day], min_value=min_day, max_value=max_day)
-    df = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
+    # --- FILTERS ---
+    st.subheader("F I L T E R S")
+    start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
+    
+    # Apply date filter first
+    df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
-    # --- KPIs ---
+    # Create new filters based on the date-filtered data
+    if not df_filtered.empty:
+        technician_list = sorted(df_filtered["Technician"].unique().tolist())
+        work_type_list = sorted(df_filtered["Work Type"].unique().tolist())
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_techs = st.multiselect("👨‍🔧 Select Technician(s)", technician_list, default=technician_list)
+        with col2:
+            selected_work_types = st.multiselect("📋 Select Work Type(s)", work_type_list, default=work_type_list)
+        
+        # Apply the new filters
+        df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
+
+    # --- Check if there's any data left after filtering ---
+    if df_filtered.empty:
+        st.warning("No data available for the selected filters. Please adjust your selections.")
+        return
+
+    # --- KPIs (Calculated from the FINAL filtered dataframe) ---
     st.markdown("### 📌 Key Performance Indicators")
-    total_jobs = df["WO#"].nunique()
-    duration_series = pd.to_numeric(df["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
+    total_jobs = df_filtered["WO#"].nunique()
+    duration_series = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
     avg_duration = duration_series.mean() or 0
-    unique_statuses = df["Tech Status"].nunique()
-    tech_count = df["Technician"].nunique()
+    unique_statuses = df_filtered["Tech Status"].nunique()
+    tech_count = df_filtered["Technician"].nunique()
     avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
     num_days = (end_date - start_date).days + 1
-    total_entries = df["WO#"].count()
+    total_entries = df_filtered["WO#"].count()
     max_duration = duration_series.max() or 0
     min_duration = duration_series.min() or 0
 
     kpi1, kpi2, kpi3 = st.columns(3)
     kpi1.metric("🔧 Total Jobs", total_jobs)
-    kpi2.metric("👨‍🔧 Total Technicians", tech_count)
+    kpi2.metric("👨‍🔧 Technicians", tech_count)
     kpi3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
 
     kpi4, kpi5, kpi6 = st.columns(3)
@@ -164,13 +185,13 @@ def run_workorders_dashboard():
 
     st.markdown("---")
 
-    # --- Data Grouping ---
-    grouped_overall = (df.groupby(["Technician", "Work Type"])
+    # --- Data Grouping (using the FINAL filtered dataframe) ---
+    grouped_overall = (df_filtered.groupby(["Technician", "Work Type"])
                        .agg(Total_Jobs=("WO#", "nunique"),
                             Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
                        .reset_index())
     
-    df_daily = (df.groupby(["Technician", "Day", "Work Type"])
+    df_daily = (df_filtered.groupby(["Technician", "Day", "Work Type"])
                 .agg(Jobs_Completed=("WO#", "nunique"),
                      Total_Entries=("WO#", "count"),
                      Avg_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
@@ -183,14 +204,14 @@ def run_workorders_dashboard():
         st.subheader("Total Jobs by Work Type")
         fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
                       color="Technician", title="Jobs by Work Type & Technician",
-                      template="plotly_dark") # <-- CHANGED
+                      template="plotly_dark")
         fig1.update_layout(title_font_color="#FFFFFF")
         st.plotly_chart(fig1, use_container_width=True)
 
         st.subheader("Average Duration by Work Type")
         fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
                       color="Technician", title="Avg Duration by Work Type & Technician",
-                      template="plotly_dark") # <-- CHANGED
+                      template="plotly_dark")
         fig2.update_layout(title_font_color="#FFFFFF")
         st.plotly_chart(fig2, use_container_width=True)
 
