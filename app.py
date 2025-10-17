@@ -36,7 +36,7 @@ try:
         construction.run_construction_dashboard()
 
     elif report == "Tally":
-        import tally_dashboard
+        import dashboard
         tally_dashboard.run_dashboard()
 
     elif report == "Install":
