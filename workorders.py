@@ -31,9 +31,11 @@ def run_workorders_dashboard():
                 date_col = col
                 break
 
-        if date_col is None:
-            st.error("⚠️ No date column found in uploaded file. Please include a column with 'Date' in the name.")
-            return
+        # --- Convert numeric-like columns safely ---
+for col in ["Duration"]:
+    if col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
 
         # --- Sidebar Filters ---
         st.sidebar.markdown("### 🔍 Filter Options")
