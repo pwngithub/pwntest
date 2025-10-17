@@ -44,7 +44,7 @@ try:
 
     elif report == "Tally":
         import importlib
-        import tally_dashboard as tally_module
+        import dashboard as tally_module
         importlib.reload(tally_module)
 
     elif report == "Accounting":
