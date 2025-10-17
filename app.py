@@ -55,8 +55,9 @@ try:
         splicing.run_splicing_dashboard()
 
     elif report == "Accounting":
-        import accounting
-        accounting.run_accounting_dashboard()
+    import importlib
+    import accounting
+    importlib.reload(accounting)
 
     elif report == "Projects":
         import projects
