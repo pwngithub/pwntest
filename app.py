@@ -54,6 +54,11 @@ elif report == "Preps":
     except Exception as e:
         st.sidebar.error(f"⚠️ Failed to load data for Preps: {e}")
         st.error("Unable to load Preps dashboard.")
+)
+
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Failed to load data for Preps: {e}")
+        st.error("Unable to load Preps dashboard.")
   
     
     elif report == "Construction":
