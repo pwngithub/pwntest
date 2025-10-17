@@ -39,7 +39,7 @@ try:
         import workorders
         workorders.run_workorders_dashboard()
 
-    elif report == "Preps":
+elif report == "Preps":
     try:
         from jotform_client import fetch_jotform_data
         from prep import run_preps_dashboard
