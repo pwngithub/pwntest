@@ -9,7 +9,6 @@ report = st.sidebar.selectbox(
     "Select Report",
     [
         "Welcome",       # ✅ Default welcome page
-        "Dashboard",
         "Work Orders",
         "Construction",
         "Tally",
