@@ -3,3 +3,5 @@ pandas
 altair
 requests
 plotly
+gspread
+google-auth-oauthlib
