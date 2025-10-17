@@ -11,7 +11,6 @@ report = st.sidebar.selectbox(
     [
         "Welcome",        # Default page
         "Work Orders",
-        "Preps",
         "Construction",
         "Tally",
         "Accounting",
