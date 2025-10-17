@@ -148,6 +148,7 @@ def render_header():
     )
 
 
+
     # Sidebar toggle remains for accessibility
     if st.sidebar.button(toggle_label):
         toggle_theme()
