@@ -34,7 +34,7 @@ report = st.sidebar.selectbox(
 try:
     branding.init_theme_state()
     branding.apply_theme()
-    branding.render_header()
+    #branding.render_header()
 
     if report == "Home":
         st.markdown(
