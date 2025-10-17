@@ -43,4 +43,6 @@ try:
         importlib.reload(network_module)
 
 except Exception as e:
-    st.error(f"Could not load {report} report: {e}")
+    report_name = report if 'report' in locals() else "Unknown"
+    st.error(f"Could not load {report_name} report: {e}")
+
