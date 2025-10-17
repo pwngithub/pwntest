@@ -12,8 +12,6 @@ report = st.sidebar.selectbox(
         "Work Orders",
         "Construction",
         "Tally",
-        "Install",
-        "Splicing",
         "Accounting",
         "Projects"
     ],
@@ -46,22 +44,15 @@ try:
         import tally_dashboard
         tally_dashboard.run_tally_dashboard()
 
-    elif report == "Install":
-        import install
-        install.run_install_dashboard()
-
-    elif report == "Splicing":
-        import splicing
-        splicing.run_splicing_dashboard()
-
     elif report == "Accounting":
         import importlib, accounting
-        importlib.reload(accounting)  # ✅ Runs accounting.py as standalone page
+        importlib.reload(accounting)  # Runs accounting.py as standalone
 
     elif report == "Projects":
         import importlib, projects
-        importlib.reload(projects)  # ✅ Runs projects.py as standalone page
+        importlib.reload(projects)  # Runs projects.py as standalone
 
 except Exception as e:
     st.error(f"Could not load {report} report: {e}")
+
 
