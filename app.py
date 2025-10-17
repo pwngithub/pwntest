@@ -1,6 +1,6 @@
 import streamlit as st
 from dashboard import run_dashboard
-from tally_dashboard import run_tally_dashboard
+from dashboard import run_dashboard
 from construction import run_construction_dashboard
 from workorders import run_workorders_dashboard
 from accounting import run_accounting_dashboard
