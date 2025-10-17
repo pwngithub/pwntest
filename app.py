@@ -44,7 +44,7 @@ try:
 
     elif report == "Tally":
         import dashboard
-        dashboard.run_dashboard_dashboard()
+        dashboard.run_dashboard()
 
     elif report == "Accounting":
         import importlib
