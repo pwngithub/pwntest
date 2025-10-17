@@ -1,6 +1,26 @@
 import streamlit as st
 import branding
 # -------------------------------
+# Sidebar: Report Selector
+# -------------------------------
+st.sidebar.title("📊 Reports")
+
+# Always define report before try/except
+report = st.sidebar.selectbox(
+    "Select Report",
+    [
+        "Welcome",        # Default page
+        "Work Orders",
+        "Construction",
+        "Tally",
+        "Accounting",
+        "Projects",
+        "Network"
+    ],
+    index=0
+)
+
+# -------------------------------
 # Report Loader
 # -------------------------------
 try:
@@ -25,7 +45,7 @@ try:
     elif report == "Tally":
         import importlib
         import tally_dashboard as tally_module
-        importlib.reload(tally_module)  # Isolated reload — avoids cross-theme conflicts
+        importlib.reload(tally_module)
 
     elif report == "Accounting":
         import importlib
@@ -43,6 +63,5 @@ try:
         importlib.reload(network_module)
 
 except Exception as e:
-    report_name = report if 'report' in locals() else "Unknown"
-    st.error(f"Could not load {report_name} report: {e}")
+    st.error(f"Could not load {report} report: {e}")
 
