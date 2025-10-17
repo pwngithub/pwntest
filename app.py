@@ -1,24 +1,6 @@
 import streamlit as st
 import branding
 # -------------------------------
-# Sidebar: Report Selector
-# -------------------------------
-st.sidebar.title("📊 Reports")
-report = st.sidebar.selectbox(
-    "Select Report",
-    [
-        "Welcome",        # Default page
-        "Work Orders",
-        "Construction",
-        "Tally",
-        "Accounting",
-        "Projects",
-        "Network"         # ✅ New report added
-    ],
-    index=0
-)
-
-# -------------------------------
 # Report Loader
 # -------------------------------
 try:
@@ -41,20 +23,24 @@ try:
         construction.run_construction_dashboard()
 
     elif report == "Tally":
-        import importlib, dashboard
-        importlib.reload(dashboard)  # Runs tally_dashboard.py standalone
+        import importlib
+        import tally_dashboard as tally_module
+        importlib.reload(tally_module)  # Isolated reload — avoids cross-theme conflicts
 
     elif report == "Accounting":
-        import importlib, accounting
-        importlib.reload(accounting)  # ✅ Runs accounting.py standalone
+        import importlib
+        import accounting as accounting_module
+        importlib.reload(accounting_module)
 
     elif report == "Projects":
-        import importlib, projects
-        importlib.reload(projects)    # ✅ Runs projects.py standalone
+        import importlib
+        import projects as projects_module
+        importlib.reload(projects_module)
 
     elif report == "Network":
-        import importlib, network
-        importlib.reload(network)     # ✅ Runs network.py standalone
+        import importlib
+        import network as network_module
+        importlib.reload(network_module)
 
 except Exception as e:
     st.error(f"Could not load {report} report: {e}")
