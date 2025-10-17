@@ -43,8 +43,8 @@ try:
         construction.run_construction_dashboard()
 
     elif report == "Tally":
-        import dashboard
-        dashboard.run_dashboard()
+        import tally_dashboard
+        tally_dashboard.run_tally_dashboard()
 
     elif report == "Install":
         import install
@@ -55,12 +55,13 @@ try:
         splicing.run_splicing_dashboard()
 
     elif report == "Accounting":
-    import importlib
-    import accounting
-    importlib.reload(accounting)
+        import importlib, accounting
+        importlib.reload(accounting)  # ✅ Runs accounting.py as standalone page
 
     elif report == "Projects":
-        import projects
+        import importlib, projects
+        importlib.reload(projects)  # ✅ Runs projects.py as standalone page
 
 except Exception as e:
     st.error(f"Could not load {report} report: {e}")
+
