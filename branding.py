@@ -12,9 +12,9 @@ LOGO_URL = "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f3
 
 
 def init_theme_state():
-    """Initialize dark/light mode state if not set."""
+    """Initialize dark/light mode state; default is dark."""
     if "dark_mode" not in st.session_state:
-        st.session_state["dark_mode"] = False
+        st.session_state["dark_mode"] = True  # Default to dark mode
 
 
 def toggle_theme():
