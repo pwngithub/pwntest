@@ -5,3 +5,6 @@ requests
 plotly
 gspread
 google-auth-oauthlib
+pillow>=10.0.0
+urllib3>=2.0.0
+matplotlib>=3.8.0
