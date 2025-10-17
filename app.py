@@ -1,3 +1,5 @@
+import streamlit as st
+import branding
 # -------------------------------
 # Sidebar: Report Selector
 # -------------------------------
@@ -38,9 +40,9 @@ try:
         import construction
         construction.run_construction_dashboard()
 
-    elif report == "Tally":
-        import tally_dashboard
-        tally_dashboard.run_tally_dashboard()
+    elif report == "Talley":
+        import dashboard
+        dashboard.run_dashboard()
 
     elif report == "Accounting":
         import importlib, accounting
