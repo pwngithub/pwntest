@@ -37,7 +37,7 @@ try:
 
     elif report == "Tally":
         import dashboard
-        tally_dashboard.run_dashboard()
+        dashboard.run_dashboard()
 
     elif report == "Install":
         import install
