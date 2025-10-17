@@ -1,124 +1,118 @@
-
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import os
+import altair as alt
+from datetime import datetime
+from branding import get_colors, apply_theme
 
 def run_workorders_dashboard():
-    st.set_page_config(page_title="Technician Dashboard", layout="wide")
+    # Apply theme
+    apply_theme()
+    colors = get_colors()
 
-    st.markdown("""
-    <div style='text-align:center;'>
-    <img src='https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w' width='500'>
-    </div>
-    """, unsafe_allow_html=True)
+    # --- Page Title ---
+    st.markdown(
+        f"<h1 style='color:{colors['text']}; text-align:center; margin-bottom:20px;'>🧾 Work Orders Dashboard</h1>",
+        unsafe_allow_html=True
+    )
 
-    st.markdown("<h1 style='color:#4A648C;text-align:center;'>🛠 Pioneer Broadband Work Orders Dashboard</h1>", unsafe_allow_html=True)
-    st.markdown("<hr>", unsafe_allow_html=True)
+    # --- File Upload ---
+    uploaded_file = st.sidebar.file_uploader("📁 Upload Work Orders CSV", type=["csv"])
 
-    # Create folder for saved uploads
-    saved_folder = "saved_uploads"
-    os.makedirs(saved_folder, exist_ok=True)
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
 
-    mode = st.radio("Select Mode", ["Upload New File", "Load Existing File"])
+        # --- Sidebar Filters ---
+        st.sidebar.markdown("### 🔍 Filter Options")
+        min_date = pd.to_datetime(df["Date"]).min() if "Date" in df.columns else None
+        max_date = pd.to_datetime(df["Date"]).max() if "Date" in df.columns else None
 
-    if mode == "Upload New File":
-        uploaded_file = st.file_uploader("Upload Technician Workflow CSV", type=["csv"])
-        custom_filename = st.text_input("Enter a name to save this file as (without extension):")
+        start_date, end_date = st.sidebar.date_input(
+            "📅 Select Date Range",
+            [min_date, max_date] if min_date and max_date else [datetime.today(), datetime.today()]
+        )
 
-        if uploaded_file and custom_filename:
-            save_path = os.path.join(saved_folder, custom_filename + ".csv")
-            with open(save_path, "wb") as f:
-                f.write(uploaded_file.read())
-            st.success(f"File saved as: {save_path}")
-            df = pd.read_csv(save_path)
+        techs = df["Technician"].unique() if "Technician" in df.columns else []
+        selected_techs = st.sidebar.multiselect("👷 Select Technician(s)", options=techs, default=techs)
 
-        elif uploaded_file and not custom_filename:
-            st.warning("Please enter a file name to save.")
+        work_types = df["Work Type"].unique() if "Work Type" in df.columns else []
+        selected_types = st.sidebar.multiselect("⚙️ Select Work Type(s)", options=work_types, default=work_types)
 
-        else:
+        # --- Filter Data ---
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        mask = (df["Date"] >= pd.Timestamp(start_date)) & (df["Date"] <= pd.Timestamp(end_date))
+        mask &= df["Technician"].isin(selected_techs)
+        mask &= df["Work Type"].isin(selected_types)
+        filtered_df = df.loc[mask].copy()
+
+        if filtered_df.empty:
+            st.warning("No records match your filters.")
             return
 
-    else:  # Load from existing saved files
-        saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
-        if not saved_files:
-            st.warning("No saved files found. Please upload one first.")
-            return
-        selected_file = st.selectbox("Select a saved file to load", saved_files)
+        # --- KPI Metrics ---
+        total_jobs = len(filtered_df)
+        total_duration = filtered_df["Duration"].sum() if "Duration" in filtered_df.columns else 0
+        avg_duration = filtered_df["Duration"].mean() if "Duration" in filtered_df.columns else 0
+        unique_techs = filtered_df["Technician"].nunique() if "Technician" in filtered_df.columns else 0
 
-        st.markdown("### 🗑 Delete a Saved File")
-        file_to_delete = st.selectbox("Select a file to delete", saved_files, key="delete_file")
-        if st.button("Delete Selected File"):
-            os.remove(os.path.join(saved_folder, file_to_delete))
-            st.success(f"{file_to_delete} has been deleted.")
-            st.experimental_rerun()
+        # --- KPI Cards ---
+        col1, col2, col3, col4 = st.columns(4)
+        metric_style = (
+            "background-color:#003865; color:white; padding:15px; border-radius:12px; "
+            "text-align:center; box-shadow:0 2px 6px rgba(0,0,0,0.3);"
+        )
+        col1.markdown(f"<div style='{metric_style}'><h4>Total Work Orders</h4><h2>{total_jobs:,}</h2></div>", unsafe_allow_html=True)
+        col2.markdown(f"<div style='{metric_style}'><h4>Total Duration</h4><h2>{total_duration:.1f} hrs</h2></div>", unsafe_allow_html=True)
+        col3.markdown(f"<div style='{metric_style}'><h4>Average Duration</h4><h2>{avg_duration:.2f} hrs</h2></div>", unsafe_allow_html=True)
+        col4.markdown(f"<div style='{metric_style}'><h4>Active Technicians</h4><h2>{unique_techs}</h2></div>", unsafe_allow_html=True)
 
-        df = pd.read_csv(os.path.join(saved_folder, selected_file))
+        st.divider()
 
-    df["Date When"] = pd.to_datetime(df["Date When"], errors="coerce")
-    df = df.dropna(subset=["Date When"])
-    df["Day"] = df["Date When"].dt.date
+        # --- Chart: Work Orders by Technician ---
+        st.subheader("📈 Work Orders by Technician")
+        if "Technician" in filtered_df.columns:
+            chart = (
+                alt.Chart(filtered_df)
+                .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, color="#8BC53F")
+                .encode(
+                    x=alt.X("Technician:N", sort="-y", title="Technician"),
+                    y=alt.Y("count():Q", title="Work Order Count"),
+                    tooltip=["Technician", "count()"]
+                )
+                .properties(height=400)
+            )
+            st.altair_chart(chart, use_container_width=True)
 
-    min_day = df["Day"].min()
-    max_day = df["Day"].max()
-    start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
-    df = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
+        # --- Chart: Duration by Work Type ---
+        if "Work Type" in filtered_df.columns and "Duration" in filtered_df.columns:
+            st.subheader("🕒 Average Duration by Work Type")
+            avg_chart = (
+                alt.Chart(filtered_df)
+                .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, color="#003865")
+                .encode(
+                    x=alt.X("Work Type:N", sort="-y", title="Work Type"),
+                    y=alt.Y("mean(Duration):Q", title="Average Duration (hrs)"),
+                    tooltip=["Work Type", "mean(Duration)"]
+                )
+                .properties(height=400)
+            )
+            st.altair_chart(avg_chart, use_container_width=True)
 
-    
-    total_jobs = df["WO#"].nunique()
-    avg_duration = pd.to_numeric(df["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean() or 0
-    unique_statuses = df["Tech Status"].nunique()
-    tech_count = df["Techinician"].nunique()
-    avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
-    num_days = (end_date - start_date).days + 1
+        # --- Summary Table ---
+        st.divider()
+        st.subheader("📊 Work Order Summary Table")
 
-    st.markdown("### 📌 Key Performance Indicators")
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    k1.metric("🔧 Total Jobs", total_jobs)
-    k2.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
-    k3.metric("📋 Unique Statuses", unique_statuses)
-    k4.metric("👨‍🔧 Total Technicians", tech_count)
-    k5.metric("📈 Jobs per Technician", f"{avg_jobs_per_tech:.1f}")
-    k6.metric("📆 Days Covered", num_days)
+        display_cols = [col for col in ["Date", "Technician", "Work Type", "Duration", "Status"] if col in filtered_df.columns]
+        styled_table = (
+            filtered_df[display_cols]
+            .sort_values(by="Date", ascending=False)
+            .style.set_table_styles(
+                [
+                    {"selector": "thead th", "props": [("background-color", "#003865"), ("color", "white")]},
+                    {"selector": "tbody td", "props": [("padding", "6px 12px")]},
+                ]
+            )
+        )
+        st.dataframe(filtered_df[display_cols], use_container_width=True)
 
-    total_entries = df["WO#"].count()
-    duration_series = pd.to_numeric(df["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
-    max_duration = duration_series.max() or 0
-    min_duration = duration_series.min() or 0
-
-    k7, k8, k9 = st.columns(3)
-    k7.metric("🧾 Total Entries", total_entries)
-    k8.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
-    k9.metric("⏱️ Shortest Duration (hrs)", f"{min_duration:.2f}")
-
-
-    st.markdown("---")
-
-    grouped_overall = (df.groupby(["Techinician", "Work Type"])
-                       .agg(Total_Jobs=("WO#", "nunique"),
-                            Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-                       .reset_index())
-
-    fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
-                  color="Techinician", title="Total Jobs by Work Type",
-                  color_discrete_sequence=["#8BC53F"])
-    fig1.update_layout(plot_bgcolor='white', title_font_color="#4A648C")
-    st.plotly_chart(fig1, use_container_width=True)
-
-    fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
-                  color="Techinician", title="Avg Duration by Work Type",
-                  color_discrete_sequence=["#8BC53F"])
-    fig2.update_layout(plot_bgcolor='white', title_font_color="#4A648C")
-    st.plotly_chart(fig2, use_container_width=True)
-
-    st.markdown("### 🗂 Breakout Table: Daily Summary")
-    df_daily = (df.groupby(["Techinician", "Day", "Work Type"])
-                .agg(Jobs_Completed=("WO#", "nunique"),
-                     Total_Entries=("WO#", "count"),
-                     Avg_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-                .reset_index())
-    st.dataframe(df_daily, use_container_width=True)
-
-    st.markdown("### 📤 Export Overall Summary")
-    csv = grouped_overall.to_csv(index=False).encode('utf-8')
-    st.download_button("Download Summary CSV", data=csv, file_name="workorders_summary.csv", mime="text/csv")
+    else:
+        st.info("📤 Upload a CSV file to begin exploring Work Orders.")
