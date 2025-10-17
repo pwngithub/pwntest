@@ -8,20 +8,15 @@ DARK_BG = "#000000"
 LIGHT_TEXT = "#003865"
 DARK_TEXT = "#FFFFFF"
 
-LOGO_URL = "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w"
-
-
 def init_theme_state():
     """Initialize dark/light mode state; default is dark."""
     if "dark_mode" not in st.session_state:
         st.session_state["dark_mode"] = True  # Default to dark mode
 
-
 def toggle_theme():
     """Toggle between dark and light mode."""
     st.session_state["dark_mode"] = not st.session_state["dark_mode"]
     st.rerun()
-
 
 def get_colors():
     """Return color palette based on mode."""
@@ -30,9 +25,8 @@ def get_colors():
     else:
         return {"bg": LIGHT_BG, "text": LIGHT_TEXT, "accent": PIONEER_GREEN}
 
-
 def apply_theme():
-    """Apply global dark/light theme across all Streamlit elements, including sidebar, top bar, and dropdowns."""
+    """Apply global dark/light theme across all Streamlit elements, including sidebar and dropdowns."""
     colors = get_colors()
 
     st.markdown(
@@ -91,7 +85,7 @@ def apply_theme():
             label, span, p, h1, h2, h3, h4, h5 {{
                 color: {colors['text']} !important;
             }}
-            /* Sidebar selectbox and dropdown override */
+            /* Sidebar selectbox dropdown specifically */
             div[data-baseweb="select"] > div {{
                 background-color: {colors['bg']} !important;
                 color: {colors['text']} !important;
@@ -121,41 +115,6 @@ def apply_theme():
         """,
         unsafe_allow_html=True,
     )
-
-
-
-def render_header():
-    """Render a sleek full-width Pioneer header with logo and title only (no light/dark toggle)."""
-    init_theme_state()
-    colors = get_colors()
-
-    st.markdown(
-        f"""
-        <div style="
-            display:flex;
-            align-items:center;
-            justify-content:flex-start;
-            background-color:{PIONEER_BLUE if not st.session_state['dark_mode'] else '#111111'};
-            padding:14px 40px;
-            border-bottom:3px solid {PIONEER_GREEN};
-            box-shadow:0 2px 6px rgba(0,0,0,0.25);
-        ">
-            <img src="{LOGO_URL}" alt="Pioneer Broadband Logo" style="height:55px; margin-right:20px;">
-            <h2 style="color:white; margin:0;">Pioneer Broadband Dashboard</h2>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-
-
-
-    # Sidebar toggle remains for accessibility
-    #if st.sidebar.button(toggle_label):
-       # toggle_theme()
-
-
 
 def render_footer():
     """Render a global footer."""
