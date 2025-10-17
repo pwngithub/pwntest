@@ -35,10 +35,6 @@ try:
             </div>
         """, unsafe_allow_html=True)
 
-    elif report == "Dashboard":
-        import dashboard
-        dashboard.run_dashboard()
-
     elif report == "Work Orders":
         import workorders
         workorders.run_workorders_dashboard()
