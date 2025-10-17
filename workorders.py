@@ -10,36 +10,43 @@ def run_workorders_dashboard():
         initial_sidebar_state="expanded"
     )
 
-    # --- Custom CSS for KPI Cards and other styling ---
+    # --- Custom CSS for Dark Theme KPI Cards and other styling ---
     st.markdown("""
     <style>
-    /* Main container styling */
+    /* Main container styling for dark theme */
     .stApp {
-        background-color: #F0F2F6;
+        background-color: #0E1117;
     }
 
-    /* KPI Card styling */
+    /* KPI Card styling for dark theme */
     div[data-testid="metric-container"] {
-        background-color: #FFFFFF;
-        border: 1px solid #CCCCCC;
+        background-color: #262730;
+        border: 1px solid #3c3c3c;
         padding: 15px;
         border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.4);
         transition: transform 0.2s;
+        color: #FAFAFA; /* Ensure text inside is light */
     }
     div[data-testid="metric-container"]:hover {
         transform: scale(1.05);
+        border-color: #8BC53F; /* Highlight color from your original charts */
     }
     
+    /* Ensure metric labels are a lighter gray */
+    div[data-testid="metric-container"] > label {
+        color: #A0A0A0;
+    }
+
     /* Center align the logo */
     .logo-container {
         text-align: center;
         margin-bottom: 20px;
     }
     
-    /* Main title styling */
+    /* Main title styling for dark theme */
     .main-title {
-        color: #4A648C;
+        color: #FFFFFF;
         text-align: center;
         font-weight: bold;
     }
@@ -116,7 +123,6 @@ def run_workorders_dashboard():
     df = df.dropna(subset=["Date When"])
     df["Day"] = df["Date When"].dt.date
     
-    # Fix potential typo in column name for broader compatibility
     if "Techinician" in df.columns and "Technician" not in df.columns:
         df.rename(columns={"Techinician": "Technician"}, inplace=True)
 
@@ -177,15 +183,15 @@ def run_workorders_dashboard():
         st.subheader("Total Jobs by Work Type")
         fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
                       color="Technician", title="Jobs by Work Type & Technician",
-                      template="plotly_white")
-        fig1.update_layout(title_font_color="#4A648C")
+                      template="plotly_dark") # <-- CHANGED
+        fig1.update_layout(title_font_color="#FFFFFF")
         st.plotly_chart(fig1, use_container_width=True)
 
         st.subheader("Average Duration by Work Type")
         fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
                       color="Technician", title="Avg Duration by Work Type & Technician",
-                      template="plotly_white")
-        fig2.update_layout(title_font_color="#4A648C")
+                      template="plotly_dark") # <-- CHANGED
+        fig2.update_layout(title_font_color="#FFFFFF")
         st.plotly_chart(fig2, use_container_width=True)
 
     with tab2:
@@ -196,7 +202,3 @@ def run_workorders_dashboard():
         csv = grouped_overall.to_csv(index=False).encode('utf-8')
         st.download_button("Download Summary CSV", data=csv, file_name="workorders_summary.csv", mime="text/csv")
         st.dataframe(grouped_overall, use_container_width=True)
-
-# To run the app, you would typically have a block like this:
-# if __name__ == "__main__":
-#     run_workorders_dashboard()
