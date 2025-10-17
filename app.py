@@ -42,7 +42,7 @@ try:
         import construction
         construction.run_construction_dashboard()
 
-   elif report == "Tally":
+    elif report == "Tally":
         import dashboard
         dashboard.run_dashboard_dashboard()
 
