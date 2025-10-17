@@ -43,8 +43,8 @@ try:
         construction.run_construction_dashboard()
 
     elif report == "Tally":
-        import tally_dashboard
-        tally_dashboard.run_tally_dashboard()
+        import dashboard
+        dashboard.run_dashboard()
 
     elif report == "Install":
         import install
