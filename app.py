@@ -40,9 +40,9 @@ try:
         import construction
         construction.run_construction_dashboard()
 
-    elif report == "Talley":
-        import dashboard
-        dashboard.run_dashboard()
+    elif report == "Tally":
+    import importlib, dashboard
+    importlib.reload(dashboard)  # Runs tally_dashboard.py standalone
 
     elif report == "Accounting":
         import importlib, accounting
