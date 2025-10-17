@@ -38,6 +38,16 @@ try:
         import workorders
         workorders.run_workorders_dashboard()
 
+    elif report == "Preps":
+    try:
+        df = fetch_jotform_data(form_id="232136783361054", api_key="32c62a1b6c1a350caed2f989c1be4e48")
+        st.sidebar.success(f"Loaded Preps data: {df.shape[0]} rows")
+        run_preps_dashboard()
+    except Exception as e:
+        st.sidebar.error(f"Failed to load data for Preps: {e}")
+        st.error("Unable to load Preps dashboard.")
+
+
     elif report == "Construction":
         import construction
         construction.run_construction_dashboard()
