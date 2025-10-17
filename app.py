@@ -28,7 +28,6 @@ try:
         st.markdown("""
             <div style="text-align:center; padding:80px 20px;">
                 <img src="https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w" width="400">
-                <h1 style="color:#003865;">Welcome to the Pioneer Broadband Dashboard</h1>
                 <p style="font-size:18px;">Select a report from the sidebar to begin exploring your operational data.</p>
                 <br>
                
