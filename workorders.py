@@ -21,14 +21,31 @@ def run_workorders_dashboard():
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
 
+        # --- Normalize column names ---
+        df.columns = df.columns.str.strip().str.title()
+
+        # --- Detect Date column ---
+        date_col = None
+        for col in df.columns:
+            if "date" in col.lower():
+                date_col = col
+                break
+
+        if date_col is None:
+            st.error("⚠️ No date column found in uploaded file. Please include a column with 'Date' in the name.")
+            return
+
         # --- Sidebar Filters ---
         st.sidebar.markdown("### 🔍 Filter Options")
-        min_date = pd.to_datetime(df["Date"]).min() if "Date" in df.columns else None
-        max_date = pd.to_datetime(df["Date"]).max() if "Date" in df.columns else None
+
+        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+        min_date = df[date_col].min()
+        max_date = df[date_col].max()
 
         start_date, end_date = st.sidebar.date_input(
             "📅 Select Date Range",
-            [min_date, max_date] if min_date and max_date else [datetime.today(), datetime.today()]
+            [min_date, max_date] if not pd.isnull(min_date) and not pd.isnull(max_date)
+            else [datetime.today(), datetime.today()]
         )
 
         techs = df["Technician"].unique() if "Technician" in df.columns else []
@@ -38,10 +55,12 @@ def run_workorders_dashboard():
         selected_types = st.sidebar.multiselect("⚙️ Select Work Type(s)", options=work_types, default=work_types)
 
         # --- Filter Data ---
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-        mask = (df["Date"] >= pd.Timestamp(start_date)) & (df["Date"] <= pd.Timestamp(end_date))
-        mask &= df["Technician"].isin(selected_techs)
-        mask &= df["Work Type"].isin(selected_types)
+        mask = (df[date_col] >= pd.Timestamp(start_date)) & (df[date_col] <= pd.Timestamp(end_date))
+        if "Technician" in df.columns:
+            mask &= df["Technician"].isin(selected_techs)
+        if "Work Type" in df.columns:
+            mask &= df["Work Type"].isin(selected_types)
+
         filtered_df = df.loc[mask].copy()
 
         if filtered_df.empty:
@@ -82,7 +101,7 @@ def run_workorders_dashboard():
             )
             st.altair_chart(chart, use_container_width=True)
 
-        # --- Chart: Duration by Work Type ---
+        # --- Chart: Average Duration by Work Type ---
         if "Work Type" in filtered_df.columns and "Duration" in filtered_df.columns:
             st.subheader("🕒 Average Duration by Work Type")
             avg_chart = (
@@ -101,17 +120,7 @@ def run_workorders_dashboard():
         st.divider()
         st.subheader("📊 Work Order Summary Table")
 
-        display_cols = [col for col in ["Date", "Technician", "Work Type", "Duration", "Status"] if col in filtered_df.columns]
-        styled_table = (
-            filtered_df[display_cols]
-            .sort_values(by="Date", ascending=False)
-            .style.set_table_styles(
-                [
-                    {"selector": "thead th", "props": [("background-color", "#003865"), ("color", "white")]},
-                    {"selector": "tbody td", "props": [("padding", "6px 12px")]},
-                ]
-            )
-        )
+        display_cols = [col for col in [date_col, "Technician", "Work Type", "Duration", "Status"] if col in filtered_df.columns]
         st.dataframe(filtered_df[display_cols], use_container_width=True)
 
     else:
