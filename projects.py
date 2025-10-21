@@ -11,7 +11,6 @@ st.set_page_config(
 )
 
 # --- Constants ---
-# REFACTORED: Using constants for column names prevents typos and makes code easier to update.
 COL_TYPE = "Type"
 COL_DESIGN = "Design"
 COL_AS_BUILT = "As Built"
@@ -49,7 +48,15 @@ def process_data(raw_df):
 
     # Dynamically find the header row containing "Type"
     try:
-        header_row_index = raw_df[raw_df[0] == COL_TYPE].index[0]
+        # Search for "Type" in any of the first few columns to be more robust
+        header_row_index = -1
+        for i, row in raw_df.head().iterrows():
+            if 'Type' in row.astype(str).str.strip().tolist():
+                header_row_index = i
+                break
+        if header_row_index == -1:
+            raise IndexError # Trigger the except block if not found
+
         header = raw_df.iloc[header_row_index].str.strip()
         df = raw_df.iloc[header_row_index + 1 :].copy()
         df.columns = header
@@ -74,31 +81,35 @@ def process_data(raw_df):
 
     # Aggregate data
     kpi_df = df.groupby(COL_TYPE).agg({COL_DESIGN: "sum", COL_AS_BUILT: "sum"}).reset_index()
-    kpi_df[COL_COMPLETION] = (kpi_df[COL_AS_BUILT] / kpi_df[COL_DESIGN].replace(0, pd.NA) * 100).clip(0, 100).fillna(0)
+    # Filter out rows where design is 0 to avoid division by zero issues
+    kpi_df = kpi_df[kpi_df[COL_DESIGN] > 0]
+
+    kpi_df[COL_COMPLETION] = (kpi_df[COL_AS_BUILT] / kpi_df[COL_DESIGN] * 100).clip(0, 100)
     kpi_df[COL_LEFT_TO_BUILD] = kpi_df[COL_DESIGN] - kpi_df[COL_AS_BUILT]
     
     return df, kpi_df
 
 # --- UI Display Functions ---
-# REFACTORED: Broke the main function into smaller, manageable UI components.
 
 def display_sidebar(kpi_df):
-    """Renders the sidebar with controls."""
+    """Renders the sidebar controls. Returns the filtered DataFrame."""
     st.sidebar.header("Controls")
     if st.sidebar.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
-    all_types = sorted(kpi_df[COL_TYPE].unique())
-    selected_types = st.sidebar.multiselect(
-        "Filter Project Type", options=all_types, default=all_types
-    )
-    
-    # NEW: Added a download button for the processed data.
-    if not kpi_df.empty:
+    # Only show filters and download if data is available
+    if kpi_df is not None and not kpi_df.empty:
+        all_types = sorted(kpi_df[COL_TYPE].unique())
+        selected_types = st.sidebar.multiselect(
+            "Filter Project Type", options=all_types, default=all_types
+        )
+        
+        # Download button
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             kpi_df.to_excel(writer, index=False, sheet_name='Summary')
+        
         st.sidebar.download_button(
             label="📥 Download Data as Excel",
             data=output.getvalue(),
@@ -106,7 +117,10 @@ def display_sidebar(kpi_df):
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
-    return kpi_df[kpi_df[COL_TYPE].isin(selected_types)]
+        return kpi_df[kpi_df[COL_TYPE].isin(selected_types)]
+    else:
+        st.sidebar.info("No data to filter.")
+        return pd.DataFrame() # Return empty dataframe
 
 def display_kpis(kpi_df):
     """Displays the main KPI metrics at the top of the page."""
@@ -125,7 +139,7 @@ def display_kpis(kpi_df):
     st.divider()
 
 def get_progress_color(percentage):
-    """NEW: Helper function to return a color based on completion percentage."""
+    """Helper function to return a color based on completion percentage."""
     if percentage >= 90:
         return "green"
     elif percentage >= 50:
@@ -139,84 +153,69 @@ def display_tabs(kpi_df):
     
     with tab1:
         st.subheader("Completion % by Type")
-        if not kpi_df.empty:
-            chart = (
-                alt.Chart(kpi_df)
-                .mark_bar(color="#4A90E2")
-                .encode(
-                    x=alt.X(f"{COL_COMPLETION}:Q", scale=alt.Scale(domain=[0, 100]), title="Completion %"),
-                    y=alt.Y(f"{COL_TYPE}:N", sort="-x", title="Project Type"),
-                    tooltip=[COL_TYPE, COL_COMPLETION, COL_AS_BUILT, COL_DESIGN],
-                )
+        chart = (
+            alt.Chart(kpi_df)
+            .mark_bar(color="#4A90E2")
+            .encode(
+                x=alt.X(f"{COL_COMPLETION}:Q", scale=alt.Scale(domain=[0, 100]), title="Completion %"),
+                y=alt.Y(f"{COL_TYPE}:N", sort="-x", title="Project Type"),
+                tooltip=[COL_TYPE, COL_COMPLETION, COL_AS_BUILT, COL_DESIGN],
             )
-            st.altair_chart(chart, use_container_width=True)
-        else:
-            st.info("No data to display for the selected filters.")
+        )
+        st.altair_chart(chart, use_container_width=True)
 
     with tab2:
         st.subheader("Detailed Breakdown")
-        if not kpi_df.empty:
-            sorted_kpi = kpi_df.sort_values(by=COL_COMPLETION, ascending=False)
-            top_performer = sorted_kpi.iloc[0][COL_TYPE]
-            
-            for _, row in sorted_kpi.iterrows():
-                st.markdown("---")
-                # NEW: Added color to titles for quick visual assessment.
-                color = get_progress_color(row[COL_COMPLETION])
-                title = f"**{row[COL_TYPE]}**"
-                if row[COL_TYPE] == top_performer:
-                    title = f"🏆 {title}"
+        sorted_kpi = kpi_df.sort_values(by=COL_COMPLETION, ascending=False)
+        top_performer = sorted_kpi.iloc[0][COL_TYPE]
+        
+        for _, row in sorted_kpi.iterrows():
+            st.markdown("---")
+            color = get_progress_color(row[COL_COMPLETION])
+            title = f"**{row[COL_TYPE]}**"
+            if row[COL_TYPE] == top_performer:
+                title = f"🏆 {title}"
 
-                st.markdown(f"<h4 style='color:{color};'>{title}</h4>", unsafe_allow_html=True)
-                
-                st.progress(int(row[COL_COMPLETION]), text=f"{row[COL_COMPLETION]:.2f}%")
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Completion %", f"{row[COL_COMPLETION]:.2f}%")
-                c2.metric("As Built", f"{row[COL_AS_BUILT]:,.2f}")
-                c3.metric("Design Target", f"{row[COL_DESIGN]:,.2f}")
-        else:
-            st.info("No detailed data to display for the selected filters.")
+            st.markdown(f"<h4 style='color:{color};'>{title}</h4>", unsafe_allow_html=True)
+            st.progress(int(row[COL_COMPLETION]), text=f"{row[COL_COMPLETION]:.2f}%")
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Completion %", f"{row[COL_COMPLETION]:.2f}%")
+            c2.metric("As Built", f"{row[COL_AS_BUILT]:,.2f}")
+            c3.metric("Design Target", f"{row[COL_DESIGN]:,.2f}")
 
 # --- Main App ---
 def main():
     """Main function to run the Streamlit app."""
     display_header()
-    
+
+    # --- Load and Process Data ---
     raw_df = load_data(GOOGLE_SHEET_URL)
-    
-    if raw_df is None:
-        st.warning("Could not load data. The dashboard cannot be displayed.")
-        return
-
-    # Display last updated time if possible
-    try:
-        st.caption(f"Last Updated: {raw_df.iloc[6,0]}")
-    except IndexError:
-        pass # Silently fail if the cell doesn't exist
-
     clean_df, kpi_df = process_data(raw_df)
 
-    if kpi_df is None or kpi_df.empty:
-        st.warning("No valid data could be processed. Please check the Google Sheet format.")
-        return
-
+    # --- Sidebar ---
+    # Display the sidebar and get the user's filtered selection
     filtered_kpi = display_sidebar(kpi_df)
-    
-    if filtered_kpi.empty:
-        st.info("No data available for the selected filters.")
-    else:
+
+    # --- Main Content Area ---
+    if not filtered_kpi.empty:
+        # Display last updated time if possible
+        try:
+            st.caption(f"Last Updated: {raw_df.iloc[6,0]}")
+        except (IndexError, AttributeError):
+            pass # Silently fail if the cell doesn't exist
+
         display_kpis(filtered_kpi)
         display_tabs(filtered_kpi)
 
-    # Raw Data Expander
-    with st.expander("🔍 View Raw Cleaned Data Table"):
-        if clean_df is not None:
-            # Show only columns that are not completely empty or unnamed
-            valid_cols = [c for c in clean_df.columns if not str(c).startswith("Unnamed") and clean_df[c].notna().any()]
-            st.dataframe(clean_df[valid_cols].fillna(""), use_container_width=True)
-        else:
-            st.write("No raw data to display.")
+        with st.expander("🔍 View Raw Cleaned Data Table"):
+            if clean_df is not None:
+                valid_cols = [c for c in clean_df.columns if not str(c).startswith("Unnamed") and clean_df[c].notna().any()]
+                st.dataframe(clean_df[valid_cols].fillna(""), use_container_width=True)
+    else:
+        # This message shows if data loading failed or if the user deselected all types
+        st.info("No data to display. Please check the data source or select a project type from the sidebar.")
+
 
 if __name__ == "__main__":
     main()
