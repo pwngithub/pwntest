@@ -12,16 +12,16 @@ st.set_page_config(page_title="Profit & Loss Dashboard", page_icon="💰", layou
 # SIDEBAR: THEME TOGGLE
 # -------------------------------
 if "dark_mode" not in st.session_state:
-    st.session_state["dark_mode"] = False  # default: light mode
+    st.session_state["dark_mode"] = False
 
-# Dynamic toggle label
 toggle_label = "🌙 Switch to Dark Mode" if not st.session_state["dark_mode"] else "☀️ Switch to Light Mode"
-
 if st.sidebar.button(toggle_label):
     st.session_state["dark_mode"] = not st.session_state["dark_mode"]
-    st.rerun()  # instantly refresh the UI with the new theme
+    st.rerun()
 
-# Apply color palette dynamically
+# -------------------------------
+# THEME COLORS
+# -------------------------------
 if st.session_state["dark_mode"]:
     bg_color = "#000000"
     text_color = "#FFFFFF"
@@ -42,7 +42,7 @@ else:
     )
 
 # -------------------------------
-# GLOBAL BACKGROUND + FADE TRANSITION
+# GLOBAL BACKGROUND + FADE
 # -------------------------------
 st.markdown(
     f"""
@@ -80,7 +80,7 @@ st.markdown(
 )
 
 # -------------------------------
-# GOOGLE SHEETS CONFIG
+# GOOGLE SHEET CONFIG
 # -------------------------------
 SHEET_ID = "1iiBe4CLYPlr_kpIOuvzxLliwA0ferGtBRhtnMLfhOQg"
 
@@ -159,32 +159,41 @@ def find_col(df, key):
 def num(df, r, c):
     try:
         v = str(df.iat[r, c])
-        return pd.to_numeric(v.replace(",", "").replace("$", ""), errors="coerce")
+        return pd.to_numeric(v.replace(",", "").replace("$", "").replace("%", ""), errors="coerce")
     except Exception:
         return 0
 
+# --- Locate key data rows/columns ---
 col_idx = find_col(df, "month") or 1
 ebitda_r = find_row(df, ["ebitda"])
 subs_r = find_row(df, ["users months", "user months"])
 mrr_r = find_row(df, ["broadhub rev", "broadhub"])
+roi_r = find_row(df, ["roi"])
 
+# --- Extract KPI values ---
 ebitda = num(df, ebitda_r, col_idx) if ebitda_r is not None else 0
 subs = num(df, subs_r, col_idx) if subs_r is not None else 0
 mrr = num(df, mrr_r, col_idx) if mrr_r is not None else 0
 arpu = (mrr / subs) if subs > 0 else 0
 
+roi_monthly_col = find_col(df, "monthly") or 2
+roi_ytd_col = find_col(df, "ytd") or 3
+roi_monthly = num(df, roi_r, roi_monthly_col) if roi_r is not None else 0
+roi_ytd = num(df, roi_r, roi_ytd_col) if roi_r is not None else 0
+
 # -------------------------------
-# KPI SECTION
+# KPI DISPLAY
 # -------------------------------
 st.markdown(f"<h2 style='color:{border_color};'>💼 Financial Performance – {selected_tab}</h2>", unsafe_allow_html=True)
 c1, c2, c3, c4 = st.columns(4)
 
-def kpi_box(label, value):
+def kpi_box(label, value, is_percent=False):
     try:
-        n = float(str(value).replace("$", "").replace(",", ""))
+        n = float(str(value).replace("$", "").replace(",", "").replace("%", ""))
     except:
         n = 0
     val_color = border_color if n >= 0 else "red"
+    formatted_value = f"{n:,.2f}%" if is_percent else f"${n:,.2f}"
     return f"""
     <div style="
         background-color:{card_bg};
@@ -194,17 +203,22 @@ def kpi_box(label, value):
         box-shadow:0px 2px 10px rgba(0,86,179,0.15);
         text-align:center;">
         <div style="font-weight:600;color:{text_color};">{label}</div>
-        <div style="font-size:1.5em;font-weight:700;color:{val_color};">{value}</div>
+        <div style="font-size:1.5em;font-weight:700;color:{val_color};">{formatted_value}</div>
     </div>
     """
 
-c1.markdown(kpi_box("Monthly Recurring Revenue (MRR)", f"${mrr:,.2f}"), unsafe_allow_html=True)
-c2.markdown(kpi_box("Subscriber Count", f"{subs:,.0f}"), unsafe_allow_html=True)
-c3.markdown(kpi_box("Average Revenue Per User (ARPU)", f"${arpu:,.2f}"), unsafe_allow_html=True)
-c4.markdown(kpi_box("EBITDA", f"${ebitda:,.2f}"), unsafe_allow_html=True)
+c1.markdown(kpi_box("Monthly Recurring Revenue (MRR)", f"{mrr}", False), unsafe_allow_html=True)
+c2.markdown(kpi_box("Subscriber Count", f"{subs}", False), unsafe_allow_html=True)
+c3.markdown(kpi_box("Average Revenue Per User (ARPU)", f"{arpu}", False), unsafe_allow_html=True)
+c4.markdown(kpi_box("EBITDA", f"{ebitda}", False), unsafe_allow_html=True)
+
+# --- New ROI row ---
+r1, r2 = st.columns(2)
+r1.markdown(kpi_box("ROI Monthly", roi_monthly, is_percent=True), unsafe_allow_html=True)
+r2.markdown(kpi_box("ROI Year To Date", roi_ytd, is_percent=True), unsafe_allow_html=True)
 
 # -------------------------------
-# SIDEBAR OPTIONS
+# SIDEBAR + DOWNLOAD
 # -------------------------------
 st.sidebar.markdown("---")
 show_df = st.sidebar.checkbox("📋 Show Profit & Loss Sheet Preview", False)
@@ -212,15 +226,12 @@ if show_df:
     st.subheader(f"📋 Profit & Loss Sheet Preview – {selected_tab}")
     st.dataframe(df, use_container_width=True)
 
-# -------------------------------
-# DOWNLOAD BUTTON
-# -------------------------------
 st.subheader("⬇️ Download Data")
 csv = df.to_csv(index=False).encode("utf-8")
 st.download_button(f"Download {selected_tab} CSV", csv, f"{selected_tab}_profit_loss.csv", "text/csv")
 
 # -------------------------------
-# FIX: SIDEBAR + BUTTON COLORS (VISIBLE IN BOTH THEMES)
+# FIXED BUTTON COLORS
 # -------------------------------
 extra_css = f"""
 <style>
@@ -228,8 +239,6 @@ section[data-testid="stSidebar"] {{
     background-color: {bg_color} !important;
     color: {text_color} !important;
 }}
-
-/* === Toggle Background Theme button === */
 section[data-testid="stSidebar"] div.stButton > button {{
     background-color: {'#ffffff' if not st.session_state['dark_mode'] else '#222222'} !important;
     color: {'#0056b3' if not st.session_state['dark_mode'] else '#ffffff'} !important;
@@ -237,44 +246,13 @@ section[data-testid="stSidebar"] div.stButton > button {{
     border-radius: 8px !important;
     font-weight: 700 !important;
     width: 100% !important;
-    padding: 0.6em 1em !important;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    transition: all 0.2s ease-in-out;
 }}
-section[data-testid="stSidebar"] div.stButton > button:hover {{
-    background-color: {border_color} !important;
-    color: #ffffff !important;
-    transform: scale(1.02);
-}}
-
-/* === Month dropdown styling === */
-div[data-baseweb="select"] > div {{
-    background-color: {card_bg} !important;
-    color: {text_color} !important;
-    border: 1.5px solid {border_color} !important;
-    border-radius: 6px !important;
-}}
-div[data-baseweb="select"] svg,
-section[data-testid="stSidebar"] svg,
-section[data-testid="stSidebar"] path {{
-    fill: {'#0056b3' if not st.session_state['dark_mode'] else '#ffffff'} !important;
-}}
-div[data-baseweb="select"] div {{
-    color: {text_color} !important;
-}}
-
-/* === Download button styling === */
 div[data-testid="stDownloadButton"] button {{
     background-color: {border_color} !important;
     color: #ffffff !important;
     border-radius: 8px !important;
     font-weight: 600 !important;
     border: none !important;
-    padding: 0.6em 1.2em !important;
-}}
-div[data-testid="stDownloadButton"] button:hover {{
-    background-color: #004080 !important;
-    color: #ffffff !important;
 }}
 </style>
 """
