@@ -192,9 +192,9 @@ def kpi_box(label, value, is_percent=False):
     """
 
 # Row 1
-c1.markdown(kpi_box("Monthly Recurring Revenue (MRR)", f"{mrr}", False), unsafe_allow_html=True)
+c1.markdown(kpi_box("Monthly Recurring Revenue", f"{mrr}", False), unsafe_allow_html=True)
 c2.markdown(kpi_box("Subscriber Count", f"{subs}", False), unsafe_allow_html=True)
-c3.markdown(kpi_box("Average Revenue Per User (ARPU)", f"{arpu}", False), unsafe_allow_html=True)
+c3.markdown(kpi_box("Average Revenue Per User ", f"{arpu}", False), unsafe_allow_html=True)
 c4.markdown(kpi_box("EBITDA", f"{ebitda}", False), unsafe_allow_html=True)
 
 # Row 2 – ROI
