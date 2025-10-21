@@ -178,13 +178,23 @@ subs = num(df, subs_r, col_idx) if subs_r is not None else 0
 mrr = num(df, mrr_r, col_idx) if mrr_r is not None else 0
 arpu = (mrr / subs) if subs > 0 else 0
 
-# --- ROI values (row 55) ---
+# --- ROI values (row 55) robust detection ---
 roi_row = 54  # row 55 in the sheet (0-based index)
-roi_monthly_col = find_col(df, "monthly")
-roi_ytd_col = find_col(df, "ytd")
+
+# Normalize and show available columns in sidebar for debug
+st.sidebar.write("🧩 Detected Columns:", list(df.columns))
+
+# Try fuzzy matching for "Monthly" and "YTD"
+roi_monthly_col = next((i for i, c in enumerate(df.columns) if re.search(r"month", c, re.IGNORECASE)), None)
+roi_ytd_col = next((i for i, c in enumerate(df.columns) if re.search(r"ytd", c, re.IGNORECASE)), None)
 
 roi_monthly = num(df, roi_row, roi_monthly_col) if roi_monthly_col is not None else 0
 roi_ytd = num(df, roi_row, roi_ytd_col) if roi_ytd_col is not None else 0
+
+# Debug info in sidebar
+st.sidebar.write(f"ROI Row: {roi_row + 1}, Monthly Col: {roi_monthly_col}, YTD Col: {roi_ytd_col}")
+st.sidebar.write(f"ROI Monthly Value: {roi_monthly}, ROI YTD Value: {roi_ytd}")
+
 
 # -------------------------------
 # KPI SECTION
