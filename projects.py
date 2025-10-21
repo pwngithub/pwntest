@@ -41,6 +41,7 @@ def process_data(df):
     df_processed.dropna(subset=['Type'], inplace=True)
     df_processed['Type'] = df_processed['Type'].astype(str).str.replace(':', '', regex=False).str.strip().str.title()
 
+    # Filter out metadata rows (like "Last Edited")
     df_processed = df_processed[~df_processed['Type'].str.contains("Last Edited", case=False, na=False)]
 
     for col in ['Design', 'As Built']:
@@ -150,13 +151,15 @@ if raw_dataframe is not None:
                     top_performer_type = sorted_kpi_data.iloc[0]['Type']
 
                     for index, row in sorted_kpi_data.iterrows():
-                        with st.container(border=True, key=f"container_{index}"):
+                        # Note: st.container doesn't take a key; just show a bordered block
+                        with st.container(border=True):
                             if row['Type'] == top_performer_type:
                                 st.subheader(f'🏆 Top Performer: {row["Type"]}')
                             else:
                                 st.subheader(f'{row["Type"]}')
 
-                            st.progress(int(row['Completion %']), text=f"{row['Completion %']:.2f}%", key=f"progress_{index}")
+                            # st.progress does not support key; text is OK in newer Streamlit
+                            st.progress(int(row['Completion %']), text=f"{row['Completion %']:.2f}%")
 
                             kpi_c1, kpi_c2, kpi_c3 = st.columns(3)
                             kpi_c1.metric("Completion %", f"{row['Completion %']:.2f}%")
