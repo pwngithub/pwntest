@@ -4,13 +4,61 @@ import plotly.express as px
 import os
 import sqlite3
 from datetime import datetime
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+import tempfile
+import json
 
-# ----------------------------------------
-# SAFE INITIALIZATION
-# ----------------------------------------
+# -------------------------
+# Google Drive Upload Helper
+# -------------------------
+def upload_to_gdrive(local_path, filename):
+    """Upload local file to Google Drive using secrets credentials."""
+    try:
+        creds_json = json.loads(st.secrets["gdrive"]["client_config"])
+        with tempfile.NamedTemporaryFile("w", delete=False) as tmp_json:
+            json.dump(creds_json, tmp_json)
+            tmp_json.flush()
+            tmp_json_path = tmp_json.name
+
+        gauth = GoogleAuth()
+        gauth.LoadClientConfigFile(tmp_json_path)
+        gauth.LocalWebserverAuth()
+        drive = GoogleDrive(gauth)
+
+        # Ensure the target folder exists
+        folder_name = "PBB_WorkOrders"
+        folder_list = drive.ListFile({
+            'q': f"title='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        }).GetList()
+        if folder_list:
+            folder_id = folder_list[0]['id']
+        else:
+            folder = drive.CreateFile({
+                'title': folder_name,
+                'mimeType': 'application/vnd.google-apps.folder'
+            })
+            folder.Upload()
+            folder_id = folder['id']
+
+        # Upload the file
+        f = drive.CreateFile({'title': filename, 'parents': [{'id': folder_id}]})
+        f.SetContentFile(local_path)
+        f.Upload()
+        return f['alternateLink']
+
+    except Exception as e:
+        st.sidebar.error(f"Google Drive upload failed: {e}")
+        return None
+
+# -------------------------
+# Streamlit Page Config
+# -------------------------
 st.set_page_config(page_title="PBB Work Orders Dashboard", layout="wide", initial_sidebar_state="expanded")
 
-# Determine persistent path (works on Streamlit Cloud or locally)
+# -------------------------
+# Persistent Folder Setup
+# -------------------------
 if os.path.exists("/mount/data"):
     BASE_FOLDER = "/mount/data/pbb_workorders"
 else:
@@ -28,14 +76,15 @@ conn.execute("""
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         filename TEXT UNIQUE,
         path TEXT,
-        uploaded_at TEXT
+        uploaded_at TEXT,
+        gdrive_link TEXT
     )
 """)
 conn.commit()
 
-# ----------------------------------------
-# PAGE STYLING
-# ----------------------------------------
+# -------------------------
+# Style and Branding
+# -------------------------
 st.markdown("""
 <style>
 .stApp { background-color: #0E1117; }
@@ -58,9 +107,9 @@ st.markdown("""
 st.markdown("<h1 class='main-title'>🛠 Pioneer Broadband Work Orders Dashboard</h1>", unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# ----------------------------------------
-# SIDEBAR: FILE MANAGEMENT
-# ----------------------------------------
+# -------------------------
+# Sidebar File Management
+# -------------------------
 st.sidebar.header("📁 File Management")
 mode = st.sidebar.radio("Select Mode", ["Upload New File", "Load Existing File"])
 df = None
@@ -75,15 +124,24 @@ if mode == "Upload New File":
         try:
             with open(save_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
+
+            # Upload to Google Drive
+            gdrive_link = upload_to_gdrive(save_path, custom_filename + ".csv")
+
+            # Store metadata
             conn.execute(
-                "INSERT OR REPLACE INTO uploads (filename, path, uploaded_at) VALUES (?, ?, ?)",
-                (custom_filename + ".csv", save_path, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                "INSERT OR REPLACE INTO uploads (filename, path, uploaded_at, gdrive_link) VALUES (?, ?, ?, ?)",
+                (custom_filename + ".csv", save_path, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), gdrive_link)
             )
             conn.commit()
+
             st.sidebar.success(f"✅ File saved to: {save_path}")
+            if gdrive_link:
+                st.sidebar.markdown(f"[📂 View in Google Drive]({gdrive_link})")
+
             df = pd.read_csv(save_path)
         except Exception as e:
-            st.sidebar.error(f"❌ Error saving file: {e}")
+            st.sidebar.error(f"❌ Error saving or uploading file: {e}")
     elif uploaded_file and not custom_filename:
         st.sidebar.warning("Please enter a name before saving.")
 
@@ -96,40 +154,40 @@ elif mode == "Load Existing File":
 
     selected_file = st.sidebar.selectbox("Select a saved file to load", saved_files)
     if selected_file:
-        path_row = conn.execute("SELECT path FROM uploads WHERE filename=?", (selected_file,)).fetchone()
-        if path_row and os.path.exists(path_row[0]):
-            st.sidebar.info(f"📂 Loaded from: {path_row[0]}")
-            try:
-                df = pd.read_csv(path_row[0])
-            except Exception as e:
-                st.error(f"Error reading file: {e}")
+        row = conn.execute("SELECT path, gdrive_link FROM uploads WHERE filename=?", (selected_file,)).fetchone()
+        if row:
+            local_path, gdrive_link = row
+            if os.path.exists(local_path):
+                st.sidebar.info(f"📂 Loaded from: {local_path}")
+                if gdrive_link:
+                    st.sidebar.markdown(f"[🌐 View in Google Drive]({gdrive_link})")
+                df = pd.read_csv(local_path)
+            else:
+                st.sidebar.error("⚠️ File missing locally. Re-upload needed.")
                 st.stop()
-        else:
-            st.error("⚠️ File missing on disk. Please re-upload.")
-            st.stop()
 
-    # Delete File Option
+    # Delete file
     st.sidebar.markdown("---")
     st.sidebar.subheader("🗑 Delete a Saved File")
     file_to_delete = st.sidebar.selectbox("Select a file to delete", ["-"] + saved_files)
     if st.sidebar.button("Delete Selected File"):
         if file_to_delete and file_to_delete != "-":
-            path_row = conn.execute("SELECT path FROM uploads WHERE filename=?", (file_to_delete,)).fetchone()
-            if path_row and os.path.exists(path_row[0]):
-                os.remove(path_row[0])
+            row = conn.execute("SELECT path FROM uploads WHERE filename=?", (file_to_delete,)).fetchone()
+            if row and os.path.exists(row[0]):
+                os.remove(row[0])
             conn.execute("DELETE FROM uploads WHERE filename=?", (file_to_delete,))
             conn.commit()
             st.sidebar.success(f"'{file_to_delete}' deleted.")
             st.experimental_rerun()
 
-# --- Stop early if no DataFrame loaded ---
+# Stop early if no file loaded
 if df is None:
     st.info("Please upload or load a file to view data.")
     st.stop()
 
-# ----------------------------------------
-# DATA PROCESSING
-# ----------------------------------------
+# -------------------------
+# Data Processing
+# -------------------------
 df["Date When"] = pd.to_datetime(df["Date When"], errors="coerce")
 df = df.dropna(subset=["Date When"])
 df["Day"] = df["Date When"].dt.date
@@ -156,9 +214,9 @@ if df_filtered.empty:
     st.warning("No data for selected filters.")
     st.stop()
 
-# ----------------------------------------
+# -------------------------
 # KPI SECTION
-# ----------------------------------------
+# -------------------------
 st.markdown("### 📌 Key Performance Indicators")
 total_jobs = df_filtered["WO#"].nunique()
 duration_series = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
@@ -179,9 +237,9 @@ kpi4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
 kpi5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
 kpi6.metric("⏱️ Shortest Duration (hrs)", f"{min_duration:.2f}")
 
-# ----------------------------------------
+# -------------------------
 # CHARTS
-# ----------------------------------------
+# -------------------------
 grouped_overall = (df_filtered.groupby(["Technician", "Work Type"])
                    .agg(Total_Jobs=("WO#", "nunique"),
                         Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
