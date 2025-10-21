@@ -8,12 +8,11 @@ import altair as alt
 st.set_page_config(page_title="Project Dashboard", page_icon="🚀", layout="wide")
 
 # -----------------------------------------
-# SMOOTH RERUN / NO-FLICKER STYLE FIX
+# STYLE FIXES (SMOOTH + NO FLICKER)
 # -----------------------------------------
 st.markdown(
     """
     <style>
-    /* Prevent flicker or visible redraw on rerun */
     .stApp {
         transition: none !important;
         scroll-behavior: smooth !important;
@@ -46,20 +45,15 @@ if "header_loaded" not in st.session_state:
 # -----------------------------------------
 @st.cache_data(ttl=300)
 def load_data(sheet_url):
-    try:
-        csv_url = sheet_url.replace("/edit?usp=sharing", "/export?format=csv")
-        return pd.read_csv(csv_url, header=None)
-    except Exception as e:
-        st.error(f"Failed to load data. Error: {e}")
-        return None
-
+    """Load Google Sheet CSV data."""
+    csv_url = sheet_url.replace("/edit?usp=sharing", "/export?format=csv")
+    return pd.read_csv(csv_url, header=None)
 
 def process_data(df):
     df = df.copy()
     df.columns = df.columns.str.strip()
-    required = ["Type", "Design", "As Built"]
-    if not all(c in df.columns for c in required):
-        st.warning("Missing required columns.")
+    req = ["Type", "Design", "As Built"]
+    if not all(c in df.columns for c in req):
         return None
 
     df = df.dropna(subset=["Type"])
@@ -77,7 +71,6 @@ def process_data(df):
     out["Left to be Built"] = out["Design"] - out["As Built"]
     return out
 
-
 # -----------------------------------------
 # MAIN DASHBOARD
 # -----------------------------------------
@@ -91,11 +84,13 @@ def show_dashboard():
         st.warning("Could not load data.")
         return
 
+    # Timestamp display
     try:
         st.caption(f"Last Updated: {raw.iloc[6,0]}")
     except Exception:
         st.caption("No update timestamp found.")
 
+    # Header extraction
     try:
         header_idx = raw[raw[0] == "Type"].index[0]
         header = raw.iloc[header_idx].fillna("Unnamed")
@@ -112,7 +107,7 @@ def show_dashboard():
         st.warning("No valid data found.")
         return
 
-    # Sidebar filters
+    # --- Sidebar Filters ---
     st.sidebar.header("Controls")
     if st.sidebar.button("🔄 Refresh Data"):
         load_data.clear()
@@ -124,7 +119,7 @@ def show_dashboard():
     )
     kpi = kpi[kpi["Type"].isin(selected)]
 
-    # Overall KPIs
+    # --- Overall KPIs ---
     st.header("📊 Overall Project Health")
     total_d, total_b = kpi["Design"].sum(), kpi["As Built"].sum()
     total_l = kpi["Left to be Built"].sum()
@@ -137,9 +132,12 @@ def show_dashboard():
     c4.metric("Overall Completion", f"{overall:.2f}%")
     st.divider()
 
-    # Tabs for KPI vs details
-    tab1, tab2 = st.tabs(["📊 KPI Overview", "📄 Detailed Breakdown"])
+    # --- Tabs ---
+    tab1, tab2, tab3 = st.tabs(
+        ["📊 KPI Overview", "📄 Detailed Breakdown", "🔍 Raw Data Table"]
+    )
 
+    # --- KPI Overview ---
     with tab1:
         st.subheader("Completion Percentage by Type")
         if not kpi.empty:
@@ -156,6 +154,7 @@ def show_dashboard():
         else:
             st.info("No data to display.")
 
+    # --- Detailed Breakdown ---
     with tab2:
         st.subheader("Detailed Breakdown by Project Type")
         if not kpi.empty:
@@ -176,10 +175,22 @@ def show_dashboard():
         else:
             st.info("No data available.")
 
-    # Raw Data Table
-    with st.expander("🔍 View Raw Data Table"):
-        cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
-        st.dataframe(df[cols].fillna(""), use_container_width=True)
+    # --- Async Raw Data Viewer ---
+    with tab3:
+        st.subheader("Raw Data Table (Loaded on Demand)")
+        if "show_raw" not in st.session_state:
+            st.session_state["show_raw"] = False
+
+        if not st.session_state["show_raw"]:
+            if st.button("📂 Load Raw Data"):
+                st.session_state["show_raw"] = True
+                st.experimental_rerun()
+        else:
+            cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
+            st.dataframe(df[cols].fillna(""), use_container_width=True)
+            if st.button("❌ Hide Table"):
+                st.session_state["show_raw"] = False
+                st.experimental_rerun()
 
 
 # -----------------------------------------
