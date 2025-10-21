@@ -112,10 +112,10 @@ if raw_dataframe is not None:
             overall_completion = (total_as_built / total_design * 100) if total_design > 0 else 0
 
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Design", f"{total_design:,.0f}", key="total_design")
-            col2.metric("Total As Built", f"{total_as_built:,.0f}", key="total_asbuilt")
-            col3.metric("Left to be Built", f"{total_left:,.0f}", key="total_left")
-            col4.metric("Overall Completion", f"{overall_completion:.2f}%", key="overall_completion")
+            col1.metric("Total Design", f"{total_design:,.0f}")
+            col2.metric("Total As Built", f"{total_as_built:,.0f}")
+            col3.metric("Left to be Built", f"{total_left:,.0f}")
+            col4.metric("Overall Completion", f"{overall_completion:.2f}%")
 
             st.divider()
 
@@ -159,9 +159,9 @@ if raw_dataframe is not None:
                             st.progress(int(row['Completion %']), text=f"{row['Completion %']:.2f}%", key=f"progress_{index}")
 
                             kpi_c1, kpi_c2, kpi_c3 = st.columns(3)
-                            kpi_c1.metric("Completion %", f"{row['Completion %']:.2f}%", key=f"comp_{index}")
-                            kpi_c2.metric("As Built", f"{row['As Built']:,.2f}", key=f"asbuilt_{index}")
-                            kpi_c3.metric("Design Target", f"{row['Design']:,.2f}", key=f"design_{index}")
+                            kpi_c1.metric("Completion %", f"{row['Completion %']:.2f}%")
+                            kpi_c2.metric("As Built", f"{row['As Built']:,.2f}")
+                            kpi_c3.metric("Design Target", f"{row['Design']:,.2f}")
                 else:
                     st.info("No data to display for the selected project types.")
 
