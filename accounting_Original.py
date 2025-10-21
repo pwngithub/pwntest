@@ -9,40 +9,19 @@ import re
 st.set_page_config(page_title="Profit & Loss Dashboard", page_icon="💰", layout="wide")
 
 # -------------------------------
-# SIDEBAR: THEME TOGGLE
+# DARK MODE STYLING
 # -------------------------------
-if "dark_mode" not in st.session_state:
-    st.session_state["dark_mode"] = False  # default: light mode
-
-# Dynamic toggle label
-toggle_label = "🌙 Switch to Dark Mode" if not st.session_state["dark_mode"] else "☀️ Switch to Light Mode"
-
-if st.sidebar.button(toggle_label):
-    st.session_state["dark_mode"] = not st.session_state["dark_mode"]
-    st.rerun()  # instantly refresh the UI with the new theme
-
-# Apply color palette dynamically
-if st.session_state["dark_mode"]:
-    bg_color = "#000000"
-    text_color = "#FFFFFF"
-    card_bg = "#1c1c1c"
-    border_color = "#1e90ff"
-    logo_url = (
-        "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/"
-        "369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo+white.png?format=1500w"
-    )
-else:
-    bg_color = "#FFFFFF"
-    text_color = "#000000"
-    card_bg = "#ffffff"
-    border_color = "#0056b3"
-    logo_url = (
-        "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/"
-        "369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w"
-    )
+bg_color = "#000000"
+text_color = "#FFFFFF"
+card_bg = "#1c1c1c"
+border_color = "#1e90ff"
+logo_url = (
+    "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/"
+    "369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo+white.png?format=1500w"
+)
 
 # -------------------------------
-# GLOBAL BACKGROUND + FADE TRANSITION
+# GLOBAL BACKGROUND + FADE
 # -------------------------------
 st.markdown(
     f"""
@@ -80,7 +59,7 @@ st.markdown(
 )
 
 # -------------------------------
-# GOOGLE SHEETS CONFIG
+# GOOGLE SHEET CONFIG
 # -------------------------------
 SHEET_ID = "1iiBe4CLYPlr_kpIOuvzxLliwA0ferGtBRhtnMLfhOQg"
 
@@ -140,7 +119,7 @@ except Exception as e:
     st.stop()
 
 # -------------------------------
-# FIND KPI ROWS
+# HELPERS
 # -------------------------------
 def find_row(df, keys):
     col = df.iloc[:, 0].astype(str).str.lower()
@@ -158,11 +137,16 @@ def find_col(df, key):
 
 def num(df, r, c):
     try:
-        v = str(df.iat[r, c])
+        v = str(df.iat[r, c]).strip()
+        if "%" in v:
+            return float(v.replace("%", "").replace(",", "").replace("$", ""))
         return pd.to_numeric(v.replace(",", "").replace("$", ""), errors="coerce")
     except Exception:
         return 0
 
+# -------------------------------
+# KPI LOGIC
+# -------------------------------
 col_idx = find_col(df, "month") or 1
 ebitda_r = find_row(df, ["ebitda"])
 subs_r = find_row(df, ["users months", "user months"])
@@ -173,18 +157,27 @@ subs = num(df, subs_r, col_idx) if subs_r is not None else 0
 mrr = num(df, mrr_r, col_idx) if mrr_r is not None else 0
 arpu = (mrr / subs) if subs > 0 else 0
 
+# --- ROI values (row 55) ---
+roi_row = 54  # row 55 in the sheet (0-based index)
+roi_monthly_col = next((i for i, c in enumerate(df.columns) if re.search(r"month", c, re.IGNORECASE)), None)
+roi_ytd_col = next((i for i, c in enumerate(df.columns) if re.search(r"ytd", c, re.IGNORECASE)), None)
+
+roi_monthly = num(df, roi_row, roi_monthly_col) if roi_monthly_col is not None else 0
+roi_ytd = num(df, roi_row, roi_ytd_col) if roi_ytd_col is not None else 0
+
 # -------------------------------
-# KPI SECTION
+# KPI DISPLAY
 # -------------------------------
 st.markdown(f"<h2 style='color:{border_color};'>💼 Financial Performance – {selected_tab}</h2>", unsafe_allow_html=True)
 c1, c2, c3, c4 = st.columns(4)
 
-def kpi_box(label, value):
+def kpi_box(label, value, is_percent=False):
     try:
-        n = float(str(value).replace("$", "").replace(",", ""))
+        n = float(str(value).replace("%", "").replace("$", "").replace(",", ""))
     except:
         n = 0
     val_color = border_color if n >= 0 else "red"
+    formatted = f"{n:,.2f}%" if is_percent else f"${n:,.2f}"
     return f"""
     <div style="
         background-color:{card_bg};
@@ -194,17 +187,23 @@ def kpi_box(label, value):
         box-shadow:0px 2px 10px rgba(0,86,179,0.15);
         text-align:center;">
         <div style="font-weight:600;color:{text_color};">{label}</div>
-        <div style="font-size:1.5em;font-weight:700;color:{val_color};">{value}</div>
+        <div style="font-size:1.5em;font-weight:700;color:{val_color};">{formatted}</div>
     </div>
     """
 
-c1.markdown(kpi_box("Monthly Recurring Revenue (MRR)", f"${mrr:,.2f}"), unsafe_allow_html=True)
-c2.markdown(kpi_box("Subscriber Count", f"{subs:,.0f}"), unsafe_allow_html=True)
-c3.markdown(kpi_box("Average Revenue Per User (ARPU)", f"${arpu:,.2f}"), unsafe_allow_html=True)
-c4.markdown(kpi_box("EBITDA", f"${ebitda:,.2f}"), unsafe_allow_html=True)
+# Row 1
+c1.markdown(kpi_box("Monthly Recurring Revenue (MRR)", f"{mrr}", False), unsafe_allow_html=True)
+c2.markdown(kpi_box("Subscriber Count", f"{subs}", False), unsafe_allow_html=True)
+c3.markdown(kpi_box("Average Revenue Per User (ARPU)", f"{arpu}", False), unsafe_allow_html=True)
+c4.markdown(kpi_box("EBITDA", f"{ebitda}", False), unsafe_allow_html=True)
+
+# Row 2 – ROI
+r1, r2 = st.columns(2)
+r1.markdown(kpi_box("ROI Monthly", f"{roi_monthly}", True), unsafe_allow_html=True)
+r2.markdown(kpi_box("ROI Year To Date", f"{roi_ytd}", True), unsafe_allow_html=True)
 
 # -------------------------------
-# SIDEBAR OPTIONS
+# SIDEBAR OPTIONS + DOWNLOAD
 # -------------------------------
 st.sidebar.markdown("---")
 show_df = st.sidebar.checkbox("📋 Show Profit & Loss Sheet Preview", False)
@@ -212,15 +211,12 @@ if show_df:
     st.subheader(f"📋 Profit & Loss Sheet Preview – {selected_tab}")
     st.dataframe(df, use_container_width=True)
 
-# -------------------------------
-# DOWNLOAD BUTTON
-# -------------------------------
 st.subheader("⬇️ Download Data")
 csv = df.to_csv(index=False).encode("utf-8")
 st.download_button(f"Download {selected_tab} CSV", csv, f"{selected_tab}_profit_loss.csv", "text/csv")
 
 # -------------------------------
-# FIX: SIDEBAR + BUTTON COLORS (VISIBLE IN BOTH THEMES)
+# FIXED BUTTON COLORS
 # -------------------------------
 extra_css = f"""
 <style>
@@ -228,53 +224,12 @@ section[data-testid="stSidebar"] {{
     background-color: {bg_color} !important;
     color: {text_color} !important;
 }}
-
-/* === Toggle Background Theme button === */
-section[data-testid="stSidebar"] div.stButton > button {{
-    background-color: {'#ffffff' if not st.session_state['dark_mode'] else '#222222'} !important;
-    color: {'#0056b3' if not st.session_state['dark_mode'] else '#ffffff'} !important;
-    border: 2px solid {border_color} !important;
-    border-radius: 8px !important;
-    font-weight: 700 !important;
-    width: 100% !important;
-    padding: 0.6em 1em !important;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    transition: all 0.2s ease-in-out;
-}}
-section[data-testid="stSidebar"] div.stButton > button:hover {{
-    background-color: {border_color} !important;
-    color: #ffffff !important;
-    transform: scale(1.02);
-}}
-
-/* === Month dropdown styling === */
-div[data-baseweb="select"] > div {{
-    background-color: {card_bg} !important;
-    color: {text_color} !important;
-    border: 1.5px solid {border_color} !important;
-    border-radius: 6px !important;
-}}
-div[data-baseweb="select"] svg,
-section[data-testid="stSidebar"] svg,
-section[data-testid="stSidebar"] path {{
-    fill: {'#0056b3' if not st.session_state['dark_mode'] else '#ffffff'} !important;
-}}
-div[data-baseweb="select"] div {{
-    color: {text_color} !important;
-}}
-
-/* === Download button styling === */
 div[data-testid="stDownloadButton"] button {{
     background-color: {border_color} !important;
     color: #ffffff !important;
     border-radius: 8px !important;
     font-weight: 600 !important;
     border: none !important;
-    padding: 0.6em 1.2em !important;
-}}
-div[data-testid="stDownloadButton"] button:hover {{
-    background-color: #004080 !important;
-    color: #ffffff !important;
 }}
 </style>
 """
