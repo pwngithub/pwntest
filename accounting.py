@@ -9,37 +9,16 @@ import re
 st.set_page_config(page_title="Profit & Loss Dashboard", page_icon="💰", layout="wide")
 
 # -------------------------------
-# SIDEBAR: THEME TOGGLE
+# DARK MODE STYLING
 # -------------------------------
-if "dark_mode" not in st.session_state:
-    st.session_state["dark_mode"] = False
-
-toggle_label = "🌙 Switch to Dark Mode" if not st.session_state["dark_mode"] else "☀️ Switch to Light Mode"
-if st.sidebar.button(toggle_label):
-    st.session_state["dark_mode"] = not st.session_state["dark_mode"]
-    st.rerun()
-
-# -------------------------------
-# THEME COLORS
-# -------------------------------
-if st.session_state["dark_mode"]:
-    bg_color = "#000000"
-    text_color = "#FFFFFF"
-    card_bg = "#1c1c1c"
-    border_color = "#1e90ff"
-    logo_url = (
-        "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/"
-        "369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo+white.png?format=1500w"
-    )
-else:
-    bg_color = "#FFFFFF"
-    text_color = "#000000"
-    card_bg = "#ffffff"
-    border_color = "#0056b3"
-    logo_url = (
-        "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/"
-        "369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w"
-    )
+bg_color = "#000000"
+text_color = "#FFFFFF"
+card_bg = "#1c1c1c"
+border_color = "#1e90ff"
+logo_url = (
+    "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/"
+    "369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo+white.png?format=1500w"
+)
 
 # -------------------------------
 # GLOBAL BACKGROUND + FADE
@@ -166,7 +145,7 @@ def num(df, r, c):
         return 0
 
 # -------------------------------
-# FIND KPI ROWS
+# KPI LOGIC
 # -------------------------------
 col_idx = find_col(df, "month") or 1
 ebitda_r = find_row(df, ["ebitda"])
@@ -178,20 +157,16 @@ subs = num(df, subs_r, col_idx) if subs_r is not None else 0
 mrr = num(df, mrr_r, col_idx) if mrr_r is not None else 0
 arpu = (mrr / subs) if subs > 0 else 0
 
-# --- ROI values (row 55) robust detection ---
+# --- ROI values (row 55) ---
 roi_row = 54  # row 55 in the sheet (0-based index)
-
-# Try fuzzy matching for "Monthly" and "YTD"
 roi_monthly_col = next((i for i, c in enumerate(df.columns) if re.search(r"month", c, re.IGNORECASE)), None)
 roi_ytd_col = next((i for i, c in enumerate(df.columns) if re.search(r"ytd", c, re.IGNORECASE)), None)
 
 roi_monthly = num(df, roi_row, roi_monthly_col) if roi_monthly_col is not None else 0
 roi_ytd = num(df, roi_row, roi_ytd_col) if roi_ytd_col is not None else 0
 
-
-
 # -------------------------------
-# KPI SECTION
+# KPI DISPLAY
 # -------------------------------
 st.markdown(f"<h2 style='color:{border_color};'>💼 Financial Performance – {selected_tab}</h2>", unsafe_allow_html=True)
 c1, c2, c3, c4 = st.columns(4)
@@ -248,14 +223,6 @@ extra_css = f"""
 section[data-testid="stSidebar"] {{
     background-color: {bg_color} !important;
     color: {text_color} !important;
-}}
-section[data-testid="stSidebar"] div.stButton > button {{
-    background-color: {'#ffffff' if not st.session_state['dark_mode'] else '#222222'} !important;
-    color: {'#0056b3' if not st.session_state['dark_mode'] else '#ffffff'} !important;
-    border: 2px solid {border_color} !important;
-    border-radius: 8px !important;
-    font-weight: 700 !important;
-    width: 100% !important;
 }}
 div[data-testid="stDownloadButton"] button {{
     background-color: {border_color} !important;
