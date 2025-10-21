@@ -8,3 +8,7 @@ google-auth-oauthlib
 pillow>=10.0.0
 urllib3>=2.0.0
 matplotlib>=3.8.0
+import plotly.express
+import os
+import sqlite3
+from datetime import datetime
