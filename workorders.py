@@ -10,23 +10,24 @@ import tempfile
 import json
 
 # -------------------------
-# Google Drive Upload Helper
+# Google Drive Upload Helper (Service Account)
 # -------------------------
 def upload_to_gdrive(local_path, filename):
-    """Upload local file to Google Drive using secrets credentials."""
+    """Upload file to Google Drive using a service account stored in Streamlit Secrets."""
     try:
-        creds_json = json.loads(st.secrets["gdrive"]["client_config"])
+        creds_json = json.loads(st.secrets["gdrive_service"]["service_account_json"])
+
         with tempfile.NamedTemporaryFile("w", delete=False) as tmp_json:
             json.dump(creds_json, tmp_json)
             tmp_json.flush()
             tmp_json_path = tmp_json.name
 
         gauth = GoogleAuth()
-        gauth.LoadClientConfigFile(tmp_json_path)
-        gauth.LocalWebserverAuth()
+        gauth.LoadServiceConfigFile(tmp_json_path)
+        gauth.ServiceAuth()  # Authenticate with service account
         drive = GoogleDrive(gauth)
 
-        # Ensure the target folder exists
+        # Ensure folder exists
         folder_name = "PBB_WorkOrders"
         folder_list = drive.ListFile({
             'q': f"title='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
@@ -41,10 +42,11 @@ def upload_to_gdrive(local_path, filename):
             folder.Upload()
             folder_id = folder['id']
 
-        # Upload the file
+        # Upload the CSV file
         f = drive.CreateFile({'title': filename, 'parents': [{'id': folder_id}]})
         f.SetContentFile(local_path)
         f.Upload()
+
         return f['alternateLink']
 
     except Exception as e:
@@ -83,7 +85,7 @@ conn.execute("""
 conn.commit()
 
 # -------------------------
-# Style and Branding
+# Page Style & Branding
 # -------------------------
 st.markdown("""
 <style>
@@ -140,8 +142,10 @@ if mode == "Upload New File":
                 st.sidebar.markdown(f"[📂 View in Google Drive]({gdrive_link})")
 
             df = pd.read_csv(save_path)
+
         except Exception as e:
             st.sidebar.error(f"❌ Error saving or uploading file: {e}")
+
     elif uploaded_file and not custom_filename:
         st.sidebar.warning("Please enter a name before saving.")
 
@@ -166,7 +170,7 @@ elif mode == "Load Existing File":
                 st.sidebar.error("⚠️ File missing locally. Re-upload needed.")
                 st.stop()
 
-    # Delete file
+    # Delete file option
     st.sidebar.markdown("---")
     st.sidebar.subheader("🗑 Delete a Saved File")
     file_to_delete = st.sidebar.selectbox("Select a file to delete", ["-"] + saved_files)
