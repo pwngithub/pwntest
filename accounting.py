@@ -189,7 +189,7 @@ def kpi_box(label, value, is_percent=False, is_number=False):
         formatted = f"${n:,.2f}"
 
     return f"""
-    <div style="
+    <div class="kpi-card" style="
         background-color:{card_bg};
         border:2px solid {border_color};
         border-radius:12px;
@@ -200,12 +200,6 @@ def kpi_box(label, value, is_percent=False, is_number=False):
         <div style="font-weight:600;color:{text_color};margin-bottom:4px;">{label}</div>
         <div style="font-size:1.6em;font-weight:700;color:{val_color};">{formatted}</div>
     </div>
-    <style>
-    div:hover {{
-        box-shadow:0px 0px 18px rgba(30,144,255,0.45);
-        transform:scale(1.01);
-    }}
-    </style>
     """
 
 # Row 1
@@ -231,6 +225,22 @@ if show_df:
 st.subheader("⬇️ Download Data")
 csv = df.to_csv(index=False).encode("utf-8")
 st.download_button(f"Download {selected_tab} CSV", csv, f"{selected_tab}_profit_loss.csv", "text/csv")
+
+# -------------------------------
+# GLOBAL CSS FOR HOVER EFFECT
+# -------------------------------
+st.markdown(
+    """
+    <style>
+    .kpi-card:hover {
+        box-shadow: 0px 0px 18px rgba(30,144,255,0.45);
+        transform: scale(1.01);
+        cursor: pointer;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # -------------------------------
 # FIXED BUTTON COLORS
