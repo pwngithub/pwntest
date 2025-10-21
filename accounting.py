@@ -145,25 +145,48 @@ def num(df, r, c):
         return 0
 
 # -------------------------------
-# KPI LOGIC
+# KPI DISPLAY
 # -------------------------------
-col_idx = find_col(df, "month") or 1
-ebitda_r = find_row(df, ["ebitda"])
-subs_r = find_row(df, ["users months", "user months"])
-mrr_r = find_row(df, ["broadhub rev", "broadhub"])
+st.markdown(f"<h2 style='color:{border_color};'>💼 Financial Performance – {selected_tab}</h2>", unsafe_allow_html=True)
+c1, c2, c3, c4 = st.columns(4)
 
-ebitda = num(df, ebitda_r, col_idx) if ebitda_r is not None else 0
-subs = num(df, subs_r, col_idx) if subs_r is not None else 0
-mrr = num(df, mrr_r, col_idx) if mrr_r is not None else 0
-arpu = (mrr / subs) if subs > 0 else 0
+def kpi_box(label, value, is_percent=False, is_number=False):
+    try:
+        n = float(str(value).replace("%", "").replace("$", "").replace(",", ""))
+    except:
+        n = 0
+    val_color = border_color if n >= 0 else "red"
 
-# --- ROI values (row 55) ---
-roi_row = 54  # row 55 in the sheet (0-based index)
-roi_monthly_col = next((i for i, c in enumerate(df.columns) if re.search(r"month", c, re.IGNORECASE)), None)
-roi_ytd_col = next((i for i, c in enumerate(df.columns) if re.search(r"ytd", c, re.IGNORECASE)), None)
+    if is_percent:
+        formatted = f"{n:,.2f}%"
+    elif is_number:
+        formatted = f"{n:,.0f}"
+    else:
+        formatted = f"${n:,.2f}"
 
-roi_monthly = num(df, roi_row, roi_monthly_col) if roi_monthly_col is not None else 0
-roi_ytd = num(df, roi_row, roi_ytd_col) if roi_ytd_col is not None else 0
+    return f"""
+    <div style="
+        background-color:{card_bg};
+        border:2px solid {border_color};
+        border-radius:10px;
+        padding:14px;
+        box-shadow:0px 2px 10px rgba(0,86,179,0.15);
+        text-align:center;">
+        <div style="font-weight:600;color:{text_color};">{label}</div>
+        <div style="font-size:1.5em;font-weight:700;color:{val_color};">{formatted}</div>
+    </div>
+    """
+
+# Row 1
+c1.markdown(kpi_box("Monthly Recurring Revenue", f"{mrr}", False), unsafe_allow_html=True)
+c2.markdown(kpi_box("Subscriber Count", f"{subs}", False, is_number=True), unsafe_allow_html=True)
+c3.markdown(kpi_box("Average Revenue Per User", f"{arpu}", False), unsafe_allow_html=True)
+c4.markdown(kpi_box("EBITDA", f"{ebitda}", False), unsafe_allow_html=True)
+
+# Row 2 – ROI
+r1, r2 = st.columns(2)
+r1.markdown(kpi_box("ROI Monthly", f"{roi_monthly}", True), unsafe_allow_html=True)
+r2.markdown(kpi_box("ROI Year To Date", f"{roi_ytd}", True), unsafe_allow_html=True)
 
 # -------------------------------
 # KPI DISPLAY
