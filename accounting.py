@@ -168,33 +168,50 @@ roi_ytd = num(df, roi_row, roi_ytd_col) if roi_ytd_col is not None else 0
 # -------------------------------
 # KPI DISPLAY
 # -------------------------------
-st.markdown(f"<h2 style='color:{border_color};'>💼 Financial Performance – {selected_tab}</h2>", unsafe_allow_html=True)
+st.markdown(
+    f"<h2 style='color:{border_color};text-shadow:0px 0px 8px rgba(30,144,255,0.45);'>💼 Financial Performance – {selected_tab}</h2>",
+    unsafe_allow_html=True,
+)
 c1, c2, c3, c4 = st.columns(4)
 
-def kpi_box(label, value, is_percent=False):
+def kpi_box(label, value, is_percent=False, is_number=False):
     try:
         n = float(str(value).replace("%", "").replace("$", "").replace(",", ""))
     except:
         n = 0
     val_color = border_color if n >= 0 else "red"
-    formatted = f"{n:,.2f}%" if is_percent else f"${n:,.2f}"
+
+    if is_percent:
+        formatted = f"{n:,.2f}%"
+    elif is_number:
+        formatted = f"{n:,.0f}"
+    else:
+        formatted = f"${n:,.2f}"
+
     return f"""
     <div style="
         background-color:{card_bg};
         border:2px solid {border_color};
-        border-radius:10px;
-        padding:14px;
-        box-shadow:0px 2px 10px rgba(0,86,179,0.15);
-        text-align:center;">
-        <div style="font-weight:600;color:{text_color};">{label}</div>
-        <div style="font-size:1.5em;font-weight:700;color:{val_color};">{formatted}</div>
+        border-radius:12px;
+        padding:16px;
+        box-shadow:0px 0px 12px rgba(30,144,255,0.25);
+        text-align:center;
+        transition: all 0.3s ease-in-out;">
+        <div style="font-weight:600;color:{text_color};margin-bottom:4px;">{label}</div>
+        <div style="font-size:1.6em;font-weight:700;color:{val_color};">{formatted}</div>
     </div>
+    <style>
+    div:hover {{
+        box-shadow:0px 0px 18px rgba(30,144,255,0.45);
+        transform:scale(1.01);
+    }}
+    </style>
     """
 
 # Row 1
 c1.markdown(kpi_box("Monthly Recurring Revenue", f"{mrr}", False), unsafe_allow_html=True)
-c2.markdown(kpi_box("Subscriber Count", f"{subs}", False), unsafe_allow_html=True)
-c3.markdown(kpi_box("Average Revenue Per User ", f"{arpu}", False), unsafe_allow_html=True)
+c2.markdown(kpi_box("Subscriber Count", f"{subs}", False, is_number=True), unsafe_allow_html=True)
+c3.markdown(kpi_box("Average Revenue Per User", f"{arpu}", False), unsafe_allow_html=True)
 c4.markdown(kpi_box("EBITDA", f"{ebitda}", False), unsafe_allow_html=True)
 
 # Row 2 – ROI
