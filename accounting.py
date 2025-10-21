@@ -159,7 +159,6 @@ def find_col(df, key):
 def num(df, r, c):
     try:
         v = str(df.iat[r, c]).strip()
-        # Keep % formatting exactly as in sheet
         if "%" in v:
             return float(v.replace("%", "").replace(",", "").replace("$", ""))
         return pd.to_numeric(v.replace(",", "").replace("$", ""), errors="coerce")
@@ -179,8 +178,8 @@ subs = num(df, subs_r, col_idx) if subs_r is not None else 0
 mrr = num(df, mrr_r, col_idx) if mrr_r is not None else 0
 arpu = (mrr / subs) if subs > 0 else 0
 
-# --- ROI values (row 54) ---
-roi_row = 53
+# --- ROI values (row 55) ---
+roi_row = 54  # row 55 in the sheet (0-based index)
 roi_monthly_col = find_col(df, "monthly")
 roi_ytd_col = find_col(df, "ytd")
 
