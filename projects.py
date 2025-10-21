@@ -33,7 +33,7 @@ def display_header():
 # --- Data Loading and Processing ---
 @st.cache_data(ttl=300)
 def load_data(sheet_url):
-    """Loads data from a Google Sheet URL and converts it to a DataFrame."""
+    """Loads data from a Google Sheet URL. Returns None on failure."""
     try:
         csv_url = sheet_url.replace("/edit?usp=sharing", "/export?format=csv")
         return pd.read_csv(csv_url, header=None)
@@ -42,90 +42,83 @@ def load_data(sheet_url):
         return None
 
 def process_data(raw_df):
-    """Processes the raw DataFrame to find headers, clean data, and calculate KPIs."""
-    if raw_df is None:
+    """
+    Processes the raw DataFrame. Returns (clean_df, kpi_df).
+    Returns (None, None) on critical processing failure.
+    """
+    if raw_df is None or raw_df.empty:
         return None, None
 
-    # Dynamically find the header row containing "Type"
     try:
-        # Search for "Type" in any of the first few columns to be more robust
-        header_row_index = -1
-        for i, row in raw_df.head().iterrows():
-            if 'Type' in row.astype(str).str.strip().tolist():
-                header_row_index = i
-                break
-        if header_row_index == -1:
-            raise IndexError # Trigger the except block if not found
+        # 1. Find the header row by searching for the cell that contains 'Type'
+        header_row_filter = raw_df.apply(lambda r: r.astype(str).str.strip().eq('Type').any(), axis=1)
+        if not header_row_filter.any():
+            st.error("Processing Error: Could not find a header row containing the word 'Type'.")
+            return raw_df, None # Return raw data for debugging, but no kpi_df
 
-        header = raw_df.iloc[header_row_index].str.strip()
+        header_row_index = header_row_filter.idxmax()
+        
+        # 2. Set the header and create the main DataFrame
+        header = raw_df.iloc[header_row_index].str.strip().fillna('Unnamed')
         df = raw_df.iloc[header_row_index + 1 :].copy()
         df.columns = header
-        df = df.loc[:, ~df.columns.duplicated()] # Remove duplicate columns
-    except (IndexError, KeyError):
-        st.error("Header row with 'Type' column not found. Please check the sheet format.")
-        return None, None
-    
-    # Check for required columns
-    required_cols = [COL_TYPE, COL_DESIGN, COL_AS_BUILT]
-    if not all(col in df.columns for col in required_cols):
-        st.warning(f"Missing one or more required columns: {', '.join(required_cols)}")
-        return df, None
+        df = df.loc[:, ~df.columns.duplicated()]
 
-    # Clean and process data
-    df = df.dropna(subset=[COL_TYPE])
-    df[COL_TYPE] = df[COL_TYPE].astype(str).str.replace(":", "", regex=False).str.strip().str.title()
-    df = df[~df[COL_TYPE].str.contains("Last Edited", case=False, na=False)]
+        # 3. Check for required columns
+        required_cols = [COL_TYPE, COL_DESIGN, COL_AS_BUILT]
+        if not all(col in df.columns for col in required_cols):
+            st.error(f"Processing Error: Missing one or more required columns. Found: {list(df.columns)}. Required: {required_cols}")
+            return df, None
 
-    for col in [COL_DESIGN, COL_AS_BUILT]:
-        df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
+        # 4. Clean and process data
+        df = df.dropna(subset=[COL_TYPE])
+        df[COL_TYPE] = df[COL_TYPE].astype(str).str.replace(":", "", regex=False).str.strip().str.title()
+        df = df[~df[COL_TYPE].str.contains("Last Edited", case=False, na=False)]
 
-    # Aggregate data
-    kpi_df = df.groupby(COL_TYPE).agg({COL_DESIGN: "sum", COL_AS_BUILT: "sum"}).reset_index()
-    # Filter out rows where design is 0 to avoid division by zero issues
-    kpi_df = kpi_df[kpi_df[COL_DESIGN] > 0]
+        for col in [COL_DESIGN, COL_AS_BUILT]:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", ""), errors='coerce').fillna(0)
 
-    kpi_df[COL_COMPLETION] = (kpi_df[COL_AS_BUILT] / kpi_df[COL_DESIGN] * 100).clip(0, 100)
-    kpi_df[COL_LEFT_TO_BUILD] = kpi_df[COL_DESIGN] - kpi_df[COL_AS_BUILT]
-    
-    return df, kpi_df
+        # 5. Aggregate data for KPIs
+        kpi_df = df.groupby(COL_TYPE).agg({COL_DESIGN: "sum", COL_AS_BUILT: "sum"}).reset_index()
+        kpi_df = kpi_df[kpi_df[COL_DESIGN] > 0] # Avoid division by zero
+        
+        if kpi_df.empty:
+             st.warning("No data rows with a 'Design' value greater than 0 were found after processing.")
+             return df, kpi_df
+
+        kpi_df[COL_COMPLETION] = (kpi_df[COL_AS_BUILT] / kpi_df[COL_DESIGN] * 100).clip(0, 100)
+        kpi_df[COL_LEFT_TO_BUILD] = kpi_df[COL_DESIGN] - kpi_df[COL_AS_BUILT]
+        
+        return df, kpi_df
+
+    except Exception as e:
+        st.error(f"A critical error occurred during data processing: {e}")
+        return raw_df, None
+
 
 # --- UI Display Functions ---
-
 def display_sidebar(kpi_df):
-    """Renders the sidebar controls. Returns the filtered DataFrame."""
     st.sidebar.header("Controls")
     if st.sidebar.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
-    # Only show filters and download if data is available
     if kpi_df is not None and not kpi_df.empty:
         all_types = sorted(kpi_df[COL_TYPE].unique())
-        selected_types = st.sidebar.multiselect(
-            "Filter Project Type", options=all_types, default=all_types
-        )
+        selected_types = st.sidebar.multiselect("Filter Project Type", options=all_types, default=all_types)
         
-        # Download button
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             kpi_df.to_excel(writer, index=False, sheet_name='Summary')
         
-        st.sidebar.download_button(
-            label="📥 Download Data as Excel",
-            data=output.getvalue(),
-            file_name="project_kpi_summary.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        
+        st.sidebar.download_button("📥 Download Data as Excel", output.getvalue(), "project_kpi_summary.xlsx")
         return kpi_df[kpi_df[COL_TYPE].isin(selected_types)]
     else:
-        st.sidebar.info("No data to filter.")
-        return pd.DataFrame() # Return empty dataframe
+        st.sidebar.info("No data available to filter.")
+        return pd.DataFrame()
 
-def display_kpis(kpi_df):
-    """Displays the main KPI metrics at the top of the page."""
+def display_dashboard_content(kpi_df):
     st.header("📊 Overall Project Health")
-    
     total_design = kpi_df[COL_DESIGN].sum()
     total_built = kpi_df[COL_AS_BUILT].sum()
     total_left = kpi_df[COL_LEFT_TO_BUILD].sum()
@@ -138,47 +131,20 @@ def display_kpis(kpi_df):
     c4.metric("Overall Completion", f"{overall_completion:.2f}%")
     st.divider()
 
-def get_progress_color(percentage):
-    """Helper function to return a color based on completion percentage."""
-    if percentage >= 90:
-        return "green"
-    elif percentage >= 50:
-        return "orange"
-    else:
-        return "red"
-
-def display_tabs(kpi_df):
-    """Renders the two main content tabs: Overview Chart and Detailed Breakdown."""
     tab1, tab2 = st.tabs(["📊 KPI Overview", "📄 Detailed Breakdown"])
-    
     with tab1:
-        st.subheader("Completion % by Type")
-        chart = (
-            alt.Chart(kpi_df)
-            .mark_bar(color="#4A90E2")
-            .encode(
-                x=alt.X(f"{COL_COMPLETION}:Q", scale=alt.Scale(domain=[0, 100]), title="Completion %"),
-                y=alt.Y(f"{COL_TYPE}:N", sort="-x", title="Project Type"),
-                tooltip=[COL_TYPE, COL_COMPLETION, COL_AS_BUILT, COL_DESIGN],
-            )
+        chart = alt.Chart(kpi_df).mark_bar(color="#4A90E2").encode(
+            x=alt.X(f"{COL_COMPLETION}:Q", scale=alt.Scale(domain=[0, 100]), title="Completion %"),
+            y=alt.Y(f"{COL_TYPE}:N", sort="-x", title="Project Type"),
+            tooltip=[COL_TYPE, COL_COMPLETION, COL_AS_BUILT, COL_DESIGN],
         )
         st.altair_chart(chart, use_container_width=True)
-
     with tab2:
         st.subheader("Detailed Breakdown")
-        sorted_kpi = kpi_df.sort_values(by=COL_COMPLETION, ascending=False)
-        top_performer = sorted_kpi.iloc[0][COL_TYPE]
-        
-        for _, row in sorted_kpi.iterrows():
+        for _, row in kpi_df.sort_values(by=COL_COMPLETION, ascending=False).iterrows():
             st.markdown("---")
-            color = get_progress_color(row[COL_COMPLETION])
-            title = f"**{row[COL_TYPE]}**"
-            if row[COL_TYPE] == top_performer:
-                title = f"🏆 {title}"
-
-            st.markdown(f"<h4 style='color:{color};'>{title}</h4>", unsafe_allow_html=True)
+            st.markdown(f"**{row[COL_TYPE]}**")
             st.progress(int(row[COL_COMPLETION]), text=f"{row[COL_COMPLETION]:.2f}%")
-            
             c1, c2, c3 = st.columns(3)
             c1.metric("Completion %", f"{row[COL_COMPLETION]:.2f}%")
             c2.metric("As Built", f"{row[COL_AS_BUILT]:,.2f}")
@@ -186,36 +152,27 @@ def display_tabs(kpi_df):
 
 # --- Main App ---
 def main():
-    """Main function to run the Streamlit app."""
     display_header()
-
-    # --- Load and Process Data ---
     raw_df = load_data(GOOGLE_SHEET_URL)
+    
+    # Process data and handle potential errors
     clean_df, kpi_df = process_data(raw_df)
-
-    # --- Sidebar ---
-    # Display the sidebar and get the user's filtered selection
+    
+    # Display sidebar regardless of data state
     filtered_kpi = display_sidebar(kpi_df)
 
-    # --- Main Content Area ---
+    # Main content area logic
     if not filtered_kpi.empty:
-        # Display last updated time if possible
         try:
             st.caption(f"Last Updated: {raw_df.iloc[6,0]}")
-        except (IndexError, AttributeError):
-            pass # Silently fail if the cell doesn't exist
-
-        display_kpis(filtered_kpi)
-        display_tabs(filtered_kpi)
-
-        with st.expander("🔍 View Raw Cleaned Data Table"):
-            if clean_df is not None:
-                valid_cols = [c for c in clean_df.columns if not str(c).startswith("Unnamed") and clean_df[c].notna().any()]
-                st.dataframe(clean_df[valid_cols].fillna(""), use_container_width=True)
+        except: pass
+        display_dashboard_content(filtered_kpi)
     else:
-        # This message shows if data loading failed or if the user deselected all types
-        st.info("No data to display. Please check the data source or select a project type from the sidebar.")
-
-
+        st.info("No data to display. This could be due to a processing error or filter selection.")
+        # If processing failed, show the raw data to help the user debug their sheet
+        if clean_df is not None:
+            with st.expander("🔍 View Raw Loaded Data for Debugging"):
+                st.dataframe(clean_df)
+                
 if __name__ == "__main__":
     main()
