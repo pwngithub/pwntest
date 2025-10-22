@@ -169,7 +169,22 @@ def run_workorders_dashboard():
 
     st.markdown("---")
 
-    # --- Grouping ---
+    # --- Fastest Technician by Work Type ---
+    st.subheader("⚡ Fastest Technician by Work Type")
+    fastest_by_type = (
+        df_filtered.groupby(["Work Type", "Technician"])
+        .agg(Average_Duration=("Duration", lambda x: pd.to_numeric(
+            x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+        .reset_index()
+    )
+    # Get the fastest tech (lowest avg duration) per work type
+    fastest_by_type = fastest_by_type.loc[fastest_by_type.groupby("Work Type")["Average_Duration"].idxmin()].reset_index(drop=True)
+    fastest_by_type["Average_Duration"] = fastest_by_type["Average_Duration"].round(2)
+    st.dataframe(fastest_by_type, use_container_width=True)
+
+    st.markdown("---")
+
+    # --- Grouping for Charts ---
     grouped_overall = (df_filtered.groupby(["Technician", "Work Type"])
                        .agg(Total_Jobs=("WO#", "nunique"),
                             Average_Duration=("Duration", lambda x: pd.to_numeric(
@@ -227,12 +242,17 @@ def run_workorders_dashboard():
         st.subheader("Download Summary Data")
         csv_overall = grouped_overall.to_csv(index=False).encode('utf-8')
         csv_avg_duration = avg_duration_by_worktype.to_csv(index=False).encode('utf-8')
+        csv_fastest = fastest_by_type.to_csv(index=False).encode('utf-8')
 
         st.download_button("⬇️ Technician Summary CSV", data=csv_overall, file_name="workorders_summary.csv", mime="text/csv")
         st.download_button("⬇️ Avg Duration by Work Type CSV", data=csv_avg_duration, file_name="avg_duration_by_worktype.csv", mime="text/csv")
+        st.download_button("⬇️ Fastest Tech by Work Type CSV", data=csv_fastest, file_name="fastest_by_worktype.csv", mime="text/csv")
 
         st.markdown("### Technician Summary")
         st.dataframe(grouped_overall, use_container_width=True)
 
         st.markdown("### Overall Average Duration by Work Type")
         st.dataframe(avg_duration_by_worktype, use_container_width=True)
+
+        st.markdown("### Fastest Technician by Work Type")
+        st.dataframe(fastest_by_type, use_container_width=True)
