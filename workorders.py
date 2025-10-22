@@ -138,7 +138,7 @@ def run_workorders_dashboard():
         st.warning("No data available for the selected filters. Please adjust your selections.")
         return
 
-    # --- KPI Calculations ---
+    # --- KPIs ---
     st.markdown("### 📌 Key Performance Indicators")
     total_jobs = df_filtered["WO#"].nunique()
     duration_series = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
@@ -150,25 +150,8 @@ def run_workorders_dashboard():
     total_entries = df_filtered["WO#"].count()
     max_duration = duration_series.max() or 0
     min_duration = duration_series.min() or 0
-
-    avg_duration_by_worktype = (
-        df_filtered.groupby("Work Type")
-        .agg(Average_Duration=("Duration", lambda x: pd.to_numeric(
-            x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()),
-             Total_Jobs=("WO#", "nunique"))
-        .reset_index()
-    )
-
-    # --- Derived KPIs ---
-    top3_longest = avg_duration_by_worktype.nlargest(3, "Average_Duration")
-    longest_type = top3_longest.iloc[0]["Work Type"] if not top3_longest.empty else "N/A"
-    longest_time = top3_longest.iloc[0]["Average_Duration"] if not top3_longest.empty else 0
-    fastest_type = avg_duration_by_worktype.nsmallest(1, "Average_Duration")["Work Type"].values[0] if not avg_duration_by_worktype.empty else "N/A"
-    most_completed = avg_duration_by_worktype.nlargest(1, "Total_Jobs")["Work Type"].values[0] if not avg_duration_by_worktype.empty else "N/A"
-    duration_spread = max_duration - min_duration if max_duration and min_duration else 0
     jobs_per_day_per_tech = total_jobs / (num_days * tech_count) if tech_count and num_days else 0
 
-    # --- KPI Display ---
     kpi1, kpi2, kpi3 = st.columns(3)
     kpi1.metric("🔧 Total Jobs", total_jobs)
     kpi2.metric("👨‍🔧 Technicians", tech_count)
@@ -186,20 +169,7 @@ def run_workorders_dashboard():
 
     st.markdown("---")
 
-    # --- NEW ADVANCED KPIs ---
-    st.subheader("📊 Advanced KPIs")
-    colA, colB, colC, colD = st.columns(4)
-    colA.metric("🏆 Longest Avg Work Type", longest_type, f"{longest_time:.2f} hrs")
-    colB.metric("⚡ Fastest Work Type", fastest_type)
-    colC.metric("🧰 Most Completed Work Type", most_completed)
-    colD.metric("📉 Duration Spread", f"{duration_spread:.2f} hrs")
-
-    st.markdown("**Top 3 Longest Avg Durations:**")
-    st.dataframe(top3_longest, use_container_width=True)
-
-    st.markdown("---")
-
-    # --- Charts and Tables ---
+    # --- Grouping ---
     grouped_overall = (df_filtered.groupby(["Technician", "Work Type"])
                        .agg(Total_Jobs=("WO#", "nunique"),
                             Average_Duration=("Duration", lambda x: pd.to_numeric(
@@ -212,6 +182,13 @@ def run_workorders_dashboard():
                      Avg_Duration=("Duration", lambda x: pd.to_numeric(
                          x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
                 .reset_index())
+
+    avg_duration_by_worktype = (
+        df_filtered.groupby("Work Type")
+        .agg(Average_Duration=("Duration", lambda x: pd.to_numeric(
+            x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+        .reset_index()
+    )
 
     # --- Tabs ---
     tab1, tab2, tab3 = st.tabs(["📊 Job Charts", "🗂 Daily Breakout Table", "📤 Export Summary"])
