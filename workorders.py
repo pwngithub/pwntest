@@ -110,8 +110,6 @@ def run_workorders_dashboard():
     df["Date When"] = pd.to_datetime(df["Date When"], errors="coerce")
     df = df.dropna(subset=["Date When"])
     df["Day"] = df["Date When"].dt.date
-    df["Month"] = df["Date When"].dt.strftime("%B")  # Month name (e.g., January, February)
-    df["Month_Num"] = df["Date When"].dt.month       # Month number (for sorting)
 
     if "Techinician" in df.columns and "Technician" not in df.columns:
         df.rename(columns={"Techinician": "Technician"}, inplace=True)
@@ -121,18 +119,8 @@ def run_workorders_dashboard():
 
     # --- FILTERS ---
     st.subheader("F I L T E R S")
-
-    col_date, col_month = st.columns([2, 1])
-    with col_date:
-        start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
-    with col_month:
-        months_available = sorted(df["Month"].unique().tolist(), key=lambda m: df.loc[df["Month"] == m, "Month_Num"].iloc[0])
-        selected_month = st.selectbox("🗓 Filter by Month (Optional)", ["All"] + months_available)
-
-    # Apply filters
+    start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
     df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
-    if selected_month != "All":
-        df_filtered = df_filtered[df_filtered["Month"] == selected_month]
 
     if not df_filtered.empty:
         technician_list = sorted(df_filtered["Technician"].unique().tolist())
