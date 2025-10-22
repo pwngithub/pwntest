@@ -169,6 +169,20 @@ def run_workorders_dashboard():
 
     st.markdown("---")
 
+    # --- Summary Table: Jobs and Avg Duration per Work Type ---
+    st.subheader("📊 Summary by Work Type")
+    summary_by_worktype = (
+        df_filtered.groupby("Work Type")
+        .agg(Total_Jobs=("WO#", "nunique"),
+             Average_Duration=("Duration", lambda x: pd.to_numeric(
+                 x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+        .reset_index()
+    )
+    summary_by_worktype["Average_Duration"] = summary_by_worktype["Average_Duration"].round(2)
+    st.dataframe(summary_by_worktype, use_container_width=True)
+
+    st.markdown("---")
+
     # --- Grouping ---
     grouped_overall = (df_filtered.groupby(["Technician", "Work Type"])
                        .agg(Total_Jobs=("WO#", "nunique"),
@@ -227,12 +241,17 @@ def run_workorders_dashboard():
         st.subheader("Download Summary Data")
         csv_overall = grouped_overall.to_csv(index=False).encode('utf-8')
         csv_avg_duration = avg_duration_by_worktype.to_csv(index=False).encode('utf-8')
+        csv_summary = summary_by_worktype.to_csv(index=False).encode('utf-8')
 
         st.download_button("⬇️ Technician Summary CSV", data=csv_overall, file_name="workorders_summary.csv", mime="text/csv")
         st.download_button("⬇️ Avg Duration by Work Type CSV", data=csv_avg_duration, file_name="avg_duration_by_worktype.csv", mime="text/csv")
+        st.download_button("⬇️ Summary by Work Type CSV", data=csv_summary, file_name="summary_by_worktype.csv", mime="text/csv")
 
         st.markdown("### Technician Summary")
         st.dataframe(grouped_overall, use_container_width=True)
 
         st.markdown("### Overall Average Duration by Work Type")
         st.dataframe(avg_duration_by_worktype, use_container_width=True)
+
+        st.markdown("### Summary by Work Type")
+        st.dataframe(summary_by_worktype, use_container_width=True)
