@@ -169,14 +169,37 @@ def run_workorders_dashboard():
 
     st.markdown("---")
 
-    # --- Fastest Technician by Work Type ---
-    st.subheader("⚡ Fastest Technician by Work Type")
+        # --- Fastest Technician by Work Type (Graph) ---
+    st.subheader("⚡ Fastest Average Technician per Work Type")
+
+    # Calculate average duration by work type and technician
     fastest_by_type = (
         df_filtered.groupby(["Work Type", "Technician"])
         .agg(Average_Duration=("Duration", lambda x: pd.to_numeric(
             x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
         .reset_index()
     )
+
+    # Get the fastest tech (lowest avg duration) per work type
+    fastest_by_type = fastest_by_type.loc[fastest_by_type.groupby("Work Type")["Average_Duration"].idxmin()].reset_index(drop=True)
+    fastest_by_type["Average_Duration"] = fastest_by_type["Average_Duration"].round(2)
+
+    # --- Chart ---
+    fig_fastest = px.bar(
+        fastest_by_type.sort_values("Average_Duration"),
+        x="Average_Duration",
+        y="Work Type",
+        color="Technician",
+        orientation="h",
+        text=fastest_by_type["Average_Duration"],
+        title="⚡ Fastest Average Technician per Work Type",
+        template="plotly_dark",
+        color_discrete_sequence=px.colors.qualitative.Safe
+    )
+    fig_fastest.update_traces(textposition="outside")
+    fig_fastest.update_layout(title_font_color="#FFFFFF", yaxis_title="", xaxis_title="Average Duration (hrs)")
+    st.plotly_chart(fig_fastest, use_container_width=True)
+
     # Get the fastest tech (lowest avg duration) per work type
     fastest_by_type = fastest_by_type.loc[fastest_by_type.groupby("Work Type")["Average_Duration"].idxmin()].reset_index(drop=True)
     fastest_by_type["Average_Duration"] = fastest_by_type["Average_Duration"].round(2)
