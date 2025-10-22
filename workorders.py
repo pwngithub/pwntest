@@ -169,20 +169,6 @@ def run_workorders_dashboard():
 
     st.markdown("---")
 
-    # --- Summary Table: Jobs and Avg Duration per Work Type ---
-    st.subheader("📊 Summary by Work Type")
-    summary_by_worktype = (
-        df_filtered.groupby("Work Type")
-        .agg(Total_Jobs=("WO#", "nunique"),
-             Average_Duration=("Duration", lambda x: pd.to_numeric(
-                 x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-        .reset_index()
-    )
-    summary_by_worktype["Average_Duration"] = summary_by_worktype["Average_Duration"].round(2)
-    st.dataframe(summary_by_worktype, use_container_width=True)
-
-    st.markdown("---")
-
     # --- Grouping ---
     grouped_overall = (df_filtered.groupby(["Technician", "Work Type"])
                        .agg(Total_Jobs=("WO#", "nunique"),
@@ -203,6 +189,20 @@ def run_workorders_dashboard():
             x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
         .reset_index()
     )
+
+    # --- Collapsible Summary Section ---
+    with st.expander("📊 Summary by Work Type (Click to Expand)", expanded=False):
+        summary_by_worktype = (
+            df_filtered.groupby("Work Type")
+            .agg(Total_Jobs=("WO#", "nunique"),
+                 Average_Duration=("Duration", lambda x: pd.to_numeric(
+                     x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+            .reset_index()
+        )
+        summary_by_worktype["Average_Duration"] = summary_by_worktype["Average_Duration"].round(2)
+        st.dataframe(summary_by_worktype, use_container_width=True)
+
+    st.markdown("---")
 
     # --- Tabs ---
     tab1, tab2, tab3 = st.tabs(["📊 Job Charts", "🗂 Daily Breakout Table", "📤 Export Summary"])
@@ -252,6 +252,3 @@ def run_workorders_dashboard():
 
         st.markdown("### Overall Average Duration by Work Type")
         st.dataframe(avg_duration_by_worktype, use_container_width=True)
-
-        st.markdown("### Summary by Work Type")
-        st.dataframe(summary_by_worktype, use_container_width=True)
