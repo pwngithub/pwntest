@@ -13,12 +13,9 @@ def run_workorders_dashboard():
     # --- Custom CSS for Dark Theme KPI Cards and other styling ---
     st.markdown("""
     <style>
-    /* Main container styling for dark theme */
     .stApp {
         background-color: #0E1117;
     }
-
-    /* KPI Card styling for dark theme */
     div[data-testid="metric-container"] {
         background-color: #262730;
         border: 1px solid #3c3c3c;
@@ -62,7 +59,6 @@ def run_workorders_dashboard():
     os.makedirs(saved_folder, exist_ok=True)
 
     mode = st.sidebar.radio("Select Mode", ["Upload New File", "Load Existing File"], key="mode_select")
-    
     df = None
 
     if mode == "Upload New File":
@@ -80,7 +76,6 @@ def run_workorders_dashboard():
                 st.sidebar.error(f"Error saving or reading file: {e}")
         elif uploaded_file and not custom_filename:
             st.sidebar.warning("Please enter a file name to save.")
-
     else:
         saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
         if not saved_files:
@@ -115,7 +110,7 @@ def run_workorders_dashboard():
     df["Date When"] = pd.to_datetime(df["Date When"], errors="coerce")
     df = df.dropna(subset=["Date When"])
     df["Day"] = df["Date When"].dt.date
-    
+
     if "Techinician" in df.columns and "Technician" not in df.columns:
         df.rename(columns={"Techinician": "Technician"}, inplace=True)
 
@@ -231,7 +226,16 @@ def run_workorders_dashboard():
         st.dataframe(df_daily, use_container_width=True)
 
     with tab3:
-        st.subheader("Download Overall Summary Data")
-        csv = grouped_overall.to_csv(index=False).encode('utf-8')
-        st.download_button("Download Summary CSV", data=csv, file_name="workorders_summary.csv", mime="text/csv")
+        st.subheader("Download Summary Data")
+
+        csv_overall = grouped_overall.to_csv(index=False).encode('utf-8')
+        csv_avg_duration = avg_duration_by_worktype.to_csv(index=False).encode('utf-8')
+
+        st.download_button("⬇️ Download Technician Summary CSV", data=csv_overall, file_name="workorders_summary.csv", mime="text/csv")
+        st.download_button("⬇️ Download Avg Duration by Work Type CSV", data=csv_avg_duration, file_name="avg_duration_by_worktype.csv", mime="text/csv")
+
+        st.markdown("### Technician Summary")
         st.dataframe(grouped_overall, use_container_width=True)
+
+        st.markdown("### Overall Average Duration by Work Type")
+        st.dataframe(avg_duration_by_worktype, use_container_width=True)
