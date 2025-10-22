@@ -31,7 +31,7 @@ st.markdown(
 # -----------------------------------------
 # ONE-TIME HEADER
 # -----------------------------------------
-if "header_loaded" not in st.session_state:
+if "header_loaded" not in st.session_state or st.session_state.get("rerun_triggered", False):
     st.image(
         "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/"
         "369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w",
@@ -39,6 +39,7 @@ if "header_loaded" not in st.session_state:
     )
     st.title("🚀 Project Performance Dashboard")
     st.session_state["header_loaded"] = True
+    st.session_state["rerun_triggered"] = False
 
 # -----------------------------------------
 # DATA FUNCTIONS
@@ -47,7 +48,11 @@ if "header_loaded" not in st.session_state:
 def load_data(sheet_url):
     """Load Google Sheet CSV data."""
     csv_url = sheet_url.replace("/edit?usp=sharing", "/export?format=csv")
-    return pd.read_csv(csv_url, header=None)
+    try:
+        return pd.read_csv(csv_url, header=None)
+    except Exception as e:
+        st.error(f"Failed to load data: {e}")
+        return None
 
 def process_data(df):
     df = df.copy()
@@ -111,7 +116,8 @@ def show_dashboard():
     st.sidebar.header("Controls")
     if st.sidebar.button("🔄 Refresh Data"):
         load_data.clear()
-        st.rerun()
+        st.session_state["rerun_triggered"] = True
+        st.experimental_rerun()
 
     all_types = sorted(kpi["Type"].unique())
     selected = st.sidebar.multiselect(
@@ -184,14 +190,15 @@ def show_dashboard():
         if not st.session_state["show_raw"]:
             if st.button("📂 Load Raw Data"):
                 st.session_state["show_raw"] = True
+                st.session_state["rerun_triggered"] = True
                 st.experimental_rerun()
         else:
             cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
             st.dataframe(df[cols].fillna(""), use_container_width=True)
             if st.button("❌ Hide Table"):
                 st.session_state["show_raw"] = False
+                st.session_state["rerun_triggered"] = True
                 st.experimental_rerun()
-
 
 # -----------------------------------------
 # RUN APP
