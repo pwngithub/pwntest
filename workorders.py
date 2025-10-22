@@ -138,7 +138,7 @@ def run_workorders_dashboard():
         st.warning("No data available for the selected filters. Please adjust your selections.")
         return
 
-    # --- KPIs ---
+    # --- KPI Calculations ---
     st.markdown("### 📌 Key Performance Indicators")
     total_jobs = df_filtered["WO#"].nunique()
     duration_series = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
@@ -151,6 +151,24 @@ def run_workorders_dashboard():
     max_duration = duration_series.max() or 0
     min_duration = duration_series.min() or 0
 
+    avg_duration_by_worktype = (
+        df_filtered.groupby("Work Type")
+        .agg(Average_Duration=("Duration", lambda x: pd.to_numeric(
+            x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()),
+             Total_Jobs=("WO#", "nunique"))
+        .reset_index()
+    )
+
+    # --- Derived KPIs ---
+    top3_longest = avg_duration_by_worktype.nlargest(3, "Average_Duration")
+    longest_type = top3_longest.iloc[0]["Work Type"] if not top3_longest.empty else "N/A"
+    longest_time = top3_longest.iloc[0]["Average_Duration"] if not top3_longest.empty else 0
+    fastest_type = avg_duration_by_worktype.nsmallest(1, "Average_Duration")["Work Type"].values[0] if not avg_duration_by_worktype.empty else "N/A"
+    most_completed = avg_duration_by_worktype.nlargest(1, "Total_Jobs")["Work Type"].values[0] if not avg_duration_by_worktype.empty else "N/A"
+    duration_spread = max_duration - min_duration if max_duration and min_duration else 0
+    jobs_per_day_per_tech = total_jobs / (num_days * tech_count) if tech_count and num_days else 0
+
+    # --- KPI Display ---
     kpi1, kpi2, kpi3 = st.columns(3)
     kpi1.metric("🔧 Total Jobs", total_jobs)
     kpi2.metric("👨‍🔧 Technicians", tech_count)
@@ -159,16 +177,29 @@ def run_workorders_dashboard():
     kpi4, kpi5, kpi6 = st.columns(3)
     kpi4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
     kpi5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
-    kpi6.metric("⏱️ Shortest Duration (hrs)", f"{min_duration:.2f}")
-    
+    kpi6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
+
     kpi7, kpi8, kpi9 = st.columns(3)
-    kpi7.metric("🧾 Total Entries", total_entries)
-    kpi8.metric("📋 Unique Statuses", unique_statuses)
-    kpi9.metric("📆 Days Covered", num_days)
+    kpi7.metric("📋 Unique Statuses", unique_statuses)
+    kpi8.metric("📆 Days Covered", num_days)
+    kpi9.metric("🧮 Jobs per Day per Tech", f"{jobs_per_day_per_tech:.2f}")
 
     st.markdown("---")
 
-    # --- Grouping ---
+    # --- NEW ADVANCED KPIs ---
+    st.subheader("📊 Advanced KPIs")
+    colA, colB, colC, colD = st.columns(4)
+    colA.metric("🏆 Longest Avg Work Type", longest_type, f"{longest_time:.2f} hrs")
+    colB.metric("⚡ Fastest Work Type", fastest_type)
+    colC.metric("🧰 Most Completed Work Type", most_completed)
+    colD.metric("📉 Duration Spread", f"{duration_spread:.2f} hrs")
+
+    st.markdown("**Top 3 Longest Avg Durations:**")
+    st.dataframe(top3_longest, use_container_width=True)
+
+    st.markdown("---")
+
+    # --- Charts and Tables ---
     grouped_overall = (df_filtered.groupby(["Technician", "Work Type"])
                        .agg(Total_Jobs=("WO#", "nunique"),
                             Average_Duration=("Duration", lambda x: pd.to_numeric(
@@ -190,24 +221,15 @@ def run_workorders_dashboard():
         fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
                       color="Technician", title="Jobs by Work Type & Technician",
                       template="plotly_dark")
-        fig1.update_layout(title_font_color="#FFFFFF")
         st.plotly_chart(fig1, use_container_width=True)
 
         st.subheader("Average Duration by Work Type & Technician")
         fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
                       color="Technician", title="Avg Duration by Work Type & Technician",
                       template="plotly_dark")
-        fig2.update_layout(title_font_color="#FFFFFF")
         st.plotly_chart(fig2, use_container_width=True)
 
-        # --- NEW: Overall Average Duration by Work Type (All Technicians Combined) ---
         st.subheader("Overall Average Duration by Work Type (All Technicians Combined)")
-        avg_duration_by_worktype = (
-            df_filtered.groupby("Work Type")
-            .agg(Average_Duration=("Duration", lambda x: pd.to_numeric(
-                x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-            .reset_index()
-        )
         fig3 = px.bar(
             avg_duration_by_worktype,
             x="Work Type",
@@ -219,7 +241,6 @@ def run_workorders_dashboard():
             color_continuous_scale="Viridis"
         )
         fig3.update_traces(textposition="outside")
-        fig3.update_layout(title_font_color="#FFFFFF")
         st.plotly_chart(fig3, use_container_width=True)
 
     with tab2:
@@ -227,12 +248,11 @@ def run_workorders_dashboard():
 
     with tab3:
         st.subheader("Download Summary Data")
-
         csv_overall = grouped_overall.to_csv(index=False).encode('utf-8')
         csv_avg_duration = avg_duration_by_worktype.to_csv(index=False).encode('utf-8')
 
-        st.download_button("⬇️ Download Technician Summary CSV", data=csv_overall, file_name="workorders_summary.csv", mime="text/csv")
-        st.download_button("⬇️ Download Avg Duration by Work Type CSV", data=csv_avg_duration, file_name="avg_duration_by_worktype.csv", mime="text/csv")
+        st.download_button("⬇️ Technician Summary CSV", data=csv_overall, file_name="workorders_summary.csv", mime="text/csv")
+        st.download_button("⬇️ Avg Duration by Work Type CSV", data=csv_avg_duration, file_name="avg_duration_by_worktype.csv", mime="text/csv")
 
         st.markdown("### Technician Summary")
         st.dataframe(grouped_overall, use_container_width=True)
