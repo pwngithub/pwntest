@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -27,25 +26,19 @@ def run_workorders_dashboard():
         border-radius: 10px;
         box-shadow: 0 4px 8px rgba(0,0,0,0.4);
         transition: transform 0.2s;
-        color: #FAFAFA; /* Ensure text inside is light */
+        color: #FAFAFA;
     }
     div[data-testid="metric-container"]:hover {
         transform: scale(1.05);
-        border-color: #8BC53F; /* Highlight color from your original charts */
+        border-color: #8BC53F;
     }
-    
-    /* Ensure metric labels are a lighter gray */
     div[data-testid="metric-container"] > label {
         color: #A0A0A0;
     }
-
-    /* Center align the logo */
     .logo-container {
         text-align: center;
         margin-bottom: 20px;
     }
-    
-    /* Main title styling for dark theme */
     .main-title {
         color: #FFFFFF;
         text-align: center;
@@ -70,7 +63,7 @@ def run_workorders_dashboard():
 
     mode = st.sidebar.radio("Select Mode", ["Upload New File", "Load Existing File"], key="mode_select")
     
-    df = None # Initialize dataframe as None
+    df = None
 
     if mode == "Upload New File":
         uploaded_file = st.sidebar.file_uploader("Upload Technician Workflow CSV", type=["csv"])
@@ -88,7 +81,7 @@ def run_workorders_dashboard():
         elif uploaded_file and not custom_filename:
             st.sidebar.warning("Please enter a file name to save.")
 
-    else:  # Load from existing saved files
+    else:
         saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
         if not saved_files:
             st.warning("No saved files found. Please upload one first.")
@@ -102,7 +95,6 @@ def run_workorders_dashboard():
                 st.error(f"Error loading file: {e}")
                 return
 
-        # --- File Deletion Section in Sidebar ---
         st.sidebar.markdown("---")
         st.sidebar.markdown("### 🗑 Delete a Saved File")
         file_to_delete = st.sidebar.selectbox("Select a file to delete", ["-"] + saved_files, key="delete_file")
@@ -114,7 +106,7 @@ def run_workorders_dashboard():
             else:
                 st.sidebar.warning("Please select a valid file to delete.")
 
-    # --- Main Dashboard Area (only if a dataframe is loaded) ---
+    # --- Main Dashboard Area ---
     if df is None:
         st.info("Please upload a new file or select an existing one from the sidebar to begin.")
         return
@@ -133,11 +125,8 @@ def run_workorders_dashboard():
     # --- FILTERS ---
     st.subheader("F I L T E R S")
     start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
-    
-    # Apply date filter first
     df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
-    # Create new filters based on the date-filtered data
     if not df_filtered.empty:
         technician_list = sorted(df_filtered["Technician"].unique().tolist())
         work_type_list = sorted(df_filtered["Work Type"].unique().tolist())
@@ -148,15 +137,13 @@ def run_workorders_dashboard():
         with col2:
             selected_work_types = st.multiselect("📋 Select Work Type(s)", work_type_list, default=work_type_list)
         
-        # Apply the new filters
         df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
 
-    # --- Check if there's any data left after filtering ---
     if df_filtered.empty:
         st.warning("No data available for the selected filters. Please adjust your selections.")
         return
 
-    # --- KPIs (Calculated from the FINAL filtered dataframe) ---
+    # --- KPIs ---
     st.markdown("### 📌 Key Performance Indicators")
     total_jobs = df_filtered["WO#"].nunique()
     duration_series = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
@@ -186,19 +173,21 @@ def run_workorders_dashboard():
 
     st.markdown("---")
 
-    # --- Data Grouping (using the FINAL filtered dataframe) ---
+    # --- Grouping ---
     grouped_overall = (df_filtered.groupby(["Technician", "Work Type"])
                        .agg(Total_Jobs=("WO#", "nunique"),
-                            Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+                            Average_Duration=("Duration", lambda x: pd.to_numeric(
+                                x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
                        .reset_index())
     
     df_daily = (df_filtered.groupby(["Technician", "Day", "Work Type"])
                 .agg(Jobs_Completed=("WO#", "nunique"),
                      Total_Entries=("WO#", "count"),
-                     Avg_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+                     Avg_Duration=("Duration", lambda x: pd.to_numeric(
+                         x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
                 .reset_index())
 
-    # --- Visualizations and Data Tables using Tabs ---
+    # --- Tabs ---
     tab1, tab2, tab3 = st.tabs(["📊 Job Charts", "🗂 Daily Breakout Table", "📤 Export Summary"])
 
     with tab1:
@@ -209,12 +198,34 @@ def run_workorders_dashboard():
         fig1.update_layout(title_font_color="#FFFFFF")
         st.plotly_chart(fig1, use_container_width=True)
 
-        st.subheader("Average Duration by Work Type")
+        st.subheader("Average Duration by Work Type & Technician")
         fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
                       color="Technician", title="Avg Duration by Work Type & Technician",
                       template="plotly_dark")
         fig2.update_layout(title_font_color="#FFFFFF")
         st.plotly_chart(fig2, use_container_width=True)
+
+        # --- NEW: Overall Average Duration by Work Type (All Technicians Combined) ---
+        st.subheader("Overall Average Duration by Work Type (All Technicians Combined)")
+        avg_duration_by_worktype = (
+            df_filtered.groupby("Work Type")
+            .agg(Average_Duration=("Duration", lambda x: pd.to_numeric(
+                x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+            .reset_index()
+        )
+        fig3 = px.bar(
+            avg_duration_by_worktype,
+            x="Work Type",
+            y="Average_Duration",
+            title="Overall Average Duration by Work Type",
+            text=avg_duration_by_worktype["Average_Duration"].round(2),
+            template="plotly_dark",
+            color="Average_Duration",
+            color_continuous_scale="Viridis"
+        )
+        fig3.update_traces(textposition="outside")
+        fig3.update_layout(title_font_color="#FFFFFF")
+        st.plotly_chart(fig3, use_container_width=True)
 
     with tab2:
         st.dataframe(df_daily, use_container_width=True)
