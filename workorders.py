@@ -271,33 +271,6 @@ def run_workorders_dashboard():
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Create pivot of average duration (hrs)
-                df_filtered["Duration_Num"] = pd.to_numeric(
-                    df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0],
-                    errors="coerce"
-                )
-
-                pivot_table = (
-                    df_filtered.pivot_table(
-                        index="Technician",
-                        columns="Work Type",
-                        values="Duration_Num",
-                        aggfunc="mean"
-                    )
-                    .round(2)
-                    .fillna(0)
-                )
-
-                # Sort technicians by overall average duration
-                pivot_table["Overall Avg (hrs)"] = pivot_table.mean(axis=1)
-                pivot_table = pivot_table.sort_values("Overall Avg (hrs)", ascending=False)
-
-                st.dataframe(
-                    pivot_table.style.format("{:.2f}").background_gradient(
-                        cmap="viridis", axis=None
-                    ),
-                    use_container_width=True
-                )
 
 
     # =====================================================
