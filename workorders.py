@@ -224,6 +224,43 @@ def run_workorders_dashboard():
                               title="Jobs by Work Type & Technician", template="plotly_dark")
                 st.plotly_chart(fig1, use_container_width=True)
 
+                    # --- Average Duration per Technician per Work Type Table ---
+                st.markdown("""
+                <div style='margin-top:25px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
+                            background:linear-gradient(90deg, #1c1c1c 0%, #8BC53F 100%);'>
+                    <h4 style='color:white; margin:0;'>👨‍🔧 Average Duration per Technician per Work Order Type (hrs)</h4>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Create pivot of average duration (hrs)
+                df_filtered["Duration_Num"] = pd.to_numeric(
+                    df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0],
+                    errors="coerce"
+                )
+
+                pivot_table = (
+                    df_filtered.pivot_table(
+                        index="Technician",
+                        columns="Work Type",
+                        values="Duration_Num",
+                        aggfunc="mean"
+                    )
+                    .round(2)
+                    .fillna(0)
+                )
+
+                # Sort technicians by overall average duration
+                pivot_table["Overall Avg (hrs)"] = pivot_table.mean(axis=1)
+                pivot_table = pivot_table.sort_values("Overall Avg (hrs)", ascending=False)
+
+                st.dataframe(
+                    pivot_table.style.format("{:.2f}").background_gradient(
+                        cmap="viridis", axis=None
+                    ),
+                    use_container_width=True
+                )
+
+
     # =====================================================
     # 🔁 INSTALLATION REWORK SECTION
     # =====================================================
