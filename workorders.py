@@ -83,10 +83,16 @@ def run_workorders_dashboard():
         st.info("Please upload or load a Work Orders file to begin.")
         return
 
-    # --- Data Processing ---
-    df["Date When"] = pd.to_datetime(df["Date When"], errors="coerce")
-    df = df.dropna(subset=["Date When"])
-    df["Day"] = df["Date When"].dt.date
+    # --- Auto-detect date column ---
+    date_cols = [col for col in df.columns if str(col).lower() in ["date when", "date", "work date", "completed", "completion date"]]
+    if not date_cols:
+        st.error("No date column found. Please include a 'Date When', 'Date', or 'Completed' column in your CSV.")
+        st.stop()
+
+    date_col = date_cols[0]
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    df = df.dropna(subset=[date_col])
+    df["Day"] = df[date_col].dt.date
 
     if "Techinician" in df.columns and "Technician" not in df.columns:
         df.rename(columns={"Techinician": "Technician"}, inplace=True)
@@ -132,7 +138,7 @@ def run_workorders_dashboard():
     k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
     k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
 
-    # --- Grouping for Charts ---
+    # --- Charts ---
     grouped_overall = (
         df_filtered.groupby(["Technician", "Work Type"])
         .agg(Total_Jobs=("WO#", "nunique"),
@@ -140,13 +146,6 @@ def run_workorders_dashboard():
         .reset_index()
     )
 
-    avg_duration_by_worktype = (
-        df_filtered.groupby("Work Type")
-        .agg(Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-        .reset_index()
-    )
-
-    # --- Charts ---
     st.subheader("📊 Work Orders Charts")
     fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
                   color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
@@ -186,7 +185,7 @@ def run_workorders_dashboard():
         else:
             st.sidebar.warning("No saved files found for Installation Rework.")
 
-        # --- Parse Installation Rework File ---
+    # --- Parse Installation Rework File ---
     if df_rework is not None and not df_rework.empty:
         try:
             parsed_rows = []
@@ -194,7 +193,6 @@ def run_workorders_dashboard():
             for _, row in df_rework.iterrows():
                 values = row.tolist()
 
-                # Detect Install rows
                 if str(row[1]).startswith("Install"):
                     base_subset = [values[i] for i in [0, 2, 3, 4] if i < len(values)]
                 else:
@@ -205,10 +203,7 @@ def run_workorders_dashboard():
 
                 parsed_rows.append(base_subset)
 
-            # Convert to DataFrame
             df_combined = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Installations", "Rework", "Rework_Percentage"])
-
-            # Clean & Convert
             df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
             df_combined["Total_Installations"] = pd.to_numeric(df_combined["Total_Installations"], errors="coerce")
             df_combined["Rework"] = pd.to_numeric(df_combined["Rework"], errors="coerce")
@@ -220,9 +215,7 @@ def run_workorders_dashboard():
             )
             df_combined["Rework_Percentage"] = pd.to_numeric(df_combined["Rework_Percentage"], errors="coerce")
 
-            # =============================
-            # 📊 Installation Rework KPIs
-            # =============================
+            # --- KPIs ---
             st.markdown("### 📌 Installation Rework KPIs")
             total_jobs_rw = df_combined["Total_Installations"].sum()
             total_repeats = df_combined["Rework"].sum()
@@ -233,21 +226,18 @@ def run_workorders_dashboard():
             c2.metric("🔁 Total Reworks", int(total_repeats))
             c3.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
 
-            # =============================
-            # 🧾 Installation Rework Summary Table (with Heatmap)
-            # =============================
+            # --- Visualized Table ---
             st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
 
             def color_rework(val):
-                """Color scale: green (good) → yellow (mid) → red (high)."""
                 if pd.isna(val):
                     return ''
                 elif val < 5:
-                    return 'background-color: #3CB371; color: white;'  # green
+                    return 'background-color: #3CB371; color: white;'
                 elif val < 10:
-                    return 'background-color: #FFD700; color: black;'  # yellow
+                    return 'background-color: #FFD700; color: black;'
                 else:
-                    return 'background-color: #FF6347; color: white;'  # red
+                    return 'background-color: #FF6347; color: white;'
 
             styled_table = (
                 df_combined.style
@@ -258,14 +248,10 @@ def run_workorders_dashboard():
                     'Rework': '{:.0f}'
                 })
             )
-
             st.dataframe(styled_table, use_container_width=True)
 
-            # =============================
-            # 📊 Bubble Chart: Total Installations vs Rework %
-            # =============================
+            # --- Bubble Chart ---
             st.markdown("### 📊 Installation Rework Bubble Chart")
-
             fig_bubble = px.scatter(
                 df_combined,
                 x="Technician",
