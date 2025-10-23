@@ -27,9 +27,7 @@ def run_workorders_dashboard():
         transform: scale(1.05);
         border-color: #8BC53F;
     }
-    div[data-testid="metric-container"] > label {
-        color: #A0A0A0;
-    }
+    div[data-testid="metric-container"] > label {color: #A0A0A0;}
     .logo-container {text-align:center;margin-bottom:20px;}
     .main-title {color:#FFFFFF;text-align:center;font-weight:bold;}
     </style>
@@ -161,34 +159,34 @@ def run_workorders_dashboard():
     st.markdown("---")
 
     # =====================================================
-    # SECTION 2: TECHNICIAN RE-WORK ANALYSIS
+    # SECTION 2: INSTALLATION REWORK ANALYSIS
     # =====================================================
-    st.markdown("<h2 style='color:#8BC53F;'>🔁 Technician Re-Work Analysis</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color:#8BC53F;'>🔁 Installation Rework Analysis</h2>", unsafe_allow_html=True)
 
-    re_mode = st.sidebar.radio("Select Mode for Re-Work File", ["Upload New Re-Work File", "Load Existing Re-Work File"], key="re_mode")
+    re_mode = st.sidebar.radio("Select Mode for Installation Rework File", ["Upload New File", "Load Existing File"], key="re_mode")
     df_rework = None
 
-    if re_mode == "Upload New Re-Work File":
-        re_file = st.sidebar.file_uploader("Upload Technician Assessment File (CSV or TXT)", type=["csv", "txt"])
+    if re_mode == "Upload New File":
+        re_file = st.sidebar.file_uploader("Upload Installation Assessment File (CSV or TXT)", type=["csv", "txt"])
         re_filename = st.sidebar.text_input("Enter name to save (no extension):", key="re_filename")
 
         if re_file and re_filename:
             save_path = os.path.join(saved_folder, re_filename + ".csv")
             with open(save_path, "wb") as f:
                 f.write(re_file.getbuffer())
-            st.sidebar.success(f"Re-Work File saved as: {re_filename}.csv")
+            st.sidebar.success(f"File saved as: {re_filename}.csv")
             df_rework = pd.read_csv(save_path, header=None)
         elif re_file:
             st.sidebar.warning("Please enter a file name to save.")
     else:
         saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
         if saved_files:
-            selected_re_file = st.sidebar.selectbox("Select saved Re-Work file", saved_files, key="re_select")
+            selected_re_file = st.sidebar.selectbox("Select saved file", saved_files, key="re_select")
             df_rework = pd.read_csv(os.path.join(saved_folder, selected_re_file), header=None)
         else:
-            st.sidebar.warning("No saved files found for Re-Work.")
+            st.sidebar.warning("No saved files found for Installation Rework.")
 
-    # --- Parse Re-Work File ---
+    # --- Parse Installation Rework File ---
     if df_rework is not None and not df_rework.empty:
         try:
             parsed_rows = []
@@ -208,11 +206,11 @@ def run_workorders_dashboard():
                 parsed_rows.append(base_subset)
 
             # Convert to DataFrame
-            df_combined = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Jobs", "Rework", "Rework_Percentage"])
+            df_combined = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Installations", "Rework", "Rework_Percentage"])
 
             # Clean & Convert
             df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
-            df_combined["Total_Jobs"] = pd.to_numeric(df_combined["Total_Jobs"], errors="coerce")
+            df_combined["Total_Installations"] = pd.to_numeric(df_combined["Total_Installations"], errors="coerce")
             df_combined["Rework"] = pd.to_numeric(df_combined["Rework"], errors="coerce")
             df_combined["Rework_Percentage"] = (
                 df_combined["Rework_Percentage"].astype(str)
@@ -223,33 +221,33 @@ def run_workorders_dashboard():
             df_combined["Rework_Percentage"] = pd.to_numeric(df_combined["Rework_Percentage"], errors="coerce")
 
             # =============================
-            # 📊 Main Rework KPIs
+            # 📊 Installation Rework KPIs
             # =============================
-            st.markdown("### 📌 Re-Work KPIs")
-            total_jobs_rw = df_combined["Total_Jobs"].sum()
+            st.markdown("### 📌 Installation Rework KPIs")
+            total_jobs_rw = df_combined["Total_Installations"].sum()
             total_repeats = df_combined["Rework"].sum()
             avg_repeat_pct = df_combined["Rework_Percentage"].mean()
 
             c1, c2, c3 = st.columns(3)
-            c1.metric("🔧 Total Jobs", int(total_jobs_rw))
+            c1.metric("🏗️ Total Installations", int(total_jobs_rw))
             c2.metric("🔁 Total Reworks", int(total_repeats))
             c3.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
 
             # =============================
-            # 🧾 Re-Work Summary Table
+            # 🧾 Rework Summary Table
             # =============================
-            st.markdown("### 🧾 Re-Work Summary Table")
+            st.markdown("### 🧾 Installation Rework Summary Table")
             st.dataframe(df_combined, use_container_width=True)
 
             # =============================
-            # 📊 Re-Work % Chart
+            # 📊 Rework % Chart
             # =============================
-            st.markdown("### 📊 Re-Work % by Technician")
+            st.markdown("### 📊 Installation Rework % by Technician")
             fig_re = px.bar(
                 df_combined.sort_values("Rework_Percentage", ascending=False),
                 x="Technician",
                 y="Rework_Percentage",
-                title="Technician Re-Work % (Sorted Highest to Lowest)",
+                title="Technician Installation Rework % (Sorted Highest to Lowest)",
                 text="Rework_Percentage",
                 color="Rework_Percentage",
                 template="plotly_dark",
@@ -261,11 +259,11 @@ def run_workorders_dashboard():
             # --- Download option ---
             csv_rework = df_combined.to_csv(index=False).encode("utf-8")
             st.download_button(
-                "⬇️ Download Re-Work Summary CSV",
+                "⬇️ Download Installation Rework Summary CSV",
                 data=csv_rework,
-                file_name="rework_summary.csv",
+                file_name="installation_rework_summary.csv",
                 mime="text/csv"
             )
 
         except Exception as e:
-            st.error(f"Error parsing re-work file: {e}")
+            st.error(f"Error parsing installation rework file: {e}")
