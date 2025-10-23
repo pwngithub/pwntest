@@ -163,7 +163,7 @@ def run_workorders_dashboard():
                 k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
                 k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
 
-                # --- NEW: Average Time by Work Type KPIs ---
+                                # --- NEW: Interactive Average Time by Work Type KPIs (Minutes) ---
                 avg_by_type = (
                     df_filtered.groupby("Work Type")["Duration"]
                     .apply(lambda x: pd.to_numeric(x.str.extract(r'(\d+\.?\d*)')[0], errors='coerce').mean())
@@ -171,60 +171,49 @@ def run_workorders_dashboard():
                     .sort_values("Avg_Duration_Hrs", ascending=False)
                 )
 
-                overall_avg_by_type = avg_by_type["Avg_Duration_Hrs"].mean()
+                # Convert to minutes
+                avg_by_type["Avg_Duration_Min"] = avg_by_type["Avg_Duration_Hrs"] * 60
+                overall_avg_by_type = avg_by_type["Avg_Duration_Min"].mean()
 
+                # --- Header Bar ---
                 st.markdown("""
                 <div style='margin-top:18px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
                             background:linear-gradient(90deg, #1c1c1c 0%, #5AA9E6 100%);'>
-                    <h4 style='color:white; margin:0;'>⏳ Average Time by Work Type (hrs)</h4>
+                    <h4 style='color:white; margin:0;'>⏳ Average Time by Work Type (Minutes)</h4>
                 </div>
                 """, unsafe_allow_html=True)
 
-                st.metric("Overall Avg (across types)", f"{overall_avg_by_type:.2f}")
+                # --- Initialize session state for interactivity ---
+                if "selected_work_type" not in st.session_state:
+                    st.session_state["selected_work_type"] = None
 
+                # --- Overall Average KPI ---
+                st.metric("Overall Avg (across types)", f"{overall_avg_by_type:.0f} min")
+
+                # --- Interactive KPI Buttons ---
+                st.markdown("#### Click a Work Type to filter charts below:")
                 types = avg_by_type.to_dict("records")
+
                 for i in range(0, len(types), 3):
                     cols = st.columns(3)
                     for col, rec in zip(cols, types[i:i+3]):
                         wt = str(rec["Work Type"])
-                        val = rec["Avg_Duration_Hrs"] if pd.notna(rec["Avg_Duration_Hrs"]) else 0.0
-                        with col:
-                            st.metric(f"{wt}", f"{val:.2f}")
+                        val = rec["Avg_Duration_Min"] if pd.notna(rec["Avg_Duration_Min"]) else 0.0
+                        button_label = f"{wt} ({val:.0f} min)"
+                        button_key = f"btn_{wt}"
+                        if col.button(button_label, key=button_key):
+                            # Toggle selection
+                            if st.session_state["selected_work_type"] == wt:
+                                st.session_state["selected_work_type"] = None
+                            else:
+                                st.session_state["selected_work_type"] = wt
 
-                # --- Divider ---
-                st.markdown("""
-                <hr style='border: 0; height: 3px; background-image: linear-gradient(to right, #004aad, #8BC53F, #004aad); margin:30px 0;'>
-                """, unsafe_allow_html=True)
-
-                # --- Charts ---
-                grouped = (
-                    df_filtered.groupby(["Technician", "Work Type"])
-                    .agg(
-                        Total_Jobs=("WO#", "nunique"),
-                        Avg_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean())
-                    )
-                    .reset_index()
-                )
-
-                st.subheader("📊 Work Orders Charts")
-                fig1 = px.bar(grouped, x="Work Type", y="Total_Jobs", color="Technician",
-                              title="Jobs by Work Type & Technician", template="plotly_dark")
-                st.plotly_chart(fig1, use_container_width=True)
-
-                fig2 = px.bar(grouped, x="Work Type", y="Avg_Duration", color="Technician",
-                              title="Avg Duration by Work Type & Technician", template="plotly_dark")
-                st.plotly_chart(fig2, use_container_width=True)
-
-                # --- Avg Duration by Technician Table ---
-                st.markdown("### 🧾 Average Duration by Technician")
-                avg_duration_by_tech = (
-                    df_filtered.groupby("Technician")["Duration"]
-                    .apply(lambda x: pd.to_numeric(x.str.extract(r'(\\d+\\.?\\d*)')[0], errors='coerce').mean())
-                    .reset_index()
-                    .rename(columns={"Duration": "Average Duration (hrs)"})
-                    .sort_values("Average Duration (hrs)")
-                )
-                st.dataframe(avg_duration_by_tech.style.format({"Average Duration (hrs)": "{:.2f}"}), use_container_width=True)
+                # --- Apply Work Type Filter if Selected ---
+                if st.session_state["selected_work_type"]:
+                    df_filtered = df_filtered[df_filtered["Work Type"] == st.session_state["selected_work_type"]]
+                    st.info(f"📍 Showing filtered results for **{st.session_state['selected_work_type']}**")
+                else:
+                    st.info("📍 Showing results for **All Work Types**")
 
     # =====================================================
     # 🔁 INSTALLATION REWORK SECTION
