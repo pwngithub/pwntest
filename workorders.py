@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
 
 def run_workorders_dashboard():
     st.set_page_config(
@@ -44,196 +46,164 @@ def run_workorders_dashboard():
     st.markdown("<hr>", unsafe_allow_html=True)
 
     # =================================================
-    # SECTION 1: WORK ORDERS FILE MANAGEMENT
+    # SECTION: FILE MANAGEMENT (BOTH WORK ORDERS + REWORK)
     # =================================================
-    st.sidebar.header("📁 Work Orders File")
+    st.sidebar.header("📂 Data Files")
+
     saved_folder = "saved_uploads"
     os.makedirs(saved_folder, exist_ok=True)
 
-    mode = st.sidebar.radio("Select Mode", ["Upload New Work Orders File", "Load Existing Work Orders File"], key="wo_mode")
+    # --- Work Orders File ---
+    st.sidebar.subheader("🧾 Work Orders File")
+    mode_wo = st.sidebar.radio("Mode:", ["Upload New", "Load Existing"], key="wo_mode")
     df = None
 
-    if mode == "Upload New Work Orders File":
-        uploaded_file = st.sidebar.file_uploader("Upload Work Orders CSV", type=["csv"])
-        custom_filename = st.sidebar.text_input("Enter filename to save (no extension):", key="wo_filename")
-
-        if uploaded_file and custom_filename:
-            save_path = os.path.join(saved_folder, custom_filename + ".csv")
+    if mode_wo == "Upload New":
+        uploaded_wo = st.sidebar.file_uploader("Upload Work Orders CSV", type=["csv"], key="wo_upload")
+        custom_wo_name = st.sidebar.text_input("Save as (no extension):", key="wo_name")
+        if uploaded_wo and custom_wo_name:
+            save_path = os.path.join(saved_folder, custom_wo_name + ".csv")
             with open(save_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            st.sidebar.success(f"File saved as: {custom_filename}.csv")
+                f.write(uploaded_wo.getbuffer())
+            st.sidebar.success(f"✅ Work Orders saved as: {custom_wo_name}.csv")
             df = pd.read_csv(save_path)
-        elif uploaded_file:
-            st.sidebar.warning("Please enter a file name to save.")
+        elif uploaded_wo:
+            st.sidebar.warning("Please enter a filename before saving.")
     else:
         saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
-        if not saved_files:
-            st.warning("No saved files found. Please upload one first.")
-            return
-        selected_file = st.sidebar.selectbox("Select a saved file", saved_files, key="wo_select")
-        if selected_file:
-            df = pd.read_csv(os.path.join(saved_folder, selected_file))
-        if st.sidebar.button("🗑 Delete Selected Work Orders File"):
-            os.remove(os.path.join(saved_folder, selected_file))
-            st.sidebar.success(f"Deleted {selected_file}")
-            st.experimental_rerun()
+        selected_wo = st.sidebar.selectbox("Select Work Orders File", saved_files, key="wo_select")
+        if selected_wo:
+            df = pd.read_csv(os.path.join(saved_folder, selected_wo))
 
-    # --- Load Work Orders Data ---
-    if df is None:
-        st.info("Please upload or load a Work Orders file to begin.")
-        return
+    # --- Rework File ---
+    st.sidebar.subheader("🔁 Installation Rework File")
+    mode_re = st.sidebar.radio("Mode:", ["Upload New", "Load Existing"], key="re_mode")
+    df_rework = None
 
-    # --- Auto-detect date column ---
-    date_cols = [col for col in df.columns if str(col).lower() in ["date when", "date", "work date", "completed", "completion date"]]
-    if not date_cols:
-        st.error("No date column found. Please include a 'Date When', 'Date', or 'Completed' column in your CSV.")
-        st.stop()
-
-    date_col = date_cols[0]
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-    df = df.dropna(subset=[date_col])
-    df["Day"] = df[date_col].dt.date
-
-    if "Techinician" in df.columns and "Technician" not in df.columns:
-        df.rename(columns={"Techinician": "Technician"}, inplace=True)
-
-    min_day, max_day = df["Day"].min(), df["Day"].max()
-
-    # --- Filters ---
-    st.subheader("F I L T E R S")
-    start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
-    df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
-
-    if not df_filtered.empty:
-        techs = sorted(df_filtered["Technician"].unique())
-        work_types = sorted(df_filtered["Work Type"].unique())
-        col1, col2 = st.columns(2)
-        with col1:
-            selected_techs = st.multiselect("👨‍🔧 Select Technician(s)", techs, default=techs)
-        with col2:
-            selected_work_types = st.multiselect("📋 Select Work Type(s)", work_types, default=work_types)
-        df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
-
-    if df_filtered.empty:
-        st.warning("No data available for the selected filters.")
-        return
-
-    # --- KPIs ---
-    st.markdown("### 📌 Work Orders KPIs")
-    duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
-    total_jobs = df_filtered["WO#"].nunique()
-    avg_duration = duration.mean() or 0
-    max_duration = duration.max() or 0
-    min_duration = duration.min() or 0
-    tech_count = df_filtered["Technician"].nunique()
-    avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
-
-    k1, k2, k3 = st.columns(3)
-    k1.metric("🔧 Total Jobs", total_jobs)
-    k2.metric("👨‍🔧 Technicians", tech_count)
-    k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
-
-    k4, k5, k6 = st.columns(3)
-    k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
-    k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
-    k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
-
-    # --- Charts ---
-    grouped_overall = (
-        df_filtered.groupby(["Technician", "Work Type"])
-        .agg(Total_Jobs=("WO#", "nunique"),
-             Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-        .reset_index()
-    )
-
-    st.subheader("📊 Work Orders Charts")
-    fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
-                  color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
-    st.plotly_chart(fig1, use_container_width=True)
-
-    fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
-                  color="Technician", title="Avg Duration by Work Type & Technician", template="plotly_dark")
-    st.plotly_chart(fig2, use_container_width=True)
+    if mode_re == "Upload New":
+        uploaded_re = st.sidebar.file_uploader("Upload Installation Assessment (CSV/TXT)", type=["csv", "txt"], key="re_upload")
+        custom_re_name = st.sidebar.text_input("Save as (no extension):", key="re_name")
+        if uploaded_re and custom_re_name:
+            save_path = os.path.join(saved_folder, custom_re_name + ".csv")
+            with open(save_path, "wb") as f:
+                f.write(uploaded_re.getbuffer())
+            st.sidebar.success(f"✅ Rework File saved as: {custom_re_name}.csv")
+            df_rework = pd.read_csv(save_path, header=None)
+        elif uploaded_re:
+            st.sidebar.warning("Please enter a filename before saving.")
+    else:
+        saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
+        selected_re = st.sidebar.selectbox("Select Rework File", saved_files, key="re_select")
+        if selected_re:
+            df_rework = pd.read_csv(os.path.join(saved_folder, selected_re), header=None)
 
     st.markdown("---")
 
     # =====================================================
+    # SECTION 1: WORK ORDERS DASHBOARD
+    # =====================================================
+    if df is not None:
+        # --- Auto-detect date column ---
+        date_cols = [col for col in df.columns if str(col).lower() in ["date when", "date", "work date", "completed", "completion date"]]
+        if not date_cols:
+            st.error("⚠️ No date column found. Please include 'Date When' or 'Date' column.")
+            st.stop()
+        date_col = date_cols[0]
+        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+        df = df.dropna(subset=[date_col])
+        df["Day"] = df[date_col].dt.date
+
+        if "Techinician" in df.columns and "Technician" not in df.columns:
+            df.rename(columns={"Techinician": "Technician"}, inplace=True)
+
+        # --- Filters ---
+        min_day, max_day = df["Day"].min(), df["Day"].max()
+        st.subheader("📅 Filters")
+        start_date, end_date = st.date_input("Select Date Range:", [min_day, max_day], min_value=min_day, max_value=max_day)
+        df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
+
+        techs = sorted(df_filtered["Technician"].unique())
+        work_types = sorted(df_filtered["Work Type"].unique())
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_techs = st.multiselect("👨‍🔧 Technicians", techs, default=techs)
+        with col2:
+            selected_work_types = st.multiselect("📋 Work Types", work_types, default=work_types)
+        df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
+
+        if df_filtered.empty:
+            st.warning("No data matches your filters.")
+        else:
+            st.markdown("### 📌 Work Orders KPIs")
+            duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
+            total_jobs = df_filtered["WO#"].nunique()
+            avg_duration = duration.mean() or 0
+            max_duration = duration.max() or 0
+            min_duration = duration.min() or 0
+            tech_count = df_filtered["Technician"].nunique()
+            avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
+
+            k1, k2, k3 = st.columns(3)
+            k1.metric("🔧 Total Jobs", total_jobs)
+            k2.metric("👨‍🔧 Technicians", tech_count)
+            k3.metric("📈 Avg Jobs/Tech", f"{avg_jobs_per_tech:.1f}")
+
+            k4, k5, k6 = st.columns(3)
+            k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
+            k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
+            k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
+
+            grouped = (
+                df_filtered.groupby(["Technician", "Work Type"])
+                .agg(
+                    Total_Jobs=("WO#", "nunique"),
+                    Avg_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean())
+                )
+                .reset_index()
+            )
+
+            st.subheader("📊 Work Orders Charts")
+            fig1 = px.bar(grouped, x="Work Type", y="Total_Jobs", color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
+            st.plotly_chart(fig1, use_container_width=True)
+
+    # =====================================================
     # SECTION 2: INSTALLATION REWORK ANALYSIS
     # =====================================================
-    st.markdown("<h2 style='color:#8BC53F;'>🔁 Installation Rework Analysis</h2>", unsafe_allow_html=True)
-
-    re_mode = st.sidebar.radio("Select Mode for Installation Rework File", ["Upload New File", "Load Existing File"], key="re_mode")
-    df_rework = None
-
-    if re_mode == "Upload New File":
-        re_file = st.sidebar.file_uploader("Upload Installation Assessment File (CSV or TXT)", type=["csv", "txt"])
-        re_filename = st.sidebar.text_input("Enter name to save (no extension):", key="re_filename")
-
-        if re_file and re_filename:
-            save_path = os.path.join(saved_folder, re_filename + ".csv")
-            with open(save_path, "wb") as f:
-                f.write(re_file.getbuffer())
-            st.sidebar.success(f"File saved as: {re_filename}.csv")
-            df_rework = pd.read_csv(save_path, header=None)
-        elif re_file:
-            st.sidebar.warning("Please enter a file name to save.")
-    else:
-        saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
-        if saved_files:
-            selected_re_file = st.sidebar.selectbox("Select saved file", saved_files, key="re_select")
-            df_rework = pd.read_csv(os.path.join(saved_folder, selected_re_file), header=None)
-        else:
-            st.sidebar.warning("No saved files found for Installation Rework.")
-
-             # --- Parse Installation Rework File ---
     if df_rework is not None and not df_rework.empty:
         try:
             parsed_rows = []
-
             for _, row in df_rework.iterrows():
                 values = row.tolist()
-
-                # Detect Install rows
                 if str(row[1]).startswith("Install"):
                     base_subset = [values[i] for i in [0, 2, 3, 4] if i < len(values)]
                 else:
                     base_subset = [values[i] for i in [0, 1, 2, 3] if i < len(values)]
-
                 while len(base_subset) < 4:
                     base_subset.append(None)
-
                 parsed_rows.append(base_subset)
 
-            # Convert to DataFrame
             df_combined = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Installations", "Rework", "Rework_Percentage"])
             df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
             df_combined["Total_Installations"] = pd.to_numeric(df_combined["Total_Installations"], errors="coerce")
             df_combined["Rework"] = pd.to_numeric(df_combined["Rework"], errors="coerce")
-            df_combined["Rework_Percentage"] = (
-                df_combined["Rework_Percentage"].astype(str)
-                .str.replace("%", "")
-                .str.replace('"', "")
-                .str.strip()
+            df_combined["Rework_Percentage"] = pd.to_numeric(
+                df_combined["Rework_Percentage"].astype(str).str.replace("%", "").str.strip(), errors="coerce"
             )
-            df_combined["Rework_Percentage"] = pd.to_numeric(df_combined["Rework_Percentage"], errors="coerce")
-
-            # Sort technicians by Total Installations (descending)
             df_combined = df_combined.sort_values("Total_Installations", ascending=False)
 
             # --- KPIs ---
-            st.markdown("### 📌 Installation Rework KPIs")
-            total_jobs_rw = df_combined["Total_Installations"].sum()
+            st.markdown("## 🔁 Installation Rework Analysis")
+            total_installs = df_combined["Total_Installations"].sum()
             total_repeats = df_combined["Rework"].sum()
             avg_repeat_pct = df_combined["Rework_Percentage"].mean()
 
             c1, c2, c3 = st.columns(3)
-            c1.metric("🏗️ Total Installations", int(total_jobs_rw))
+            c1.metric("🏗️ Total Installations", int(total_installs))
             c2.metric("🔁 Total Reworks", int(total_repeats))
             c3.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
 
-            # --- Heatmap Summary Table ---
+            # --- Visual Table ---
             st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
-
             def color_rework(val):
                 if pd.isna(val):
                     return ''
@@ -243,7 +213,6 @@ def run_workorders_dashboard():
                     return 'background-color: #FFD700; color: black;'
                 else:
                     return 'background-color: #FF6347; color: white;'
-
             styled_table = (
                 df_combined.style
                 .applymap(color_rework, subset=['Rework_Percentage'])
@@ -255,70 +224,20 @@ def run_workorders_dashboard():
             )
             st.dataframe(styled_table, use_container_width=True)
 
-            # --- Combined Bar + Line Chart (with Secondary Y-Axis) ---
+            # --- Combined Bar + Line Chart ---
             st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
-
-            # Create base figure with secondary Y-axis
-            import plotly.graph_objects as go
-            from plotly.subplots import make_subplots
-
             fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
-
-            # Bars: Total Installations
-            fig_combo.add_trace(
-                go.Bar(
-                    x=df_combined["Technician"],
-                    y=df_combined["Total_Installations"],
-                    name="Total Installations",
-                    marker_color="#00BFFF"
-                ),
-                secondary_y=False
-            )
-
-            # Line: Rework %
-            fig_combo.add_trace(
-                go.Scatter(
-                    x=df_combined["Technician"],
-                    y=df_combined["Rework_Percentage"],
-                    name="Rework %",
-                    mode="lines+markers",
-                    line=dict(color="#FF6347", width=3)
-                ),
-                secondary_y=True
-            )
-
-            # Add average line for Rework %
-            fig_combo.add_hline(
-                y=avg_repeat_pct,
-                line_dash="dash",
-                line_color="cyan",
-                annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)",
-                annotation_font_color="cyan",
-                secondary_y=True
-            )
-
-            # Layout adjustments
-            fig_combo.update_layout(
-                title="Technician Total Installations vs Rework %",
-                template="plotly_dark",
-                xaxis_title="Technician",
-                yaxis_title="Total Installations",
-                legend=dict(x=0.01, y=0.99, bgcolor="rgba(0,0,0,0)"),
-                bargap=0.25
-            )
+            fig_combo.add_trace(go.Bar(x=df_combined["Technician"], y=df_combined["Total_Installations"], name="Total Installations", marker_color="#00BFFF"), secondary_y=False)
+            fig_combo.add_trace(go.Scatter(x=df_combined["Technician"], y=df_combined["Rework_Percentage"], name="Rework %", mode="lines+markers", line=dict(color="#FF6347", width=3)), secondary_y=True)
+            fig_combo.add_hline(y=avg_repeat_pct, line_dash="dash", line_color="cyan", annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)", annotation_font_color="cyan", secondary_y=True)
+            fig_combo.update_layout(title="Technician Total Installations vs Rework %", template="plotly_dark", xaxis_title="Technician", yaxis_title="Total Installations", bargap=0.25)
             fig_combo.update_yaxes(title_text="Total Installations", secondary_y=False)
             fig_combo.update_yaxes(title_text="Rework %", secondary_y=True)
-
             st.plotly_chart(fig_combo, use_container_width=True)
 
             # --- Download option ---
             csv_rework = df_combined.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "⬇️ Download Installation Rework Summary CSV",
-                data=csv_rework,
-                file_name="installation_rework_summary.csv",
-                mime="text/csv"
-            )
+            st.download_button("⬇️ Download Installation Rework Summary CSV", data=csv_rework, file_name="installation_rework_summary.csv", mime="text/csv")
 
         except Exception as e:
             st.error(f"Error parsing installation rework file: {e}")
