@@ -10,12 +10,10 @@ def run_workorders_dashboard():
         initial_sidebar_state="expanded"
     )
 
-    # --- Custom CSS for Dark Theme KPI Cards and other styling ---
+    # --- Custom CSS ---
     st.markdown("""
     <style>
-    .stApp {
-        background-color: #0E1117;
-    }
+    .stApp {background-color: #0E1117;}
     div[data-testid="metric-container"] {
         background-color: #262730;
         border: 1px solid #3c3c3c;
@@ -32,19 +30,12 @@ def run_workorders_dashboard():
     div[data-testid="metric-container"] > label {
         color: #A0A0A0;
     }
-    .logo-container {
-        text-align: center;
-        margin-bottom: 20px;
-    }
-    .main-title {
-        color: #FFFFFF;
-        text-align: center;
-        font-weight: bold;
-    }
+    .logo-container {text-align:center;margin-bottom:20px;}
+    .main-title {color:#FFFFFF;text-align:center;font-weight:bold;}
     </style>
     """, unsafe_allow_html=True)
 
-    # --- Logo and Main Title ---
+    # --- Logo + Title ---
     st.markdown("""
     <div class='logo-container'>
         <img src='https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w' width='400'>
@@ -53,57 +44,45 @@ def run_workorders_dashboard():
     st.markdown("<h1 class='main-title'>🛠 Pioneer Broadband Work Orders Dashboard</h1>", unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # --- Sidebar for File Management ---
+    # =============================
+    # SECTION 1: WORK ORDERS FILE
+    # =============================
+
     st.sidebar.header("📁 File Management")
     saved_folder = "saved_uploads"
     os.makedirs(saved_folder, exist_ok=True)
 
-    mode = st.sidebar.radio("Select Mode", ["Upload New File", "Load Existing File"], key="mode_select")
+    mode = st.sidebar.radio("Select Mode", ["Upload New Work Orders File", "Load Existing Work Orders File"], key="wo_mode")
     df = None
 
-    if mode == "Upload New File":
-        uploaded_file = st.sidebar.file_uploader("Upload Technician Workflow CSV", type=["csv"])
-        custom_filename = st.sidebar.text_input("Enter a name to save this file as (without extension):")
+    if mode == "Upload New Work Orders File":
+        uploaded_file = st.sidebar.file_uploader("Upload Work Orders CSV", type=["csv"])
+        custom_filename = st.sidebar.text_input("Enter filename to save (no extension):", key="wo_filename")
 
         if uploaded_file and custom_filename:
             save_path = os.path.join(saved_folder, custom_filename + ".csv")
-            try:
-                with open(save_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                st.sidebar.success(f"File saved as: {custom_filename}.csv")
-                df = pd.read_csv(save_path)
-            except Exception as e:
-                st.sidebar.error(f"Error saving or reading file: {e}")
-        elif uploaded_file and not custom_filename:
+            with open(save_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            st.sidebar.success(f"File saved as: {custom_filename}.csv")
+            df = pd.read_csv(save_path)
+        elif uploaded_file:
             st.sidebar.warning("Please enter a file name to save.")
     else:
         saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
         if not saved_files:
             st.warning("No saved files found. Please upload one first.")
             return
-        
-        selected_file = st.sidebar.selectbox("Select a saved file to load", saved_files)
+        selected_file = st.sidebar.selectbox("Select a saved file", saved_files, key="wo_select")
         if selected_file:
-            try:
-                df = pd.read_csv(os.path.join(saved_folder, selected_file))
-            except Exception as e:
-                st.error(f"Error loading file: {e}")
-                return
+            df = pd.read_csv(os.path.join(saved_folder, selected_file))
+        if st.sidebar.button("🗑 Delete Selected Work Orders File"):
+            os.remove(os.path.join(saved_folder, selected_file))
+            st.sidebar.success(f"Deleted {selected_file}")
+            st.experimental_rerun()
 
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### 🗑 Delete a Saved File")
-        file_to_delete = st.sidebar.selectbox("Select a file to delete", ["-"] + saved_files, key="delete_file")
-        if st.sidebar.button("Delete Selected File"):
-            if file_to_delete and file_to_delete != "-":
-                os.remove(os.path.join(saved_folder, file_to_delete))
-                st.sidebar.success(f"'{file_to_delete}' has been deleted.")
-                st.experimental_rerun()
-            else:
-                st.sidebar.warning("Please select a valid file to delete.")
-
-    # --- Main Dashboard Area ---
+    # --- Load Work Orders Data ---
     if df is None:
-        st.info("Please upload a new file or select an existing one from the sidebar to begin.")
+        st.info("Please upload or load a Work Orders file to begin.")
         return
 
     # --- Data Processing ---
@@ -114,141 +93,153 @@ def run_workorders_dashboard():
     if "Techinician" in df.columns and "Technician" not in df.columns:
         df.rename(columns={"Techinician": "Technician"}, inplace=True)
 
-    min_day = df["Day"].min()
-    max_day = df["Day"].max()
+    min_day, max_day = df["Day"].min(), df["Day"].max()
 
-    # --- FILTERS ---
+    # --- Filters ---
     st.subheader("F I L T E R S")
     start_date, end_date = st.date_input("📅 Date Range", [min_day, max_day], min_value=min_day, max_value=max_day)
     df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
     if not df_filtered.empty:
-        technician_list = sorted(df_filtered["Technician"].unique().tolist())
-        work_type_list = sorted(df_filtered["Work Type"].unique().tolist())
-        
+        techs = sorted(df_filtered["Technician"].unique())
+        work_types = sorted(df_filtered["Work Type"].unique())
         col1, col2 = st.columns(2)
         with col1:
-            selected_techs = st.multiselect("👨‍🔧 Select Technician(s)", technician_list, default=technician_list)
+            selected_techs = st.multiselect("👨‍🔧 Select Technician(s)", techs, default=techs)
         with col2:
-            selected_work_types = st.multiselect("📋 Select Work Type(s)", work_type_list, default=work_type_list)
-        
+            selected_work_types = st.multiselect("📋 Select Work Type(s)", work_types, default=work_types)
         df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
 
     if df_filtered.empty:
-        st.warning("No data available for the selected filters. Please adjust your selections.")
+        st.warning("No data available for the selected filters.")
         return
 
     # --- KPIs ---
-    st.markdown("### 📌 Key Performance Indicators")
+    st.markdown("### 📌 Work Orders KPIs")
+    duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
     total_jobs = df_filtered["WO#"].nunique()
-    duration_series = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
-    avg_duration = duration_series.mean() or 0
-    unique_statuses = df_filtered["Tech Status"].nunique()
+    avg_duration = duration.mean() or 0
+    max_duration = duration.max() or 0
+    min_duration = duration.min() or 0
     tech_count = df_filtered["Technician"].nunique()
     avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
-    num_days = (end_date - start_date).days + 1
-    total_entries = df_filtered["WO#"].count()
-    max_duration = duration_series.max() or 0
-    min_duration = duration_series.min() or 0
-    jobs_per_day_per_tech = total_jobs / (num_days * tech_count) if tech_count and num_days else 0
 
-    kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric("🔧 Total Jobs", total_jobs)
-    kpi2.metric("👨‍🔧 Technicians", tech_count)
-    kpi3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
+    k1, k2, k3 = st.columns(3)
+    k1.metric("🔧 Total Jobs", total_jobs)
+    k2.metric("👨‍🔧 Technicians", tech_count)
+    k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
 
-    kpi4, kpi5, kpi6 = st.columns(3)
-    kpi4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
-    kpi5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
-    kpi6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
+    k4, k5, k6 = st.columns(3)
+    k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
+    k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
+    k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
 
-    kpi7, kpi8, kpi9 = st.columns(3)
-    kpi7.metric("📋 Unique Statuses", unique_statuses)
-    kpi8.metric("📆 Days Covered", num_days)
-    kpi9.metric("🧮 Jobs per Day per Tech", f"{jobs_per_day_per_tech:.2f}")
-
-    st.markdown("---")
-
-    # --- Grouping ---
-    grouped_overall = (df_filtered.groupby(["Technician", "Work Type"])
-                       .agg(Total_Jobs=("WO#", "nunique"),
-                            Average_Duration=("Duration", lambda x: pd.to_numeric(
-                                x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-                       .reset_index())
-    
-    df_daily = (df_filtered.groupby(["Technician", "Day", "Work Type"])
-                .agg(Jobs_Completed=("WO#", "nunique"),
-                     Total_Entries=("WO#", "count"),
-                     Avg_Duration=("Duration", lambda x: pd.to_numeric(
-                         x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-                .reset_index())
-
-    avg_duration_by_worktype = (
-        df_filtered.groupby("Work Type")
-        .agg(Average_Duration=("Duration", lambda x: pd.to_numeric(
-            x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+    # --- Grouping for Charts ---
+    grouped_overall = (
+        df_filtered.groupby(["Technician", "Work Type"])
+        .agg(Total_Jobs=("WO#", "nunique"),
+             Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
         .reset_index()
     )
 
-    # --- Collapsible Summary Section ---
-    with st.expander("📊 Summary by Work Type (Click to Expand)", expanded=False):
-        summary_by_worktype = (
-            df_filtered.groupby("Work Type")
-            .agg(Total_Jobs=("WO#", "nunique"),
-                 Average_Duration=("Duration", lambda x: pd.to_numeric(
-                     x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-            .reset_index()
-        )
-        summary_by_worktype["Average_Duration"] = summary_by_worktype["Average_Duration"].round(2)
-        st.dataframe(summary_by_worktype, use_container_width=True)
+    avg_duration_by_worktype = (
+        df_filtered.groupby("Work Type")
+        .agg(Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+        .reset_index()
+    )
+
+    # --- Summary Section ---
+    with st.expander("📊 Summary by Work Type", expanded=False):
+        st.dataframe(avg_duration_by_worktype, use_container_width=True)
+
+    # --- Charts ---
+    st.subheader("📊 Work Orders Charts")
+    fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
+                  color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
+    st.plotly_chart(fig1, use_container_width=True)
+
+    fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
+                  color="Technician", title="Avg Duration by Work Type & Technician", template="plotly_dark")
+    st.plotly_chart(fig2, use_container_width=True)
 
     st.markdown("---")
 
-    # --- Tabs ---
-    tab1, tab2, tab3 = st.tabs(["📊 Job Charts", "🗂 Daily Breakout Table", "📤 Export Summary"])
+    # =====================================================
+    # SECTION 2: TECHNICIAN ASSESSMENT / REWORK ANALYSIS
+    # =====================================================
+    st.markdown("<h2 style='color:#8BC53F;'>🔁 Technician Re-Work Analysis</h2>", unsafe_allow_html=True)
 
-    with tab1:
-        st.subheader("Total Jobs by Work Type")
-        fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
-                      color="Technician", title="Jobs by Work Type & Technician",
-                      template="plotly_dark")
-        st.plotly_chart(fig1, use_container_width=True)
+    re_mode = st.sidebar.radio("Select Mode for Re-Work File", ["Upload New Re-Work File", "Load Existing Re-Work File"], key="re_mode")
+    df_rework = None
 
-        st.subheader("Average Duration by Work Type & Technician")
-        fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
-                      color="Technician", title="Avg Duration by Work Type & Technician",
-                      template="plotly_dark")
-        st.plotly_chart(fig2, use_container_width=True)
+    if re_mode == "Upload New Re-Work File":
+        re_file = st.sidebar.file_uploader("Upload Technician Assessment File (CSV or TXT)", type=["csv", "txt"])
+        re_filename = st.sidebar.text_input("Enter name to save (no extension):", key="re_filename")
 
-        st.subheader("Overall Average Duration by Work Type (All Technicians Combined)")
-        fig3 = px.bar(
-            avg_duration_by_worktype,
-            x="Work Type",
-            y="Average_Duration",
-            title="Overall Average Duration by Work Type",
-            text=avg_duration_by_worktype["Average_Duration"].round(2),
-            template="plotly_dark",
-            color="Average_Duration",
-            color_continuous_scale="Viridis"
-        )
-        fig3.update_traces(textposition="outside")
-        st.plotly_chart(fig3, use_container_width=True)
+        if re_file and re_filename:
+            save_path = os.path.join(saved_folder, re_filename + ".csv")
+            with open(save_path, "wb") as f:
+                f.write(re_file.getbuffer())
+            st.sidebar.success(f"Re-Work File saved as: {re_filename}.csv")
+            df_rework = pd.read_csv(save_path, header=None)
+        elif re_file:
+            st.sidebar.warning("Please enter a file name to save.")
+    else:
+        saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
+        if saved_files:
+            selected_re_file = st.sidebar.selectbox("Select saved Re-Work file", saved_files, key="re_select")
+            df_rework = pd.read_csv(os.path.join(saved_folder, selected_re_file), header=None)
+        else:
+            st.sidebar.warning("No saved files found for Re-Work.")
+    # --- Parse Re-Work File ---
+    if df_rework is not None and not df_rework.empty:
+        try:
+            df_rework = df_rework.iloc[:, [0, 6, 7, 8]]
+            df_rework.columns = ["Technician", "Total_Jobs", "Service_Repeats", "Percent_Repeats"]
+            df_rework["Technician"] = df_rework["Technician"].astype(str).str.replace('"', '').str.strip()
+            df_rework["Total_Jobs"] = pd.to_numeric(df_rework["Total_Jobs"], errors="coerce")
+            df_rework["Service_Repeats"] = pd.to_numeric(df_rework["Service_Repeats"], errors="coerce")
+            df_rework["Percent_Repeats"] = df_rework["Percent_Repeats"].astype(str).str.replace("%", "").str.replace('"', '').str.strip()
+            df_rework["Percent_Repeats"] = pd.to_numeric(df_rework["Percent_Repeats"], errors="coerce")
 
-    with tab2:
-        st.dataframe(df_daily, use_container_width=True)
+            st.markdown("### 📌 Re-Work KPIs")
+            total_jobs_rw = df_rework["Total_Jobs"].sum()
+            total_repeats = df_rework["Service_Repeats"].sum()
+            avg_repeat_pct = df_rework["Percent_Repeats"].mean()
 
-    with tab3:
-        st.subheader("Download Summary Data")
-        csv_overall = grouped_overall.to_csv(index=False).encode('utf-8')
-        csv_avg_duration = avg_duration_by_worktype.to_csv(index=False).encode('utf-8')
-        csv_summary = summary_by_worktype.to_csv(index=False).encode('utf-8')
+            c1, c2, c3 = st.columns(3)
+            c1.metric("🔧 Total Jobs", int(total_jobs_rw))
+            c2.metric("🔁 Total Service Repeats", int(total_repeats))
+            c3.metric("📈 Avg Repeat %", f"{avg_repeat_pct:.1f}%")
 
-        st.download_button("⬇️ Technician Summary CSV", data=csv_overall, file_name="workorders_summary.csv", mime="text/csv")
-        st.download_button("⬇️ Avg Duration by Work Type CSV", data=csv_avg_duration, file_name="avg_duration_by_worktype.csv", mime="text/csv")
-        st.download_button("⬇️ Summary by Work Type CSV", data=csv_summary, file_name="summary_by_worktype.csv", mime="text/csv")
+            st.markdown("### 🧾 Re-Work Summary Table")
+            st.dataframe(df_rework, use_container_width=True)
 
-        st.markdown("### Technician Summary")
-        st.dataframe(grouped_overall, use_container_width=True)
+            st.markdown("### 📊 Repeat % by Technician")
+            fig_re = px.bar(df_rework, x="Technician", y="Percent_Repeats",
+                            title="Technician Repeat %", text="Percent_Repeats",
+                            color="Percent_Repeats", template="plotly_dark", color_continuous_scale="Viridis")
+            fig_re.update_traces(textposition="outside")
+            st.plotly_chart(fig_re, use_container_width=True)
 
-        st.markdown("### Overall Average Duration by Work Type")
-        st.dataframe(avg_duration_by_worktype, use_container_width=True)
+            # --- Combined Chart if both loaded ---
+            if df is not None:
+                merged = pd.merge(
+                    grouped_overall.groupby("Technician")["Average_Duration"].mean().reset_index(),
+                    df_rework[["Technician", "Percent_Repeats"]],
+                    on="Technician", how="inner"
+                )
+                st.markdown("### ⚙️ Work Orders vs Re-Work Comparison")
+                fig_combined = px.bar(
+                    merged.melt(id_vars="Technician", value_vars=["Average_Duration", "Percent_Repeats"]),
+                    x="Technician", y="value", color="variable",
+                    barmode="group",
+                    title="Avg Duration vs Repeat % by Technician",
+                    template="plotly_dark"
+                )
+                st.plotly_chart(fig_combined, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Error parsing re-work file: {e}")
+    else:
+        st.info("Upload or load a Re-Work (Technician Assessment) file to see analysis.")
