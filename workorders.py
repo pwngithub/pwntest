@@ -163,6 +163,34 @@ def run_workorders_dashboard():
                 k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
                 k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
 
+                # --- NEW: Average Time by Work Type KPIs ---
+                avg_by_type = (
+                    df_filtered.groupby("Work Type")["Duration"]
+                    .apply(lambda x: pd.to_numeric(x.str.extract(r'(\d+\.?\d*)')[0], errors='coerce').mean())
+                    .reset_index(name="Avg_Duration_Hrs")
+                    .sort_values("Avg_Duration_Hrs", ascending=False)
+                )
+
+                overall_avg_by_type = avg_by_type["Avg_Duration_Hrs"].mean()
+
+                st.markdown("""
+                <div style='margin-top:18px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
+                            background:linear-gradient(90deg, #1c1c1c 0%, #5AA9E6 100%);'>
+                    <h4 style='color:white; margin:0;'>⏳ Average Time by Work Type (hrs)</h4>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.metric("Overall Avg (across types)", f"{overall_avg_by_type:.2f}")
+
+                types = avg_by_type.to_dict("records")
+                for i in range(0, len(types), 3):
+                    cols = st.columns(3)
+                    for col, rec in zip(cols, types[i:i+3]):
+                        wt = str(rec["Work Type"])
+                        val = rec["Avg_Duration_Hrs"] if pd.notna(rec["Avg_Duration_Hrs"]) else 0.0
+                        with col:
+                            st.metric(f"{wt}", f"{val:.2f}")
+
                 # --- Divider ---
                 st.markdown("""
                 <hr style='border: 0; height: 3px; background-image: linear-gradient(to right, #004aad, #8BC53F, #004aad); margin:30px 0;'>
