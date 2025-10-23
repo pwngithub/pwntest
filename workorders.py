@@ -188,7 +188,7 @@ def run_workorders_dashboard():
         else:
             st.sidebar.warning("No saved files found for Re-Work.")
 
-           # --- Parse Re-Work File ---
+             # --- Parse Re-Work File ---
     if df_rework is not None and not df_rework.empty:
         try:
             parsed_rows = []
@@ -202,12 +202,12 @@ def run_workorders_dashboard():
                     # Regular Rework Columns
                     base_subset = [values[i] for i in [0, 2, 3, 4] if i < len(values)]
                     # Install KPI Columns
-                    install_subset = [values[i] for i in [0, 7, 8, 9] if i < len(values)]
+                    install_subset = [values[i] for i in [0, 6, 7, 8] if i < len(values)]
                 else:
                     # Regular Rework Columns
                     base_subset = [values[i] for i in [0, 1, 2, 3] if i < len(values)]
                     # Install KPI Columns
-                    install_subset = [values[i] for i in [0, 6, 7, 8] if i < len(values)]
+                    install_subset = [values[i] for i in [0, 5, 6, 7] if i < len(values)]
 
                 # Ensure 4 values for both sets
                 while len(base_subset) < 4:
@@ -323,10 +323,6 @@ def run_workorders_dashboard():
                                data=csv_rework,
                                file_name="rework_summary.csv",
                                mime="text/csv")
-
-        except Exception as e:
-            st.error(f"Error parsing re-work file: {e}")
-
 
         except Exception as e:
             st.error(f"Error parsing re-work file: {e}")
