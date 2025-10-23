@@ -188,7 +188,7 @@ def run_workorders_dashboard():
         else:
             st.sidebar.warning("No saved files found for Re-Work.")
 
-             # --- Parse Re-Work File ---
+                # --- Parse Re-Work File ---
     if df_rework is not None and not df_rework.empty:
         try:
             parsed_rows = []
@@ -297,25 +297,6 @@ def run_workorders_dashboard():
                               color_continuous_scale="Cividis")
             fig_inst.update_traces(textposition="outside")
             st.plotly_chart(fig_inst, use_container_width=True)
-
-            # =============================
-            # ⚙️ Combined Comparison Chart
-            # =============================
-            if df is not None:
-                merged = pd.merge(
-                    grouped_overall.groupby("Technician")["Average_Duration"].mean().reset_index(),
-                    df_combined[["Technician", "Rework_Percentage"]],
-                    on="Technician", how="inner"
-                )
-                st.markdown("### ⚙️ Work Orders vs Re-Work Comparison")
-                fig_combined = px.bar(
-                    merged.melt(id_vars="Technician", value_vars=["Average_Duration", "Rework_Percentage"]),
-                    x="Technician", y="value", color="variable",
-                    barmode="group",
-                    title="Avg Duration vs Rework % by Technician",
-                    template="plotly_dark"
-                )
-                st.plotly_chart(fig_combined, use_container_width=True)
 
             # --- Download option ---
             csv_rework = df_combined.to_csv(index=False).encode("utf-8")
