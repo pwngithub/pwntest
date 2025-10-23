@@ -4,6 +4,7 @@ import plotly.express as px
 import os
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
+import re
 
 
 def run_workorders_dashboard():
@@ -136,82 +137,79 @@ def run_workorders_dashboard():
             if df_filtered.empty:
                 st.warning("No data matches your filters.")
             else:
-                                                # --- Robust Duration Conversion (handles mixed cases & plural units) ---
-                import re
+                # --- Clean Work Type ---
+                df_filtered["Work Type"] = (
+                    df_filtered["Work Type"]
+                    .astype(str)
+                    .str.strip()
+                    .str.title()
+                    .replace({"Nan": "Unknown", "": "Unknown"})
+                )
 
+                # --- Robust Duration Parser ---
                 def parse_duration(val):
-                    """Convert any readable duration format to minutes. Ignore missing/invalid entries."""
                     if pd.isna(val):
                         return None
                     val = str(val).strip().lower().replace(" ", "")
-
-                    # Match hh:mm or h:m
                     if re.match(r"^\d+:\d+$", val):
                         try:
                             h, m = val.split(":")
                             return float(h) * 60 + float(m)
                         except Exception:
                             return None
-
-                    # Handle combined hour+minute strings (e.g. '1h15m', '1hr15min')
                     match = re.match(r"(?:(\d+(?:\.\d+)?)h(?:r|rs)?)?(?:(\d+(?:\.\d+)?)m(?:in|ins)?)?", val)
                     if match:
-                        hours = float(match.group(1)) if match.group(1) else 0
-                        minutes = float(match.group(2)) if match.group(2) else 0
-                        if hours == 0 and minutes == 0:
+                        h = float(match.group(1)) if match.group(1) else 0
+                        m = float(match.group(2)) if match.group(2) else 0
+                        if h == 0 and m == 0:
                             return None
-                        return hours * 60 + minutes
-
-                    # Handle pure hours ('1.5h', '2hr', '2hrs')
+                        return h * 60 + m
                     if "h" in val:
                         try:
                             num = float(re.findall(r"[\d\.]+", val)[0])
                             return num * 60
                         except Exception:
                             return None
-
-                    # Handle pure minutes ('45min', '70mins', '30m')
                     if "m" in val:
                         try:
                             num = float(re.findall(r"[\d\.]+", val)[0])
                             return num
                         except Exception:
                             return None
-
-                    # Handle numeric only
                     try:
                         num = float(val)
                         return num if num > 0 else None
                     except Exception:
                         return None
 
-
-
                 df_filtered["Duration_Num"] = df_filtered["Duration"].apply(parse_duration)
 
                 # --- KPIs ---
                 total_jobs = df_filtered["WO#"].nunique()
-                avg_duration = df_filtered["Duration_Num"].mean()
-                max_duration = df_filtered["Duration_Num"].max()
-                min_duration = df_filtered["Duration_Num"].min()
+                avg_duration = df_filtered["Duration_Num"].mean(skipna=True)
+                max_duration = df_filtered["Duration_Num"].max(skipna=True)
+                min_duration = df_filtered["Duration_Num"].min(skipna=True)
                 tech_count = df_filtered["Technician"].nunique()
                 avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
 
-                k1, k2, k3 = st.columns(3)
-                k1.metric("🔧 Total Jobs", total_jobs)
-                k2.metric("👨‍🔧 Technicians", tech_count)
-                k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("🔧 Total Jobs", total_jobs)
+                c2.metric("👨‍🔧 Technicians", tech_count)
+                c3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
 
-                k4, k5, k6 = st.columns(3)
-                k4.metric("🕒 Avg Duration (min)", f"{avg_duration:.1f}")
-                k5.metric("⏱️ Longest Duration (min)", f"{max_duration:.1f}")
-                k6.metric("⚡ Shortest Duration (min)", f"{min_duration:.1f}")
+                c4, c5, c6 = st.columns(3)
+                c4.metric("🕒 Avg Duration (min)", f"{avg_duration:.1f}")
+                c5.metric("⏱️ Longest Duration (min)", f"{max_duration:.1f}")
+                c6.metric("⚡ Shortest Duration (min)", f"{min_duration:.1f}")
 
-                # --- Average Duration by Work Type ---
+                # --- Average Duration by Work Order Type ---
                 avg_by_type = (
-                    df_filtered.groupby("Work Type", as_index=False)["Duration_Num"].mean().rename(columns={"Duration_Num": "Avg_Duration_Min"}).sort_values("Avg_Duration_Min", ascending=False)
+                    df_filtered.groupby("Work Type", as_index=False)["Duration_Num"]
+                    .mean(skipna=True)
+                    .rename(columns={"Duration_Num": "Avg_Duration_Min"})
+                    .sort_values("Avg_Duration_Min", ascending=False)
                 )
-                overall_avg = df_filtered["Duration_Num"].mean()
+                overall_avg = df_filtered["Duration_Num"].mean(skipna=True)
 
                 st.markdown("""
                 <div style='margin-top:18px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
@@ -219,32 +217,32 @@ def run_workorders_dashboard():
                 <h4 style='color:white;margin:0;'>⏳ Average Duration by Work Order Type (Minutes)</h4></div>
                 """, unsafe_allow_html=True)
 
-                fig_avg = px.bar(avg_by_type, x="Work Type", y="Avg_Duration_Min", text="Avg_Duration_Min",
-                                 color="Avg_Duration_Min", color_continuous_scale="Viridis", template="plotly_dark")
-                fig_avg.add_hline(y=overall_avg, line_dash="dash", line_color="cyan",
-                                  annotation_text=f"Overall Avg ({overall_avg:.1f} min)", annotation_font_color="cyan")
-                fig_avg.update_traces(texttemplate='%{text:.1f} min', textposition='outside')
-                st.plotly_chart(fig_avg, use_container_width=True)
+                fig = px.bar(avg_by_type, x="Work Type", y="Avg_Duration_Min", text="Avg_Duration_Min",
+                             color="Avg_Duration_Min", color_continuous_scale="Viridis", template="plotly_dark")
+                fig.add_hline(y=overall_avg, line_dash="dash", line_color="cyan",
+                              annotation_text=f"Overall Avg ({overall_avg:.1f} min)", annotation_font_color="cyan")
+                fig.update_traces(texttemplate='%{text:.1f} min', textposition='outside')
+                st.plotly_chart(fig, use_container_width=True)
 
-                # --- Pivot: Average Duration per Tech per Type ---
+                # --- Average Duration per Technician per Work Order Type ---
                 all_techs = sorted(df_filtered["Technician"].unique())
-                all_types = sorted(df_filtered["Work Type"].unique())
+                all_types = sorted([t for t in df_filtered["Work Type"].unique() if t != "Unknown"]) + ["Unknown"]
 
                 pivot = (
                     df_filtered.pivot_table(index="Technician", columns="Work Type", values="Duration_Num", aggfunc="mean")
-                    .reindex(index=all_techs, columns=all_types, fill_value=pd.NA)
+                    .reindex(index=all_techs, columns=all_types)
                     .round(1)
                 )
                 pivot["Overall Avg (min)"] = pivot.mean(axis=1, skipna=True).round(1)
                 pivot = pivot.sort_values("Overall Avg (min)", ascending=False)
 
-                styled_pivot = pivot.style.format(lambda x: "—" if pd.isna(x) else f"{x:.1f}").background_gradient(cmap="viridis", axis=None)
+                styled = pivot.style.format(lambda x: "—" if pd.isna(x) else f"{x:.1f}").background_gradient(cmap="viridis", axis=None)
                 st.markdown("""
                 <div style='margin-top:25px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
                 background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
                 <h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per Work Order Type (Minutes)</h4></div>
                 """, unsafe_allow_html=True)
-                st.dataframe(styled_pivot, use_container_width=True)
+                st.dataframe(styled, use_container_width=True)
 
     # =====================================================
     # 🔁 INSTALLATION REWORK SECTION
@@ -254,11 +252,11 @@ def run_workorders_dashboard():
             try:
                 parsed_rows = []
                 for _, row in df_rework.iterrows():
-                    values = row.tolist()
+                    vals = row.tolist()
                     if str(row[1]).startswith("Install"):
-                        cols = [values[i] for i in [0, 2, 3, 4] if i < len(values)]
+                        cols = [vals[i] for i in [0, 2, 3, 4] if i < len(vals)]
                     else:
-                        cols = [values[i] for i in [0, 1, 2, 3] if i < len(values)]
+                        cols = [vals[i] for i in [0, 1, 2, 3] if i < len(vals)]
                     while len(cols) < 4:
                         cols.append(None)
                     parsed_rows.append(cols)
