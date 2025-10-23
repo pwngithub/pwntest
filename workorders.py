@@ -188,20 +188,34 @@ def run_workorders_dashboard():
         else:
             st.sidebar.warning("No saved files found for Re-Work.")
 
-    # --- Parse Re-Work File ---
+       # --- Parse Re-Work File ---
     if df_rework is not None and not df_rework.empty:
         try:
             # Determine which rows start with "Install" in column 1
             df_rework["col1_str"] = df_rework[1].astype(str)
             install_mask = df_rework["col1_str"].str.startswith("Install", na=False)
 
-            # Split into two groups
-            df_install = df_rework[install_mask].iloc[:, [0, 2, 3, 4]]
-            df_noninstall = df_rework[~install_mask].iloc[:, [0, 1, 2, 3]]
+            # Initialize list to collect parsed rows
+            parsed_rows = []
 
-            # Combine back
-            df_combined = pd.concat([df_install, df_noninstall], ignore_index=True)
-            df_combined.columns = ["Technician", "Total_Jobs", "Rework", "Rework_Percentage"]
+            for _, row in df_rework.iterrows():
+                values = row.tolist()
+
+                # Choose correct mapping depending on column 1
+                if str(row[1]).startswith("Install"):
+                    # Use columns [0, 2, 3, 4]
+                    subset = [values[i] for i in [0, 2, 3, 4] if i < len(values)]
+                else:
+                    # Use columns [0, 1, 2, 3]
+                    subset = [values[i] for i in [0, 1, 2, 3] if i < len(values)]
+
+                # Pad to ensure consistent 4 columns
+                while len(subset) < 4:
+                    subset.append(None)
+                parsed_rows.append(subset)
+
+            # Create DataFrame
+            df_combined = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Jobs", "Rework", "Rework_Percentage"])
 
             # Clean & convert
             df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
@@ -215,7 +229,7 @@ def run_workorders_dashboard():
             )
             df_combined["Rework_Percentage"] = pd.to_numeric(df_combined["Rework_Percentage"], errors="coerce")
 
-            # Display KPIs
+            # --- KPIs ---
             st.markdown("### 📌 Re-Work KPIs")
             total_jobs_rw = df_combined["Total_Jobs"].sum()
             total_repeats = df_combined["Rework"].sum()
@@ -239,7 +253,7 @@ def run_workorders_dashboard():
             fig_re.update_traces(textposition="outside")
             st.plotly_chart(fig_re, use_container_width=True)
 
-            # Combined comparison with Work Orders
+            # --- Combined Chart with Work Orders ---
             if df is not None:
                 merged = pd.merge(
                     grouped_overall.groupby("Technician")["Average_Duration"].mean().reset_index(),
@@ -256,7 +270,7 @@ def run_workorders_dashboard():
                 )
                 st.plotly_chart(fig_combined, use_container_width=True)
 
-            # Download option
+            # --- Download option ---
             csv_rework = df_combined.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Download Re-Work Summary CSV",
                                data=csv_rework,
@@ -265,5 +279,3 @@ def run_workorders_dashboard():
 
         except Exception as e:
             st.error(f"Error parsing re-work file: {e}")
-    else:
-        st.info("Upload or load a Re-Work (Technician Assessment) file to see analysis.")
