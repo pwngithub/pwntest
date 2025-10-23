@@ -44,11 +44,10 @@ def run_workorders_dashboard():
     st.markdown("<h1 class='main-title'>🛠 Pioneer Broadband Work Orders Dashboard</h1>", unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # =============================
-    # SECTION 1: WORK ORDERS FILE
-    # =============================
-
-    st.sidebar.header("📁 File Management")
+    # =================================================
+    # SECTION 1: WORK ORDERS FILE MANAGEMENT
+    # =================================================
+    st.sidebar.header("📁 Work Orders File")
     saved_folder = "saved_uploads"
     os.makedirs(saved_folder, exist_ok=True)
 
@@ -165,7 +164,7 @@ def run_workorders_dashboard():
     st.markdown("---")
 
     # =====================================================
-    # SECTION 2: TECHNICIAN ASSESSMENT / REWORK ANALYSIS
+    # SECTION 2: TECHNICIAN ASSESSMENT / RE-WORK ANALYSIS
     # =====================================================
     st.markdown("<h2 style='color:#8BC53F;'>🔁 Technician Re-Work Analysis</h2>", unsafe_allow_html=True)
 
@@ -191,34 +190,41 @@ def run_workorders_dashboard():
             df_rework = pd.read_csv(os.path.join(saved_folder, selected_re_file), header=None)
         else:
             st.sidebar.warning("No saved files found for Re-Work.")
+
     # --- Parse Re-Work File ---
     if df_rework is not None and not df_rework.empty:
         try:
-            df_rework = df_rework.iloc[:, [0, 6, 7, 8]]
-            df_rework.columns = ["Technician", "Total_Jobs", "Service_Repeats", "Percent_Repeats"]
+            # Use columns 0, 2, 3, 4 for this format
+            df_rework = df_rework.iloc[:, [0, 2, 3, 4]]
+            df_rework.columns = ["Technician", "Jobs", "Install_Repeats", "Repeat_Percentage"]
             df_rework["Technician"] = df_rework["Technician"].astype(str).str.replace('"', '').str.strip()
-            df_rework["Total_Jobs"] = pd.to_numeric(df_rework["Total_Jobs"], errors="coerce")
-            df_rework["Service_Repeats"] = pd.to_numeric(df_rework["Service_Repeats"], errors="coerce")
-            df_rework["Percent_Repeats"] = df_rework["Percent_Repeats"].astype(str).str.replace("%", "").str.replace('"', '').str.strip()
-            df_rework["Percent_Repeats"] = pd.to_numeric(df_rework["Percent_Repeats"], errors="coerce")
+            df_rework["Jobs"] = pd.to_numeric(df_rework["Jobs"], errors="coerce")
+            df_rework["Install_Repeats"] = pd.to_numeric(df_rework["Install_Repeats"], errors="coerce")
+            df_rework["Repeat_Percentage"] = (
+                df_rework["Repeat_Percentage"].astype(str)
+                .str.replace("%", "")
+                .str.replace('"', "")
+                .str.strip()
+            )
+            df_rework["Repeat_Percentage"] = pd.to_numeric(df_rework["Repeat_Percentage"], errors="coerce")
 
             st.markdown("### 📌 Re-Work KPIs")
-            total_jobs_rw = df_rework["Total_Jobs"].sum()
-            total_repeats = df_rework["Service_Repeats"].sum()
-            avg_repeat_pct = df_rework["Percent_Repeats"].mean()
+            total_jobs_rw = df_rework["Jobs"].sum()
+            total_repeats = df_rework["Install_Repeats"].sum()
+            avg_repeat_pct = df_rework["Repeat_Percentage"].mean()
 
             c1, c2, c3 = st.columns(3)
             c1.metric("🔧 Total Jobs", int(total_jobs_rw))
-            c2.metric("🔁 Total Service Repeats", int(total_repeats))
+            c2.metric("🔁 Install Repeats", int(total_repeats))
             c3.metric("📈 Avg Repeat %", f"{avg_repeat_pct:.1f}%")
 
             st.markdown("### 🧾 Re-Work Summary Table")
             st.dataframe(df_rework, use_container_width=True)
 
             st.markdown("### 📊 Repeat % by Technician")
-            fig_re = px.bar(df_rework, x="Technician", y="Percent_Repeats",
-                            title="Technician Repeat %", text="Percent_Repeats",
-                            color="Percent_Repeats", template="plotly_dark", color_continuous_scale="Viridis")
+            fig_re = px.bar(df_rework, x="Technician", y="Repeat_Percentage",
+                            title="Technician Repeat %", text="Repeat_Percentage",
+                            color="Repeat_Percentage", template="plotly_dark", color_continuous_scale="Viridis")
             fig_re.update_traces(textposition="outside")
             st.plotly_chart(fig_re, use_container_width=True)
 
@@ -226,18 +232,22 @@ def run_workorders_dashboard():
             if df is not None:
                 merged = pd.merge(
                     grouped_overall.groupby("Technician")["Average_Duration"].mean().reset_index(),
-                    df_rework[["Technician", "Percent_Repeats"]],
+                    df_rework[["Technician", "Repeat_Percentage"]],
                     on="Technician", how="inner"
                 )
                 st.markdown("### ⚙️ Work Orders vs Re-Work Comparison")
                 fig_combined = px.bar(
-                    merged.melt(id_vars="Technician", value_vars=["Average_Duration", "Percent_Repeats"]),
+                    merged.melt(id_vars="Technician", value_vars=["Average_Duration", "Repeat_Percentage"]),
                     x="Technician", y="value", color="variable",
                     barmode="group",
                     title="Avg Duration vs Repeat % by Technician",
                     template="plotly_dark"
                 )
                 st.plotly_chart(fig_combined, use_container_width=True)
+
+            # --- Optional download ---
+            csv_rework = df_rework.to_csv(index=False).encode("utf-8")
+            st.download_button("⬇️ Download Re-Work Summary CSV", data=csv_rework, file_name="rework_summary.csv", mime="text/csv")
 
         except Exception as e:
             st.error(f"Error parsing re-work file: {e}")
