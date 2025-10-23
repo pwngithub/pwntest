@@ -162,23 +162,32 @@ def run_workorders_dashboard():
                 k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
                 k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
 
-                # --- Overall Average Duration by Work Order Type (Minutes) ---
+                                # --- TRUE Average Duration by Work Order Type (Minutes) ---
                 st.markdown("""
                 <div style='margin-top:18px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
                             background:linear-gradient(90deg, #1c1c1c 0%, #5AA9E6 100%);'>
-                    <h4 style='color:white; margin:0;'>⏳ Overall Average Duration by Work Order Type (Minutes)</h4>
+                    <h4 style='color:white; margin:0;'>⏳ Average Duration by Work Order Type (Minutes)</h4>
                 </div>
                 """, unsafe_allow_html=True)
 
-                avg_by_type = (
-                    df_filtered.groupby("Work Type")["Duration"]
-                    .apply(lambda x: pd.to_numeric(x.str.extract(r'(\d+\.?\d*)')[0], errors='coerce').mean())
-                    .reset_index(name="Avg_Duration_Hrs")
+                # Ensure numeric duration in minutes
+                df_filtered["Duration_Num"] = pd.to_numeric(
+                    df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0],
+                    errors="coerce"
                 )
-                avg_by_type["Avg_Duration_Min"] = avg_by_type["Avg_Duration_Hrs"] * 60
-                avg_by_type = avg_by_type.sort_values("Avg_Duration_Min", ascending=False)
-                overall_avg = avg_by_type["Avg_Duration_Min"].mean()
 
+                # Compute true average duration (minutes) per Work Type
+                avg_by_type = (
+                    df_filtered.groupby("Work Type", as_index=False)["Duration_Num"]
+                    .mean()
+                    .rename(columns={"Duration_Num": "Avg_Duration_Min"})
+                    .sort_values("Avg_Duration_Min", ascending=False)
+                )
+
+                # Compute true overall average duration across all jobs
+                overall_avg = df_filtered["Duration_Num"].mean()
+
+                # --- Create Chart ---
                 fig_avg_worktype = px.bar(
                     avg_by_type,
                     x="Work Type",
@@ -186,24 +195,30 @@ def run_workorders_dashboard():
                     text="Avg_Duration_Min",
                     color="Avg_Duration_Min",
                     color_continuous_scale="Viridis",
-                    title="Overall Average Duration by Work Order Type (Minutes)",
+                    title="Average Duration by Work Order Type (Minutes)",
                     template="plotly_dark"
                 )
+
+                # Add overall average line (true weighted mean)
                 fig_avg_worktype.add_hline(
                     y=overall_avg,
                     line_dash="dash",
                     line_color="cyan",
-                    annotation_text=f"Overall Avg ({overall_avg:.0f} min)",
+                    annotation_text=f"Overall Avg ({overall_avg:.1f} min)",
                     annotation_font_color="cyan"
                 )
-                fig_avg_worktype.update_traces(texttemplate='%{text:.0f} min', textposition='outside')
+
+                # Beautify chart layout
+                fig_avg_worktype.update_traces(texttemplate='%{text:.1f} min', textposition='outside')
                 fig_avg_worktype.update_layout(
                     xaxis_title="Work Order Type",
                     yaxis_title="Average Duration (Minutes)",
                     uniformtext_minsize=8,
                     uniformtext_mode='hide'
                 )
+
                 st.plotly_chart(fig_avg_worktype, use_container_width=True)
+
 
                                 # --- Average Duration per Technician per Work Order Type (Minutes) ---
                 st.markdown("""
