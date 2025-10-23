@@ -186,7 +186,7 @@ def run_workorders_dashboard():
         else:
             st.sidebar.warning("No saved files found for Installation Rework.")
 
-    # --- Parse Installation Rework File ---
+        # --- Parse Installation Rework File ---
     if df_rework is not None and not df_rework.empty:
         try:
             parsed_rows = []
@@ -234,27 +234,51 @@ def run_workorders_dashboard():
             c3.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
 
             # =============================
-            # 🧾 Rework Summary Table
+            # 🧾 Installation Rework Summary Table (with Heatmap)
             # =============================
-            st.markdown("### 🧾 Installation Rework Summary Table")
-            st.dataframe(df_combined, use_container_width=True)
+            st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
+
+            def color_rework(val):
+                """Color scale: green (good) → yellow (mid) → red (high)."""
+                if pd.isna(val):
+                    return ''
+                elif val < 5:
+                    return 'background-color: #3CB371; color: white;'  # green
+                elif val < 10:
+                    return 'background-color: #FFD700; color: black;'  # yellow
+                else:
+                    return 'background-color: #FF6347; color: white;'  # red
+
+            styled_table = (
+                df_combined.style
+                .applymap(color_rework, subset=['Rework_Percentage'])
+                .format({
+                    'Rework_Percentage': '{:.1f}%',
+                    'Total_Installations': '{:.0f}',
+                    'Rework': '{:.0f}'
+                })
+            )
+
+            st.dataframe(styled_table, use_container_width=True)
 
             # =============================
-            # 📊 Rework % Chart
+            # 📊 Bubble Chart: Total Installations vs Rework %
             # =============================
-            st.markdown("### 📊 Installation Rework % by Technician")
-            fig_re = px.bar(
-                df_combined.sort_values("Rework_Percentage", ascending=False),
+            st.markdown("### 📊 Installation Rework Bubble Chart")
+
+            fig_bubble = px.scatter(
+                df_combined,
                 x="Technician",
                 y="Rework_Percentage",
-                title="Technician Installation Rework % (Sorted Highest to Lowest)",
-                text="Rework_Percentage",
+                size="Total_Installations",
                 color="Rework_Percentage",
-                template="plotly_dark",
-                color_continuous_scale="Viridis"
+                color_continuous_scale="RdYlGn_r",
+                size_max=40,
+                title="Technician Installation Rework Rate vs Total Installations",
+                hover_data=["Rework", "Total_Installations"]
             )
-            fig_re.update_traces(textposition="outside")
-            st.plotly_chart(fig_re, use_container_width=True)
+            fig_bubble.update_traces(marker=dict(line=dict(width=1, color="DarkSlateGrey")))
+            st.plotly_chart(fig_bubble, use_container_width=True)
 
             # --- Download option ---
             csv_rework = df_combined.to_csv(index=False).encode("utf-8")
