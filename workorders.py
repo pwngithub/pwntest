@@ -194,37 +194,41 @@ def run_workorders_dashboard():
     # --- Parse Re-Work File ---
     if df_rework is not None and not df_rework.empty:
         try:
-            # Use columns 0, 2, 3, 4 for this format
+            # Use columns 0, 2, 3, 4
             df_rework = df_rework.iloc[:, [0, 2, 3, 4]]
-            df_rework.columns = ["Technician", "Jobs", "Install_Repeats", "Repeat_Percentage"]
+            df_rework.columns = ["Technician", "Total_Jobs", "Rework", "Rework_Percentage"]
+
             df_rework["Technician"] = df_rework["Technician"].astype(str).str.replace('"', '').str.strip()
-            df_rework["Jobs"] = pd.to_numeric(df_rework["Jobs"], errors="coerce")
-            df_rework["Install_Repeats"] = pd.to_numeric(df_rework["Install_Repeats"], errors="coerce")
-            df_rework["Repeat_Percentage"] = (
-                df_rework["Repeat_Percentage"].astype(str)
+            df_rework["Total_Jobs"] = pd.to_numeric(df_rework["Total_Jobs"], errors="coerce")
+            df_rework["Rework"] = pd.to_numeric(df_rework["Rework"], errors="coerce")
+            df_rework["Rework_Percentage"] = (
+                df_rework["Rework_Percentage"].astype(str)
                 .str.replace("%", "")
                 .str.replace('"', "")
                 .str.strip()
             )
-            df_rework["Repeat_Percentage"] = pd.to_numeric(df_rework["Repeat_Percentage"], errors="coerce")
+            df_rework["Rework_Percentage"] = pd.to_numeric(df_rework["Rework_Percentage"], errors="coerce")
 
             st.markdown("### 📌 Re-Work KPIs")
-            total_jobs_rw = df_rework["Jobs"].sum()
-            total_repeats = df_rework["Install_Repeats"].sum()
-            avg_repeat_pct = df_rework["Repeat_Percentage"].mean()
+            total_jobs_rw = df_rework["Total_Jobs"].sum()
+            total_repeats = df_rework["Rework"].sum()
+            avg_repeat_pct = df_rework["Rework_Percentage"].mean()
 
             c1, c2, c3 = st.columns(3)
             c1.metric("🔧 Total Jobs", int(total_jobs_rw))
-            c2.metric("🔁 Install Repeats", int(total_repeats))
-            c3.metric("📈 Avg Repeat %", f"{avg_repeat_pct:.1f}%")
+            c2.metric("🔁 Total Reworks", int(total_repeats))
+            c3.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
 
             st.markdown("### 🧾 Re-Work Summary Table")
             st.dataframe(df_rework, use_container_width=True)
 
-            st.markdown("### 📊 Repeat % by Technician")
-            fig_re = px.bar(df_rework, x="Technician", y="Repeat_Percentage",
-                            title="Technician Repeat %", text="Repeat_Percentage",
-                            color="Repeat_Percentage", template="plotly_dark", color_continuous_scale="Viridis")
+            st.markdown("### 📊 Rework % by Technician")
+            fig_re = px.bar(df_rework.sort_values("Rework_Percentage", ascending=False),
+                            x="Technician", y="Rework_Percentage",
+                            title="Technician Rework % (Sorted Highest to Lowest)",
+                            text="Rework_Percentage",
+                            color="Rework_Percentage", template="plotly_dark",
+                            color_continuous_scale="Viridis")
             fig_re.update_traces(textposition="outside")
             st.plotly_chart(fig_re, use_container_width=True)
 
@@ -232,20 +236,20 @@ def run_workorders_dashboard():
             if df is not None:
                 merged = pd.merge(
                     grouped_overall.groupby("Technician")["Average_Duration"].mean().reset_index(),
-                    df_rework[["Technician", "Repeat_Percentage"]],
+                    df_rework[["Technician", "Rework_Percentage"]],
                     on="Technician", how="inner"
                 )
                 st.markdown("### ⚙️ Work Orders vs Re-Work Comparison")
                 fig_combined = px.bar(
-                    merged.melt(id_vars="Technician", value_vars=["Average_Duration", "Repeat_Percentage"]),
+                    merged.melt(id_vars="Technician", value_vars=["Average_Duration", "Rework_Percentage"]),
                     x="Technician", y="value", color="variable",
                     barmode="group",
-                    title="Avg Duration vs Repeat % by Technician",
+                    title="Avg Duration vs Rework % by Technician",
                     template="plotly_dark"
                 )
                 st.plotly_chart(fig_combined, use_container_width=True)
 
-            # --- Optional download ---
+            # --- Download option ---
             csv_rework = df_rework.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Download Re-Work Summary CSV", data=csv_rework, file_name="rework_summary.csv", mime="text/csv")
 
