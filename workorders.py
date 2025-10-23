@@ -359,40 +359,68 @@ def run_workorders_dashboard():
                 )
                 st.dataframe(styled_table, use_container_width=True)
 
-                # --- Combined Bar + Line Chart ---
-                st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
+                               # --- Improved Combined Chart: Installations vs Rework % ---
+                st.markdown("### 📊 Installations vs Rework Percentage by Technician")
+
+                # Sort by total installs (most to least)
+                df_chart = df_combined.sort_values("Total_Installations", ascending=False)
+
+                # Create figure with secondary y-axis
                 fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
-                fig_combo.add_trace(go.Bar(
-                    x=df_combined["Technician"],
-                    y=df_combined["Total_Installations"],
-                    name="Total Installations",
-                    marker_color="#00BFFF"
-                ), secondary_y=False)
-                fig_combo.add_trace(go.Scatter(
-                    x=df_combined["Technician"],
-                    y=df_combined["Rework_Percentage"],
-                    name="Rework %",
-                    mode="lines+markers",
-                    line=dict(color="#FF6347", width=3)
-                ), secondary_y=True)
+
+                # --- Bar trace for Total Installations ---
+                fig_combo.add_trace(
+                    go.Bar(
+                        x=df_chart["Technician"],
+                        y=df_chart["Total_Installations"],
+                        name="Total Installations",
+                        marker=dict(color="#1E90FF"),
+                        text=df_chart["Total_Installations"],
+                        textposition="outside",
+                        opacity=0.85
+                    ),
+                    secondary_y=False
+                )
+
+                # --- Line trace for Rework % ---
+                fig_combo.add_trace(
+                    go.Scatter(
+                        x=df_chart["Technician"],
+                        y=df_chart["Rework_Percentage"],
+                        name="Rework %",
+                        mode="lines+markers+text",
+                        line=dict(color="#FFA500", width=3),
+                        marker=dict(size=8, color="#FFA500"),
+                        text=[f"{v:.1f}%" for v in df_chart["Rework_Percentage"]],
+                        textposition="top center"
+                    ),
+                    secondary_y=True
+                )
+
+                # --- Horizontal line for average Rework % ---
                 fig_combo.add_hline(
                     y=avg_repeat_pct,
-                    line_dash="dash",
+                    line_dash="dot",
                     line_color="cyan",
                     annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)",
                     annotation_font_color="cyan",
                     secondary_y=True
                 )
+
+                # --- Layout ---
                 fig_combo.update_layout(
-                    title="Technician Total Installations vs Rework %",
+                    title="Technician Installations vs Rework %",
                     template="plotly_dark",
-                    xaxis_title="Technician",
-                    yaxis_title="Total Installations",
-                    bargap=0.25
+                    xaxis=dict(title="Technician", tickangle=-30, showgrid=False),
+                    yaxis=dict(title="Total Installations", showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
+                    yaxis2=dict(title="Rework %", showgrid=False, range=[0, max(df_chart["Rework_Percentage"].max() * 1.2, 10)]),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+                    bargap=0.3,
+                    height=550
                 )
-                fig_combo.update_yaxes(title_text="Total Installations", secondary_y=False)
-                fig_combo.update_yaxes(title_text="Rework %", secondary_y=True)
+
                 st.plotly_chart(fig_combo, use_container_width=True)
+
 
                 # --- Download Button ---
                 csv_rework = df_combined.to_csv(index=False).encode("utf-8")
