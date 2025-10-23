@@ -163,53 +163,63 @@ def run_workorders_dashboard():
                 k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
                 k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
 
-                # --- Average Time by Work Type Graph (Minutes) ---
+                                # --- NEW: Overall Average Duration by Work Order Type (Minutes) ---
+                st.markdown("""
+                <div style='margin-top:18px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
+                            background:linear-gradient(90deg, #1c1c1c 0%, #5AA9E6 100%);'>
+                    <h4 style='color:white; margin:0;'>⏳ Overall Average Duration by Work Order Type (Minutes)</h4>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Calculate average duration (in minutes) by Work Order Type
                 avg_by_type = (
                     df_filtered.groupby("Work Type")["Duration"]
                     .apply(lambda x: pd.to_numeric(x.str.extract(r'(\d+\.?\d*)')[0], errors='coerce').mean())
                     .reset_index(name="Avg_Duration_Hrs")
-                    .sort_values("Avg_Duration_Hrs", ascending=True)
                 )
+
+                # Convert to minutes
                 avg_by_type["Avg_Duration_Min"] = avg_by_type["Avg_Duration_Hrs"] * 60
-                overall_avg_by_type = avg_by_type["Avg_Duration_Min"].mean()
 
-                st.markdown("""
-                <div style='margin-top:18px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
-                            background:linear-gradient(90deg, #1c1c1c 0%, #5AA9E6 100%);'>
-                    <h4 style='color:white; margin:0;'>⏳ Average Time by Work Type (Minutes)</h4>
-                </div>
-                """, unsafe_allow_html=True)
+                # Sort from longest to shortest
+                avg_by_type = avg_by_type.sort_values("Avg_Duration_Min", ascending=False)
 
-                fig_avg_type = px.bar(
+                # Overall average across all work types
+                overall_avg = avg_by_type["Avg_Duration_Min"].mean()
+
+                # --- Create Chart ---
+                fig_avg_worktype = px.bar(
                     avg_by_type,
-                    y="Work Type",
-                    x="Avg_Duration_Min",
-                    orientation="h",
+                    x="Work Type",
+                    y="Avg_Duration_Min",
                     text="Avg_Duration_Min",
-                    title="Average Time by Work Type (Minutes)",
-                    template="plotly_dark",
                     color="Avg_Duration_Min",
-                    color_continuous_scale="Viridis"
+                    color_continuous_scale="Viridis",
+                    title="Overall Average Duration by Work Order Type (Minutes)",
+                    template="plotly_dark"
                 )
 
-                fig_avg_type.add_vline(
-                    x=overall_avg_by_type,
+                # Add average line
+                fig_avg_worktype.add_hline(
+                    y=overall_avg,
                     line_dash="dash",
                     line_color="cyan",
-                    annotation_text=f"Overall Avg ({overall_avg_by_type:.0f} min)",
-                    annotation_position="top right",
+                    annotation_text=f"Overall Avg ({overall_avg:.0f} min)",
+                    annotation_position="top left",
                     annotation_font_color="cyan"
                 )
 
-                fig_avg_type.update_traces(texttemplate='%{text:.0f} min', textposition='outside')
-                fig_avg_type.update_layout(
-                    yaxis_title="Work Type",
-                    xaxis_title="Average Duration (Minutes)",
+                # Beautify layout
+                fig_avg_worktype.update_traces(texttemplate='%{text:.0f} min', textposition='outside')
+                fig_avg_worktype.update_layout(
+                    xaxis_title="Work Order Type",
+                    yaxis_title="Average Duration (Minutes)",
                     uniformtext_minsize=8,
                     uniformtext_mode='hide'
                 )
 
-                st.plotly_chart(fig_avg_type, use_container_width=True)
+                st.plotly_chart(fig_avg_worktype, use_container_width=True)
+
 
                 # --- Divider ---
                 st.markdown("""
