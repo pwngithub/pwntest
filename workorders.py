@@ -46,14 +46,13 @@ def run_workorders_dashboard():
     st.markdown("<hr>", unsafe_allow_html=True)
 
     # =================================================
-    # SIDEBAR FILE MANAGEMENT (WORK ORDERS + REWORK)
+    # SIDEBAR FILE MANAGEMENT
     # =================================================
     st.sidebar.header("📂 Data Files")
-
     saved_folder = "saved_uploads"
     os.makedirs(saved_folder, exist_ok=True)
 
-    # --- Work Orders File ---
+    # --- Work Orders Upload ---
     st.sidebar.subheader("🧾 Work Orders File")
     mode_wo = st.sidebar.radio("Mode:", ["Upload New", "Load Existing"], key="wo_mode")
     df = None
@@ -75,7 +74,7 @@ def run_workorders_dashboard():
         if selected_wo:
             df = pd.read_csv(os.path.join(saved_folder, selected_wo))
 
-    # --- Rework File ---
+    # --- Rework Upload ---
     st.sidebar.subheader("🔁 Installation Rework File")
     mode_re = st.sidebar.radio("Mode:", ["Upload New", "Load Existing"], key="re_mode")
     df_rework = None
@@ -100,7 +99,7 @@ def run_workorders_dashboard():
     st.markdown("---")
 
     # =====================================================
-    # 🧾 WORK ORDERS SECTION (COLLAPSIBLE)
+    # 🧾 WORK ORDERS SECTION
     # =====================================================
     if df is not None:
         with st.expander("🧾 Work Orders Dashboard", expanded=True):
@@ -136,7 +135,7 @@ def run_workorders_dashboard():
             if df_filtered.empty:
                 st.warning("No data matches your filters.")
             else:
-                # --- Styled KPI Header ---
+                # --- Header ---
                 st.markdown("""
                 <div style='margin-top:10px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
                             background:linear-gradient(90deg, #1c1c1c 0%, #004aad 100%);'>
@@ -144,6 +143,7 @@ def run_workorders_dashboard():
                 </div>
                 """, unsafe_allow_html=True)
 
+                # --- KPI Calculations ---
                 duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
                 total_jobs = df_filtered["WO#"].nunique()
                 avg_duration = duration.mean() or 0
@@ -152,6 +152,7 @@ def run_workorders_dashboard():
                 tech_count = df_filtered["Technician"].nunique()
                 avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
 
+                # --- KPI Display
                 k1, k2, k3 = st.columns(3)
                 k1.metric("🔧 Total Jobs", total_jobs)
                 k2.metric("👨‍🔧 Technicians", tech_count)
@@ -182,8 +183,23 @@ def run_workorders_dashboard():
                               title="Jobs by Work Type & Technician", template="plotly_dark")
                 st.plotly_chart(fig1, use_container_width=True)
 
+                fig2 = px.bar(grouped, x="Work Type", y="Avg_Duration", color="Technician",
+                              title="Avg Duration by Work Type & Technician", template="plotly_dark")
+                st.plotly_chart(fig2, use_container_width=True)
+
+                # --- Avg Duration by Technician Table ---
+                st.markdown("### 🧾 Average Duration by Technician")
+                avg_duration_by_tech = (
+                    df_filtered.groupby("Technician")["Duration"]
+                    .apply(lambda x: pd.to_numeric(x.str.extract(r'(\\d+\\.?\\d*)')[0], errors='coerce').mean())
+                    .reset_index()
+                    .rename(columns={"Duration": "Average Duration (hrs)"})
+                    .sort_values("Average Duration (hrs)")
+                )
+                st.dataframe(avg_duration_by_tech.style.format({"Average Duration (hrs)": "{:.2f}"}), use_container_width=True)
+
     # =====================================================
-    # 🔁 INSTALLATION REWORK SECTION (COLLAPSIBLE)
+    # 🔁 INSTALLATION REWORK SECTION
     # =====================================================
     if df_rework is not None and not df_rework.empty:
         with st.expander("🔁 Installation Rework Analysis", expanded=False):
@@ -208,7 +224,7 @@ def run_workorders_dashboard():
                 )
                 df_combined = df_combined.sort_values("Total_Installations", ascending=False)
 
-                # --- Styled KPI Header ---
+                # --- Header ---
                 st.markdown("""
                 <div style='margin-top:10px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
                             background:linear-gradient(90deg, #1c1c1c 0%, #8BC53F 100%);'>
@@ -230,7 +246,7 @@ def run_workorders_dashboard():
                 <hr style='border: 0; height: 3px; background-image: linear-gradient(to right, #8BC53F, #004aad, #8BC53F); margin:30px 0;'>
                 """, unsafe_allow_html=True)
 
-                # --- Table ---
+                # --- Visualized Table ---
                 st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
                 def color_rework(val):
                     if pd.isna(val):
