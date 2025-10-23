@@ -185,7 +185,7 @@ def run_workorders_dashboard():
         else:
             st.sidebar.warning("No saved files found for Installation Rework.")
 
-          # --- Parse Installation Rework File ---
+             # --- Parse Installation Rework File ---
     if df_rework is not None and not df_rework.empty:
         try:
             parsed_rows = []
@@ -216,6 +216,9 @@ def run_workorders_dashboard():
                 .str.strip()
             )
             df_combined["Rework_Percentage"] = pd.to_numeric(df_combined["Rework_Percentage"], errors="coerce")
+
+            # Sort technicians by Total Installations (descending)
+            df_combined = df_combined.sort_values("Total_Installations", ascending=False)
 
             # --- KPIs ---
             st.markdown("### 📌 Installation Rework KPIs")
@@ -252,35 +255,59 @@ def run_workorders_dashboard():
             )
             st.dataframe(styled_table, use_container_width=True)
 
-            # --- Bar + Line Combo Chart ---
+            # --- Combined Bar + Line Chart (with Secondary Y-Axis) ---
             st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
 
-            fig_combo = px.bar(
-                df_combined,
-                x="Technician",
-                y="Total_Installations",
-                title="Technician Installations vs Rework %",
-                template="plotly_dark",
-                color_discrete_sequence=["#00BFFF"]
+            # Create base figure with secondary Y-axis
+            import plotly.graph_objects as go
+            from plotly.subplots import make_subplots
+
+            fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
+
+            # Bars: Total Installations
+            fig_combo.add_trace(
+                go.Bar(
+                    x=df_combined["Technician"],
+                    y=df_combined["Total_Installations"],
+                    name="Total Installations",
+                    marker_color="#00BFFF"
+                ),
+                secondary_y=False
             )
 
-            # Add Rework % as line
-            fig_combo.add_scatter(
-                x=df_combined["Technician"],
-                y=df_combined["Rework_Percentage"],
-                mode="lines+markers",
-                name="Rework %",
-                line=dict(color="#FF6347", width=3)
+            # Line: Rework %
+            fig_combo.add_trace(
+                go.Scatter(
+                    x=df_combined["Technician"],
+                    y=df_combined["Rework_Percentage"],
+                    name="Rework %",
+                    mode="lines+markers",
+                    line=dict(color="#FF6347", width=3)
+                ),
+                secondary_y=True
             )
 
-            # Add average line
+            # Add average line for Rework %
             fig_combo.add_hline(
                 y=avg_repeat_pct,
                 line_dash="dash",
                 line_color="cyan",
                 annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)",
-                annotation_font_color="cyan"
+                annotation_font_color="cyan",
+                secondary_y=True
             )
+
+            # Layout adjustments
+            fig_combo.update_layout(
+                title="Technician Total Installations vs Rework %",
+                template="plotly_dark",
+                xaxis_title="Technician",
+                yaxis_title="Total Installations",
+                legend=dict(x=0.01, y=0.99, bgcolor="rgba(0,0,0,0)"),
+                bargap=0.25
+            )
+            fig_combo.update_yaxes(title_text="Total Installations", secondary_y=False)
+            fig_combo.update_yaxes(title_text="Rework %", secondary_y=True)
 
             st.plotly_chart(fig_combo, use_container_width=True)
 
