@@ -339,45 +339,44 @@ def run_workorders_dashboard():
                 <hr style='border: 0; height: 3px; background-image: linear-gradient(to right, #8BC53F, #004aad, #8BC53F); margin:30px 0;'>
                 """, unsafe_allow_html=True)
 
-                                # --- Enhanced Visualized Table (No Green for Rework %) ---
+                                             # --- Visualized Table: Highlight ONLY Highest Percentage ---
                 st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
 
-                # Find top values for highlighting
+                # Find top values
                 max_installs = df_combined["Total_Installations"].max()
                 max_rework = df_combined["Rework"].max()
+                max_pct = df_combined["Rework_Percentage"].max()
 
                 # --- Define color functions ---
-                def color_rework_pct(val):
-                    """Color code rework percentage (no green)."""
-                    if pd.isna(val):
-                        return ''
-                    elif val < 10:
-                        return 'background-color: #FFD700; color: black;'  # Yellow (<10%)
-                    else:
-                        return 'background-color: #FF6347; color: white;'  # Red (>=10%)
-
-                def highlight_high_rework(val):
-                    if val == max_rework:
+                def highlight_highest_percentage(val):
+                    if val == max_pct:
                         return 'background-color: #FFD700; color: black; font-weight: bold;'
-                    return ''
+                    return 'color: white; background-color: black;'
 
                 def highlight_high_installs(val):
                     if val == max_installs:
                         return 'background-color: #FFD700; color: black; font-weight: bold;'
-                    return ''
+                    return 'color: white; background-color: black;'
+
+                def highlight_high_rework(val):
+                    if val == max_rework:
+                        return 'background-color: #FFD700; color: black; font-weight: bold;'
+                    return 'color: white; background-color: black;'
 
                 # --- Apply styling ---
                 styled_table = (
                     df_combined.style
-                    .applymap(color_rework_pct, subset=['Rework_Percentage'])
                     .applymap(highlight_high_installs, subset=['Total_Installations'])
                     .applymap(highlight_high_rework, subset=['Rework'])
+                    .applymap(highlight_highest_percentage, subset=['Rework_Percentage'])
                     .format({
                         'Total_Installations': '{:.0f}',
                         'Rework': '{:.0f}',
                         'Rework_Percentage': '{:.1f}%'
                     })
                 )
+
+                st.dataframe(styled_table, use_container_width=True)
 
                 st.dataframe(styled_table, use_container_width=True)
 
