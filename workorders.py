@@ -205,6 +205,45 @@ def run_workorders_dashboard():
                 )
                 st.plotly_chart(fig_avg_worktype, use_container_width=True)
 
+                                # --- Average Duration per Technician per Work Order Type (Minutes) ---
+                st.markdown("""
+                <div style='margin-top:25px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
+                            background:linear-gradient(90deg, #1c1c1c 0%, #8BC53F 100%);'>
+                    <h4 style='color:white; margin:0;'>👨‍🔧 Average Duration per Technician per Work Order Type (Minutes)</h4>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Convert duration column to numeric (already in minutes)
+                df_filtered["Duration_Num"] = pd.to_numeric(
+                    df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0],
+                    errors="coerce"
+                )
+
+                # Create pivot table
+                pivot_table = (
+                    df_filtered.pivot_table(
+                        index="Technician",
+                        columns="Work Type",
+                        values="Duration_Num",
+                        aggfunc="mean"
+                    )
+                    .round(1)
+                    .fillna(0)
+                )
+
+                # Add overall average column (minutes)
+                pivot_table["Overall Avg (min)"] = pivot_table.mean(axis=1)
+                pivot_table = pivot_table.sort_values("Overall Avg (min)", ascending=False)
+
+                # Format + style
+                styled_pivot = (
+                    pivot_table.style
+                    .format("{:.1f}")
+                    .background_gradient(cmap="viridis", axis=None)
+                )
+
+                st.dataframe(styled_pivot, use_container_width=True)
+
                 # --- Divider ---
                 st.markdown("""
                 <hr style='border: 0; height: 3px; background-image: linear-gradient(to right, #004aad, #8BC53F, #004aad); margin:30px 0;'>
