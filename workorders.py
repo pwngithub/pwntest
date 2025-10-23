@@ -198,7 +198,7 @@ def run_workorders_dashboard():
                 fig_avg_worktype.update_layout(xaxis_title="Work Order Type", yaxis_title="Average Duration (Minutes)")
                 st.plotly_chart(fig_avg_worktype, use_container_width=True)
 
-                # --- Average Duration per Technician per Work Type (Minutes) ---
+                               # --- Average Duration per Technician per Work Order Type (Minutes) ---
                 st.markdown("""
                 <div style='margin-top:25px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
                             background:linear-gradient(90deg, #1c1c1c 0%, #8BC53F 100%);'>
@@ -206,16 +206,46 @@ def run_workorders_dashboard():
                 </div>
                 """, unsafe_allow_html=True)
 
-                pivot_table = (
-                    df_filtered.pivot_table(index="Technician", columns="Work Type", values="Duration_Num", aggfunc="mean")
-                    .round(1)
-                    .fillna(0)
+                # Ensure numeric duration (in minutes)
+                df_filtered["Duration_Num"] = pd.to_numeric(
+                    df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0],
+                    errors="coerce"
                 )
-                pivot_table["Overall Avg (min)"] = pivot_table.mean(axis=1)
+
+                # Build all technician/work type combinations to ensure everyone appears
+                all_techs = sorted(df_filtered["Technician"].unique())
+                all_types = sorted(df_filtered["Work Type"].unique())
+
+                # Pivot table (keep all techs and work types)
+                pivot_table = (
+                    df_filtered.pivot_table(
+                        index="Technician",
+                        columns="Work Type",
+                        values="Duration_Num",
+                        aggfunc="mean"
+                    )
+                    .reindex(index=all_techs, columns=all_types, fill_value=0)
+                    .round(1)
+                )
+
+                # Add overall average per tech (row-wise)
+                pivot_table["Overall Avg (min)"] = pivot_table.replace(0, pd.NA).mean(axis=1).round(1)
+
+                # Fill remaining NaN values with 0 (clean look)
+                pivot_table = pivot_table.fillna(0)
+
+                # Sort by overall average
                 pivot_table = pivot_table.sort_values("Overall Avg (min)", ascending=False)
 
-                styled_pivot = pivot_table.style.format("{:.1f}").background_gradient(cmap="viridis", axis=None)
+                # Style for dark theme
+                styled_pivot = (
+                    pivot_table.style
+                    .format("{:.1f}")
+                    .background_gradient(cmap="viridis", axis=None)
+                )
+
                 st.dataframe(styled_pivot, use_container_width=True)
+
 
     # =====================================================
     # 🔁 INSTALLATION REWORK SECTION
