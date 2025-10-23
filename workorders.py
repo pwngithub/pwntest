@@ -99,7 +99,7 @@ def run_workorders_dashboard():
 
     st.markdown("---")
 
-    # =====================================================
+       # =====================================================
     # SECTION 1: WORK ORDERS DASHBOARD
     # =====================================================
     if df is not None:
@@ -115,6 +115,13 @@ def run_workorders_dashboard():
 
         if "Techinician" in df.columns and "Technician" not in df.columns:
             df.rename(columns={"Techinician": "Technician"}, inplace=True)
+
+        # --- Section Header ---
+        st.markdown("""
+        <hr style="border: 1px solid #8BC53F; margin-top: 25px; margin-bottom: 15px;">
+        <h2 style='color:#8BC53F; text-align:center;'>🧾 WORK ORDERS DASHBOARD</h2>
+        <hr style="border: 1px solid #8BC53F; margin-top: 10px; margin-bottom: 25px;">
+        """, unsafe_allow_html=True)
 
         # --- Filters ---
         min_day, max_day = df["Day"].min(), df["Day"].max()
@@ -134,7 +141,8 @@ def run_workorders_dashboard():
         if df_filtered.empty:
             st.warning("No data matches your filters.")
         else:
-            st.markdown("### 📌 Work Orders KPIs")
+            # --- Work Orders KPIs ---
+            st.markdown("### 📌 Key Performance Indicators")
             duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
             total_jobs = df_filtered["WO#"].nunique()
             avg_duration = duration.mean() or 0
@@ -144,15 +152,22 @@ def run_workorders_dashboard():
             avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
 
             k1, k2, k3 = st.columns(3)
-            k1.metric("🔧 Total Jobs", total_jobs)
-            k2.metric("👨‍🔧 Technicians", tech_count)
-            k3.metric("📈 Avg Jobs/Tech", f"{avg_jobs_per_tech:.1f}")
+            with k1:
+                st.metric("🔧 Total Jobs", total_jobs)
+            with k2:
+                st.metric("👨‍🔧 Technicians", tech_count)
+            with k3:
+                st.metric("📈 Avg Jobs/Tech", f"{avg_jobs_per_tech:.1f}")
 
             k4, k5, k6 = st.columns(3)
-            k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
-            k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
-            k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
+            with k4:
+                st.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
+            with k5:
+                st.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
+            with k6:
+                st.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
 
+            # --- Charts ---
             grouped = (
                 df_filtered.groupby(["Technician", "Work Type"])
                 .agg(
@@ -163,7 +178,8 @@ def run_workorders_dashboard():
             )
 
             st.subheader("📊 Work Orders Charts")
-            fig1 = px.bar(grouped, x="Work Type", y="Total_Jobs", color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
+            fig1 = px.bar(grouped, x="Work Type", y="Total_Jobs", color="Technician",
+                          title="Jobs by Work Type & Technician", template="plotly_dark")
             st.plotly_chart(fig1, use_container_width=True)
 
     # =====================================================
@@ -171,6 +187,13 @@ def run_workorders_dashboard():
     # =====================================================
     if df_rework is not None and not df_rework.empty:
         try:
+            st.markdown("""
+            <hr style="border: 1px solid #8BC53F; margin-top: 40px; margin-bottom: 15px;">
+            <h2 style='color:#8BC53F; text-align:center;'>🔁 INSTALLATION REWORK ANALYSIS</h2>
+            <hr style="border: 1px solid #8BC53F; margin-top: 10px; margin-bottom: 25px;">
+            """, unsafe_allow_html=True)
+
+            # --- Parse Rework File ---
             parsed_rows = []
             for _, row in df_rework.iterrows():
                 values = row.tolist()
@@ -192,17 +215,20 @@ def run_workorders_dashboard():
             df_combined = df_combined.sort_values("Total_Installations", ascending=False)
 
             # --- KPIs ---
-            st.markdown("## 🔁 Installation Rework Analysis")
+            st.markdown("### 📌 Key Performance Indicators")
             total_installs = df_combined["Total_Installations"].sum()
             total_repeats = df_combined["Rework"].sum()
             avg_repeat_pct = df_combined["Rework_Percentage"].mean()
 
             c1, c2, c3 = st.columns(3)
-            c1.metric("🏗️ Total Installations", int(total_installs))
-            c2.metric("🔁 Total Reworks", int(total_repeats))
-            c3.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
+            with c1:
+                st.metric("🏗️ Total Installations", int(total_installs))
+            with c2:
+                st.metric("🔁 Total Reworks", int(total_repeats))
+            with c3:
+                st.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
 
-            # --- Visual Table ---
+            # --- Table ---
             st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
             def color_rework(val):
                 if pd.isna(val):
@@ -216,15 +242,11 @@ def run_workorders_dashboard():
             styled_table = (
                 df_combined.style
                 .applymap(color_rework, subset=['Rework_Percentage'])
-                .format({
-                    'Rework_Percentage': '{:.1f}%',
-                    'Total_Installations': '{:.0f}',
-                    'Rework': '{:.0f}'
-                })
+                .format({'Rework_Percentage': '{:.1f}%', 'Total_Installations': '{:.0f}', 'Rework': '{:.0f}'})
             )
             st.dataframe(styled_table, use_container_width=True)
 
-            # --- Combined Bar + Line Chart ---
+            # --- Chart ---
             st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
             fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
             fig_combo.add_trace(go.Bar(x=df_combined["Technician"], y=df_combined["Total_Installations"], name="Total Installations", marker_color="#00BFFF"), secondary_y=False)
@@ -235,7 +257,7 @@ def run_workorders_dashboard():
             fig_combo.update_yaxes(title_text="Rework %", secondary_y=True)
             st.plotly_chart(fig_combo, use_container_width=True)
 
-            # --- Download option ---
+            # --- Download ---
             csv_rework = df_combined.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Download Installation Rework Summary CSV", data=csv_rework, file_name="installation_rework_summary.csv", mime="text/csv")
 
