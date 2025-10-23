@@ -136,45 +136,55 @@ def run_workorders_dashboard():
             if df_filtered.empty:
                 st.warning("No data matches your filters.")
             else:
-                                # --- Robust Duration Conversion (ignore blanks in averages) ---
+                                                # --- Robust Duration Conversion (handles mixed cases & plural units) ---
+                import re
+
                 def parse_duration(val):
-                    """Convert mixed duration formats to minutes. Ignore missing/invalid entries."""
+                    """Convert any readable duration format to minutes. Ignore missing/invalid entries."""
                     if pd.isna(val):
                         return None
-                    val = str(val).strip().lower()
+                    val = str(val).strip().lower().replace(" ", "")
 
-                    # Handle hh:mm format
-                    if ":" in val:
+                    # Match hh:mm or h:m
+                    if re.match(r"^\d+:\d+$", val):
                         try:
                             h, m = val.split(":")
                             return float(h) * 60 + float(m)
                         except Exception:
                             return None
 
-                    # Handle "x hr" or "x hour"
-                    if "hr" in val or "hour" in val:
+                    # Handle combined hour+minute strings (e.g. '1h15m', '1hr15min')
+                    match = re.match(r"(?:(\d+(?:\.\d+)?)h(?:r|rs)?)?(?:(\d+(?:\.\d+)?)m(?:in|ins)?)?", val)
+                    if match:
+                        hours = float(match.group(1)) if match.group(1) else 0
+                        minutes = float(match.group(2)) if match.group(2) else 0
+                        if hours == 0 and minutes == 0:
+                            return None
+                        return hours * 60 + minutes
+
+                    # Handle pure hours ('1.5h', '2hr', '2hrs')
+                    if "h" in val:
                         try:
-                            num = float("".join(ch for ch in val if ch.isdigit() or ch == "."))
+                            num = float(re.findall(r"[\d\.]+", val)[0])
                             return num * 60
                         except Exception:
                             return None
 
-                    # Handle "x min" or "minutes"
-                    if "min" in val:
+                    # Handle pure minutes ('45min', '70mins', '30m')
+                    if "m" in val:
                         try:
-                            num = float("".join(ch for ch in val if ch.isdigit() or ch == "."))
+                            num = float(re.findall(r"[\d\.]+", val)[0])
                             return num
                         except Exception:
                             return None
 
-                    # Handle plain numbers
+                    # Handle numeric only
                     try:
                         num = float(val)
-                        if num == 0:
-                            return None  # treat zero as missing, not a real job
-                        return num
+                        return num if num > 0 else None
                     except Exception:
                         return None
+
 
 
                 df_filtered["Duration_Num"] = df_filtered["Duration"].apply(parse_duration)
