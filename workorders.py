@@ -336,13 +336,14 @@ def run_workorders_dashboard():
                 <hr style='border: 0; height: 3px; background-image: linear-gradient(to right, #8BC53F, #004aad, #8BC53F); margin:30px 0;'>
                 """, unsafe_allow_html=True)
 
-                                # --- Visualized Table with Enhanced Highlighting ---
+                                                # --- Enhanced Visualized Table with Highlights ---
                 st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
 
-                # Find the maximum rework count
+                # Find top values for highlighting
+                max_installs = df_combined["Total_Installations"].max()
                 max_rework = df_combined["Rework"].max()
 
-                # Define color styles
+                # --- Define color functions ---
                 def color_rework_pct(val):
                     if pd.isna(val):
                         return ''
@@ -355,8 +356,28 @@ def run_workorders_dashboard():
 
                 def highlight_high_rework(val):
                     if val == max_rework:
-                        return 'background-color: #FFD700; color: black; font-weight: bold;'  # Bright yellow
+                        return 'background-color: #FFD700; color: black; font-weight: bold;'  # Yellow for top Rework
                     return ''
+
+                def highlight_high_installs(val):
+                    if val == max_installs:
+                        return 'background-color: #FFD700; color: black; font-weight: bold;'  # Yellow for top Installs
+                    return ''
+
+                # --- Apply styling ---
+                styled_table = (
+                    df_combined.style
+                    .applymap(color_rework_pct, subset=['Rework_Percentage'])
+                    .applymap(highlight_high_installs, subset=['Total_Installations'])
+                    .applymap(highlight_high_rework, subset=['Rework'])
+                    .format({
+                        'Total_Installations': '{:.0f}',
+                        'Rework': '{:.0f}',
+                        'Rework_Percentage': '{:.1f}%'
+                    })
+                )
+
+                st.dataframe(styled_table, use_container_width=True)
 
                 # Apply styling
                 styled_table = (
