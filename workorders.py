@@ -143,7 +143,14 @@ def run_workorders_dashboard():
                 </div>
                 """, unsafe_allow_html=True)
 
-                df_filtered["Duration_Num"] = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
+                # --- Safe numeric conversion for Duration ---
+                df_filtered["Duration_Num"] = (
+                    df_filtered["Duration"]
+                    .astype(str)
+                    .str.extract(r"(\d+\.?\d*)")[0]
+                )
+                df_filtered["Duration_Num"] = pd.to_numeric(df_filtered["Duration_Num"], errors="coerce").fillna(0.0)
+
                 total_jobs = df_filtered["WO#"].nunique()
                 avg_duration = df_filtered["Duration_Num"].mean() or 0
                 max_duration = df_filtered["Duration_Num"].max() or 0
@@ -195,10 +202,9 @@ def run_workorders_dashboard():
                     annotation_font_color="cyan"
                 )
                 fig_avg_worktype.update_traces(texttemplate='%{text:.1f} min', textposition='outside')
-                fig_avg_worktype.update_layout(xaxis_title="Work Order Type", yaxis_title="Average Duration (Minutes)")
                 st.plotly_chart(fig_avg_worktype, use_container_width=True)
 
-                               # --- Average Duration per Technician per Work Order Type (Minutes) ---
+                # --- Average Duration per Technician per Work Order Type ---
                 st.markdown("""
                 <div style='margin-top:25px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
                             background:linear-gradient(90deg, #1c1c1c 0%, #8BC53F 100%);'>
@@ -206,46 +212,24 @@ def run_workorders_dashboard():
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Ensure numeric duration (in minutes)
-                df_filtered["Duration_Num"] = pd.to_numeric(
-                    df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0],
-                    errors="coerce"
-                )
-
-                # Build all technician/work type combinations to ensure everyone appears
                 all_techs = sorted(df_filtered["Technician"].unique())
                 all_types = sorted(df_filtered["Work Type"].unique())
 
-                # Pivot table (keep all techs and work types)
                 pivot_table = (
-                    df_filtered.pivot_table(
-                        index="Technician",
-                        columns="Work Type",
-                        values="Duration_Num",
-                        aggfunc="mean"
-                    )
-                    .reindex(index=all_techs, columns=all_types, fill_value=0)
+                    df_filtered.pivot_table(index="Technician", columns="Work Type", values="Duration_Num", aggfunc="mean")
+                    .reindex(index=all_techs, columns=all_types, fill_value=pd.NA)
                     .round(1)
                 )
 
-                # Add overall average per tech (row-wise)
-                pivot_table["Overall Avg (min)"] = pivot_table.replace(0, pd.NA).mean(axis=1).round(1)
-
-                # Fill remaining NaN values with 0 (clean look)
-                pivot_table = pivot_table.fillna(0)
-
-                # Sort by overall average
+                pivot_table["Overall Avg (min)"] = pivot_table.mean(axis=1, skipna=True).round(1)
                 pivot_table = pivot_table.sort_values("Overall Avg (min)", ascending=False)
 
-                # Style for dark theme
                 styled_pivot = (
                     pivot_table.style
-                    .format("{:.1f}")
+                    .format(lambda x: "—" if pd.isna(x) else f"{x:.1f}")
                     .background_gradient(cmap="viridis", axis=None)
                 )
-
                 st.dataframe(styled_pivot, use_container_width=True)
-
 
     # =====================================================
     # 🔁 INSTALLATION REWORK SECTION
@@ -288,10 +272,9 @@ def run_workorders_dashboard():
                 c2.metric("🔁 Total Reworks", int(total_repeats))
                 c3.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
 
-                # --- Divider ---
                 st.markdown("<hr style='border: 0; height: 3px; background-image: linear-gradient(to right, #8BC53F, #004aad, #8BC53F); margin:30px 0;'>", unsafe_allow_html=True)
 
-                # --- Visualized Table ---
+                # --- Table ---
                 st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
 
                 max_installs = df_combined["Total_Installations"].max()
@@ -316,9 +299,8 @@ def run_workorders_dashboard():
                 )
                 st.dataframe(styled_table, use_container_width=True)
 
-                # --- Combined Chart ---
+                # --- Chart ---
                 st.markdown("### 📊 Installations vs Rework Percentage by Technician")
-
                 df_chart = df_combined.sort_values("Total_Installations", ascending=False)
                 fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
 
@@ -327,7 +309,6 @@ def run_workorders_dashboard():
 
                 fig_combo.add_hline(y=avg_repeat_pct, line_dash="dot", line_color="cyan", annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)", annotation_font_color="cyan", secondary_y=True)
                 fig_combo.update_layout(title="Technician Installations vs Rework %", template="plotly_dark", xaxis=dict(title="Technician", tickangle=-30, showgrid=False), yaxis=dict(title="Total Installations", showgrid=True, gridcolor="rgba(255,255,255,0.1)"), yaxis2=dict(title="Rework %", showgrid=False, range=[0, max(df_chart["Rework_Percentage"].max() * 1.2, 10)]), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5), bargap=0.3, height=550)
-
                 st.plotly_chart(fig_combo, use_container_width=True)
 
                 # --- Download Button ---
