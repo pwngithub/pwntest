@@ -182,84 +182,77 @@ def run_workorders_dashboard():
                           title="Jobs by Work Type & Technician", template="plotly_dark")
             st.plotly_chart(fig1, use_container_width=True)
 
-    # =====================================================
-    # SECTION 2: INSTALLATION REWORK ANALYSIS
-    # =====================================================
-    if df_rework is not None and not df_rework.empty:
-        try:
-            st.markdown("""
-            <hr style="border: 1px solid #8BC53F; margin-top: 40px; margin-bottom: 15px;">
-            <h2 style='color:#8BC53F; text-align:center;'>🔁 INSTALLATION REWORK ANALYSIS</h2>
-            <hr style="border: 1px solid #8BC53F; margin-top: 10px; margin-bottom: 25px;">
-            """, unsafe_allow_html=True)
+    # =============================
+# 🔁 INSTALLATION REWORK SECTION
+# =============================
+with st.expander("🔁 Installation Rework Analysis", expanded=True):
 
-            # --- Parse Rework File ---
-            parsed_rows = []
-            for _, row in df_rework.iterrows():
-                values = row.tolist()
-                if str(row[1]).startswith("Install"):
-                    base_subset = [values[i] for i in [0, 2, 3, 4] if i < len(values)]
-                else:
-                    base_subset = [values[i] for i in [0, 1, 2, 3] if i < len(values)]
-                while len(base_subset) < 4:
-                    base_subset.append(None)
-                parsed_rows.append(base_subset)
+    # --- Styled Header Bar ---
+    st.markdown("""
+    <div style='margin-top:10px; margin-bottom:10px; padding:10px 15px; border-radius:10px;
+                 background:linear-gradient(90deg, #1c1c1c 0%, #8BC53F 100%);'>
+        <h3 style='color:white; margin:0;'>📊 Installation Rework KPIs</h3>
+    </div>
+    """, unsafe_allow_html=True)
 
-            df_combined = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Installations", "Rework", "Rework_Percentage"])
-            df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
-            df_combined["Total_Installations"] = pd.to_numeric(df_combined["Total_Installations"], errors="coerce")
-            df_combined["Rework"] = pd.to_numeric(df_combined["Rework"], errors="coerce")
-            df_combined["Rework_Percentage"] = pd.to_numeric(
-                df_combined["Rework_Percentage"].astype(str).str.replace("%", "").str.strip(), errors="coerce"
-            )
-            df_combined = df_combined.sort_values("Total_Installations", ascending=False)
+    # --- KPIs ---
+    total_installs = df_combined["Total_Installations"].sum()
+    total_repeats = df_combined["Rework"].sum()
+    avg_repeat_pct = df_combined["Rework_Percentage"].mean()
 
-            # --- KPIs ---
-            st.markdown("### 📌 Key Performance Indicators")
-            total_installs = df_combined["Total_Installations"].sum()
-            total_repeats = df_combined["Rework"].sum()
-            avg_repeat_pct = df_combined["Rework_Percentage"].mean()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🏗️ Total Installations", int(total_installs))
+    c2.metric("🔁 Total Reworks", int(total_repeats))
+    c3.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
 
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("🏗️ Total Installations", int(total_installs))
-            with c2:
-                st.metric("🔁 Total Reworks", int(total_repeats))
-            with c3:
-                st.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
+    # --- Divider ---
+    st.markdown("""
+    <hr style='border: 0; height: 3px; background-image: linear-gradient(to right, #8BC53F, #004aad, #8BC53F); margin:30px 0;'>
+    """, unsafe_allow_html=True)
 
-            # --- Table ---
-            st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
-            def color_rework(val):
-                if pd.isna(val):
-                    return ''
-                elif val < 5:
-                    return 'background-color: #3CB371; color: white;'
-                elif val < 10:
-                    return 'background-color: #FFD700; color: black;'
-                else:
-                    return 'background-color: #FF6347; color: white;'
-            styled_table = (
-                df_combined.style
-                .applymap(color_rework, subset=['Rework_Percentage'])
-                .format({'Rework_Percentage': '{:.1f}%', 'Total_Installations': '{:.0f}', 'Rework': '{:.0f}'})
-            )
-            st.dataframe(styled_table, use_container_width=True)
+    # --- Visualized Table ---
+    st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
 
-            # --- Chart ---
-            st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
-            fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
-            fig_combo.add_trace(go.Bar(x=df_combined["Technician"], y=df_combined["Total_Installations"], name="Total Installations", marker_color="#00BFFF"), secondary_y=False)
-            fig_combo.add_trace(go.Scatter(x=df_combined["Technician"], y=df_combined["Rework_Percentage"], name="Rework %", mode="lines+markers", line=dict(color="#FF6347", width=3)), secondary_y=True)
-            fig_combo.add_hline(y=avg_repeat_pct, line_dash="dash", line_color="cyan", annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)", annotation_font_color="cyan", secondary_y=True)
-            fig_combo.update_layout(title="Technician Total Installations vs Rework %", template="plotly_dark", xaxis_title="Technician", yaxis_title="Total Installations", bargap=0.25)
-            fig_combo.update_yaxes(title_text="Total Installations", secondary_y=False)
-            fig_combo.update_yaxes(title_text="Rework %", secondary_y=True)
-            st.plotly_chart(fig_combo, use_container_width=True)
+    def color_rework(val):
+        if pd.isna(val):
+            return ''
+        elif val < 5:
+            return 'background-color: #3CB371; color: white;'
+        elif val < 10:
+            return 'background-color: #FFD700; color: black;'
+        else:
+            return 'background-color: #FF6347; color: white;'
 
-            # --- Download ---
-            csv_rework = df_combined.to_csv(index=False).encode("utf-8")
-            st.download_button("⬇️ Download Installation Rework Summary CSV", data=csv_rework, file_name="installation_rework_summary.csv", mime="text/csv")
+    styled_table = (
+        df_combined.style
+        .applymap(color_rework, subset=['Rework_Percentage'])
+        .format({
+            'Rework_Percentage': '{:.1f}%',
+            'Total_Installations': '{:.0f}',
+            'Rework': '{:.0f}'
+        })
+    )
+    st.dataframe(styled_table, use_container_width=True)
 
-        except Exception as e:
-            st.error(f"Error parsing installation rework file: {e}")
+    # --- Bar + Line Chart ---
+    st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
+    fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
+    fig_combo.add_trace(go.Bar(x=df_combined["Technician"], y=df_combined["Total_Installations"],
+                               name="Total Installations", marker_color="#00BFFF"), secondary_y=False)
+    fig_combo.add_trace(go.Scatter(x=df_combined["Technician"], y=df_combined["Rework_Percentage"],
+                                   name="Rework %", mode="lines+markers", line=dict(color="#FF6347", width=3)),
+                        secondary_y=True)
+    fig_combo.add_hline(y=avg_repeat_pct, line_dash="dash", line_color="cyan",
+                        annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)", annotation_font_color="cyan", secondary_y=True)
+    fig_combo.update_layout(title="Technician Total Installations vs Rework %",
+                            template="plotly_dark", xaxis_title="Technician", yaxis_title="Total Installations", bargap=0.25)
+    fig_combo.update_yaxes(title_text="Total Installations", secondary_y=False)
+    fig_combo.update_yaxes(title_text="Rework %", secondary_y=True)
+    st.plotly_chart(fig_combo, use_container_width=True)
+
+    # --- Download option ---
+    csv_rework = df_combined.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Download Installation Rework Summary CSV",
+                       data=csv_rework,
+                       file_name="installation_rework_summary.csv",
+                       mime="text/csv")
