@@ -188,48 +188,65 @@ def run_workorders_dashboard():
         else:
             st.sidebar.warning("No saved files found for Re-Work.")
 
-       # --- Parse Re-Work File ---
+           # --- Parse Re-Work File ---
     if df_rework is not None and not df_rework.empty:
         try:
-            # Determine which rows start with "Install" in column 1
-            df_rework["col1_str"] = df_rework[1].astype(str)
-            install_mask = df_rework["col1_str"].str.startswith("Install", na=False)
-
-            # Initialize list to collect parsed rows
             parsed_rows = []
+            install_rows = []
 
             for _, row in df_rework.iterrows():
                 values = row.tolist()
 
-                # Choose correct mapping depending on column 1
+                # Detect Install rows
                 if str(row[1]).startswith("Install"):
-                    # Use columns [0, 2, 3, 4]
-                    subset = [values[i] for i in [0, 2, 3, 4] if i < len(values)]
+                    # Regular Rework Columns
+                    base_subset = [values[i] for i in [0, 2, 3, 4] if i < len(values)]
+                    # Install KPI Columns
+                    install_subset = [values[i] for i in [0, 7, 8, 9] if i < len(values)]
                 else:
-                    # Use columns [0, 1, 2, 3]
-                    subset = [values[i] for i in [0, 1, 2, 3] if i < len(values)]
+                    # Regular Rework Columns
+                    base_subset = [values[i] for i in [0, 1, 2, 3] if i < len(values)]
+                    # Install KPI Columns
+                    install_subset = [values[i] for i in [0, 6, 7, 8] if i < len(values)]
 
-                # Pad to ensure consistent 4 columns
-                while len(subset) < 4:
-                    subset.append(None)
-                parsed_rows.append(subset)
+                # Ensure 4 values for both sets
+                while len(base_subset) < 4:
+                    base_subset.append(None)
+                while len(install_subset) < 4:
+                    install_subset.append(None)
 
-            # Create DataFrame
+                parsed_rows.append(base_subset)
+                install_rows.append(install_subset)
+
+            # Convert to DataFrames
             df_combined = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Jobs", "Rework", "Rework_Percentage"])
+            df_install = pd.DataFrame(install_rows, columns=["Technician", "Total_Installs", "Install_Rework", "Install_Percent"])
 
-            # Clean & convert
-            df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
-            df_combined["Total_Jobs"] = pd.to_numeric(df_combined["Total_Jobs"], errors="coerce")
-            df_combined["Rework"] = pd.to_numeric(df_combined["Rework"], errors="coerce")
+            # Clean & Convert Regular Rework
+            for col in ["Total_Jobs", "Rework"]:
+                df_combined[col] = pd.to_numeric(df_combined[col], errors="coerce")
             df_combined["Rework_Percentage"] = (
                 df_combined["Rework_Percentage"].astype(str)
                 .str.replace("%", "")
                 .str.replace('"', "")
                 .str.strip()
-            )
-            df_combined["Rework_Percentage"] = pd.to_numeric(df_combined["Rework_Percentage"], errors="coerce")
+            ).astype(float)
+            df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
 
-            # --- KPIs ---
+            # Clean & Convert Install KPIs
+            for col in ["Total_Installs", "Install_Rework"]:
+                df_install[col] = pd.to_numeric(df_install[col], errors="coerce")
+            df_install["Install_Percent"] = (
+                df_install["Install_Percent"].astype(str)
+                .str.replace("%", "")
+                .str.replace('"', "")
+                .str.strip()
+            ).astype(float)
+            df_install["Technician"] = df_install["Technician"].astype(str).str.replace('"', '').str.strip()
+
+            # =============================
+            # 📊 Main Rework KPIs
+            # =============================
             st.markdown("### 📌 Re-Work KPIs")
             total_jobs_rw = df_combined["Total_Jobs"].sum()
             total_repeats = df_combined["Rework"].sum()
@@ -243,6 +260,24 @@ def run_workorders_dashboard():
             st.markdown("### 🧾 Re-Work Summary Table")
             st.dataframe(df_combined, use_container_width=True)
 
+            # =============================
+            # 🧩 Install KPIs
+            # =============================
+            st.markdown("### 🧩 Install KPIs")
+            total_installs = df_install["Total_Installs"].sum()
+            total_install_repeats = df_install["Install_Rework"].sum()
+            avg_install_pct = df_install["Install_Percent"].mean()
+
+            ic1, ic2, ic3 = st.columns(3)
+            ic1.metric("🧩 Total Installs", int(total_installs))
+            ic2.metric("🔁 Installation Reworks", int(total_install_repeats))
+            ic3.metric("📊 Avg Install Repeat %", f"{avg_install_pct:.1f}%")
+
+            st.dataframe(df_install, use_container_width=True)
+
+            # =============================
+            # 📊 Charts
+            # =============================
             st.markdown("### 📊 Rework % by Technician")
             fig_re = px.bar(df_combined.sort_values("Rework_Percentage", ascending=False),
                             x="Technician", y="Rework_Percentage",
@@ -253,7 +288,19 @@ def run_workorders_dashboard():
             fig_re.update_traces(textposition="outside")
             st.plotly_chart(fig_re, use_container_width=True)
 
-            # --- Combined Chart with Work Orders ---
+            st.markdown("### 📊 Install Repeat % by Technician")
+            fig_inst = px.bar(df_install.sort_values("Install_Percent", ascending=False),
+                              x="Technician", y="Install_Percent",
+                              title="Technician Install Repeat % (Sorted Highest to Lowest)",
+                              text="Install_Percent",
+                              color="Install_Percent", template="plotly_dark",
+                              color_continuous_scale="Cividis")
+            fig_inst.update_traces(textposition="outside")
+            st.plotly_chart(fig_inst, use_container_width=True)
+
+            # =============================
+            # ⚙️ Combined Comparison Chart
+            # =============================
             if df is not None:
                 merged = pd.merge(
                     grouped_overall.groupby("Technician")["Average_Duration"].mean().reset_index(),
@@ -276,6 +323,10 @@ def run_workorders_dashboard():
                                data=csv_rework,
                                file_name="rework_summary.csv",
                                mime="text/csv")
+
+        except Exception as e:
+            st.error(f"Error parsing re-work file: {e}")
+
 
         except Exception as e:
             st.error(f"Error parsing re-work file: {e}")
