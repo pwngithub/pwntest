@@ -185,7 +185,7 @@ def run_workorders_dashboard():
         else:
             st.sidebar.warning("No saved files found for Installation Rework.")
 
-       # --- Parse Installation Rework File ---
+          # --- Parse Installation Rework File ---
     if df_rework is not None and not df_rework.empty:
         try:
             parsed_rows = []
@@ -252,33 +252,37 @@ def run_workorders_dashboard():
             )
             st.dataframe(styled_table, use_container_width=True)
 
-            # --- Bubble Chart ---
-            st.markdown("### 📊 Installation Rework Bubble Chart")
+            # --- Bar + Line Combo Chart ---
+            st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
 
-            fig_bubble = px.scatter(
+            fig_combo = px.bar(
                 df_combined,
                 x="Technician",
-                y="Rework_Percentage",
-                size="Total_Installations",
-                color="Rework_Percentage",
-                color_continuous_scale="RdYlGn_r",
-                size_max=40,
-                title="Technician Installation Rework Rate vs Total Installations",
-                hover_data=["Rework", "Total_Installations"]
+                y="Total_Installations",
+                title="Technician Installations vs Rework %",
+                template="plotly_dark",
+                color_discrete_sequence=["#00BFFF"]
+            )
+
+            # Add Rework % as line
+            fig_combo.add_scatter(
+                x=df_combined["Technician"],
+                y=df_combined["Rework_Percentage"],
+                mode="lines+markers",
+                name="Rework %",
+                line=dict(color="#FF6347", width=3)
             )
 
             # Add average line
-            fig_bubble.add_hline(
+            fig_combo.add_hline(
                 y=avg_repeat_pct,
                 line_dash="dash",
                 line_color="cyan",
                 annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)",
-                annotation_position="top left",
                 annotation_font_color="cyan"
             )
 
-            fig_bubble.update_traces(marker=dict(line=dict(width=1, color="DarkSlateGrey")))
-            st.plotly_chart(fig_bubble, use_container_width=True)
+            st.plotly_chart(fig_combo, use_container_width=True)
 
             # --- Download option ---
             csv_rework = df_combined.to_csv(index=False).encode("utf-8")
