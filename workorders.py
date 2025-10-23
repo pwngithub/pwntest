@@ -336,28 +336,42 @@ def run_workorders_dashboard():
                 <hr style='border: 0; height: 3px; background-image: linear-gradient(to right, #8BC53F, #004aad, #8BC53F); margin:30px 0;'>
                 """, unsafe_allow_html=True)
 
-                # --- Visualized Table ---
+                                # --- Visualized Table with Enhanced Highlighting ---
                 st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
-                def color_rework(val):
+
+                # Find the maximum rework count
+                max_rework = df_combined["Rework"].max()
+
+                # Define color styles
+                def color_rework_pct(val):
                     if pd.isna(val):
                         return ''
                     elif val < 5:
-                        return 'background-color: #3CB371; color: white;'
+                        return 'background-color: #3CB371; color: white;'  # Green
                     elif val < 10:
-                        return 'background-color: #FFD700; color: black;'
+                        return 'background-color: #FFD700; color: black;'  # Yellow
                     else:
-                        return 'background-color: #FF6347; color: white;'
+                        return 'background-color: #FF6347; color: white;'  # Red
 
+                def highlight_high_rework(val):
+                    if val == max_rework:
+                        return 'background-color: #FFD700; color: black; font-weight: bold;'  # Bright yellow
+                    return ''
+
+                # Apply styling
                 styled_table = (
                     df_combined.style
-                    .applymap(color_rework, subset=['Rework_Percentage'])
+                    .applymap(color_rework_pct, subset=['Rework_Percentage'])
+                    .applymap(highlight_high_rework, subset=['Rework'])
                     .format({
                         'Rework_Percentage': '{:.1f}%',
                         'Total_Installations': '{:.0f}',
                         'Rework': '{:.0f}'
                     })
                 )
+
                 st.dataframe(styled_table, use_container_width=True)
+
 
                                # --- Improved Combined Chart: Installations vs Rework % ---
                 st.markdown("### 📊 Installations vs Rework Percentage by Technician")
