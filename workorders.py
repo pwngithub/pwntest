@@ -136,31 +136,46 @@ def run_workorders_dashboard():
             if df_filtered.empty:
                 st.warning("No data matches your filters.")
             else:
-                # --- Duration Parser ---
+                                # --- Robust Duration Conversion (ignore blanks in averages) ---
                 def parse_duration(val):
+                    """Convert mixed duration formats to minutes. Ignore missing/invalid entries."""
                     if pd.isna(val):
-                        return 0.0
+                        return None
                     val = str(val).strip().lower()
+
+                    # Handle hh:mm format
                     if ":" in val:
                         try:
                             h, m = val.split(":")
                             return float(h) * 60 + float(m)
                         except Exception:
-                            return 0.0
+                            return None
+
+                    # Handle "x hr" or "x hour"
                     if "hr" in val or "hour" in val:
                         try:
-                            return float("".join(ch for ch in val if ch.isdigit() or ch == ".")) * 60
+                            num = float("".join(ch for ch in val if ch.isdigit() or ch == "."))
+                            return num * 60
                         except Exception:
-                            return 0.0
+                            return None
+
+                    # Handle "x min" or "minutes"
                     if "min" in val:
                         try:
-                            return float("".join(ch for ch in val if ch.isdigit() or ch == "."))
+                            num = float("".join(ch for ch in val if ch.isdigit() or ch == "."))
+                            return num
                         except Exception:
-                            return 0.0
+                            return None
+
+                    # Handle plain numbers
                     try:
-                        return float(val)
+                        num = float(val)
+                        if num == 0:
+                            return None  # treat zero as missing, not a real job
+                        return num
                     except Exception:
-                        return 0.0
+                        return None
+
 
                 df_filtered["Duration_Num"] = df_filtered["Duration"].apply(parse_duration)
 
