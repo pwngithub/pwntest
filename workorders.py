@@ -288,8 +288,8 @@ def run_workorders_dashboard():
 
 
 
-    # =====================================================
-    # 🔁 INSTALLATION REWORK SECTION
+        # =====================================================
+    # 🔁 INSTALLATION REWORK SECTION (FINAL VERSION)
     # =====================================================
     if df_rework is not None and not df_rework.empty:
         with st.expander("🔁 Installation Rework Analysis", expanded=False):
@@ -305,12 +305,14 @@ def run_workorders_dashboard():
                         base_subset.append(None)
                     parsed_rows.append(base_subset)
 
+                # --- Clean & Parse Data ---
                 df_combined = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Installations", "Rework", "Rework_Percentage"])
                 df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
                 df_combined["Total_Installations"] = pd.to_numeric(df_combined["Total_Installations"], errors="coerce")
                 df_combined["Rework"] = pd.to_numeric(df_combined["Rework"], errors="coerce")
                 df_combined["Rework_Percentage"] = pd.to_numeric(
-                    df_combined["Rework_Percentage"].astype(str).str.replace("%", "").str.strip(), errors="coerce"
+                    df_combined["Rework_Percentage"].astype(str).str.replace("%", "").str.strip(),
+                    errors="coerce"
                 )
                 df_combined = df_combined.sort_values("Total_Installations", ascending=False)
 
@@ -322,6 +324,7 @@ def run_workorders_dashboard():
                 </div>
                 """, unsafe_allow_html=True)
 
+                # --- KPIs ---
                 total_installs = df_combined["Total_Installations"].sum()
                 total_repeats = df_combined["Rework"].sum()
                 avg_repeat_pct = df_combined["Rework_Percentage"].mean()
@@ -336,7 +339,7 @@ def run_workorders_dashboard():
                 <hr style='border: 0; height: 3px; background-image: linear-gradient(to right, #8BC53F, #004aad, #8BC53F); margin:30px 0;'>
                 """, unsafe_allow_html=True)
 
-                                                # --- Enhanced Visualized Table with Highlights ---
+                # --- Enhanced Visualized Table ---
                 st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
 
                 # Find top values for highlighting
@@ -356,12 +359,12 @@ def run_workorders_dashboard():
 
                 def highlight_high_rework(val):
                     if val == max_rework:
-                        return 'background-color: #FFD700; color: black; font-weight: bold;'  # Yellow for top Rework
+                        return 'background-color: #FFD700; color: black; font-weight: bold;'  # Yellow
                     return ''
 
                 def highlight_high_installs(val):
                     if val == max_installs:
-                        return 'background-color: #FFD700; color: black; font-weight: bold;'  # Yellow for top Installs
+                        return 'background-color: #FFD700; color: black; font-weight: bold;'  # Yellow
                     return ''
 
                 # --- Apply styling ---
@@ -376,34 +379,17 @@ def run_workorders_dashboard():
                         'Rework_Percentage': '{:.1f}%'
                     })
                 )
-
                 st.dataframe(styled_table, use_container_width=True)
 
-                # Apply styling
-                styled_table = (
-                    df_combined.style
-                    .applymap(color_rework_pct, subset=['Rework_Percentage'])
-                    .applymap(highlight_high_rework, subset=['Rework'])
-                    .format({
-                        'Rework_Percentage': '{:.1f}%',
-                        'Total_Installations': '{:.0f}',
-                        'Rework': '{:.0f}'
-                    })
-                )
-
-                st.dataframe(styled_table, use_container_width=True)
-
-
-                               # --- Improved Combined Chart: Installations vs Rework % ---
+                # --- Improved Combined Chart ---
                 st.markdown("### 📊 Installations vs Rework Percentage by Technician")
 
-                # Sort by total installs (most to least)
+                # Sort by installs
                 df_chart = df_combined.sort_values("Total_Installations", ascending=False)
 
-                # Create figure with secondary y-axis
                 fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
 
-                # --- Bar trace for Total Installations ---
+                # Bar trace (Installs)
                 fig_combo.add_trace(
                     go.Bar(
                         x=df_chart["Technician"],
@@ -417,7 +403,7 @@ def run_workorders_dashboard():
                     secondary_y=False
                 )
 
-                # --- Line trace for Rework % ---
+                # Line trace (Rework %)
                 fig_combo.add_trace(
                     go.Scatter(
                         x=df_chart["Technician"],
@@ -432,7 +418,7 @@ def run_workorders_dashboard():
                     secondary_y=True
                 )
 
-                # --- Horizontal line for average Rework % ---
+                # Horizontal line for avg %
                 fig_combo.add_hline(
                     y=avg_repeat_pct,
                     line_dash="dot",
@@ -442,7 +428,6 @@ def run_workorders_dashboard():
                     secondary_y=True
                 )
 
-                # --- Layout ---
                 fig_combo.update_layout(
                     title="Technician Installations vs Rework %",
                     template="plotly_dark",
@@ -455,7 +440,6 @@ def run_workorders_dashboard():
                 )
 
                 st.plotly_chart(fig_combo, use_container_width=True)
-
 
                 # --- Download Button ---
                 csv_rework = df_combined.to_csv(index=False).encode("utf-8")
