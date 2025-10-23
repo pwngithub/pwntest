@@ -185,7 +185,7 @@ def run_workorders_dashboard():
         else:
             st.sidebar.warning("No saved files found for Installation Rework.")
 
-    # --- Parse Installation Rework File ---
+       # --- Parse Installation Rework File ---
     if df_rework is not None and not df_rework.empty:
         try:
             parsed_rows = []
@@ -193,6 +193,7 @@ def run_workorders_dashboard():
             for _, row in df_rework.iterrows():
                 values = row.tolist()
 
+                # Detect Install rows
                 if str(row[1]).startswith("Install"):
                     base_subset = [values[i] for i in [0, 2, 3, 4] if i < len(values)]
                 else:
@@ -203,6 +204,7 @@ def run_workorders_dashboard():
 
                 parsed_rows.append(base_subset)
 
+            # Convert to DataFrame
             df_combined = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Installations", "Rework", "Rework_Percentage"])
             df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
             df_combined["Total_Installations"] = pd.to_numeric(df_combined["Total_Installations"], errors="coerce")
@@ -226,7 +228,7 @@ def run_workorders_dashboard():
             c2.metric("🔁 Total Reworks", int(total_repeats))
             c3.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
 
-            # --- Visualized Table ---
+            # --- Heatmap Summary Table ---
             st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
 
             def color_rework(val):
@@ -252,6 +254,7 @@ def run_workorders_dashboard():
 
             # --- Bubble Chart ---
             st.markdown("### 📊 Installation Rework Bubble Chart")
+
             fig_bubble = px.scatter(
                 df_combined,
                 x="Technician",
@@ -263,6 +266,17 @@ def run_workorders_dashboard():
                 title="Technician Installation Rework Rate vs Total Installations",
                 hover_data=["Rework", "Total_Installations"]
             )
+
+            # Add average line
+            fig_bubble.add_hline(
+                y=avg_repeat_pct,
+                line_dash="dash",
+                line_color="cyan",
+                annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)",
+                annotation_position="top left",
+                annotation_font_color="cyan"
+            )
+
             fig_bubble.update_traces(marker=dict(line=dict(width=1, color="DarkSlateGrey")))
             st.plotly_chart(fig_bubble, use_container_width=True)
 
