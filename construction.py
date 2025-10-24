@@ -116,7 +116,7 @@ def run_construction_dashboard():
     # Filter the already date-filtered dataframe for Pioneer trucks
     pioneer_df = df[df['whatTruck'].isin(pioneer_trucks)]
 
-    # Recalculate footage specifically for this subset
+    # Recalculate footage and hours specifically for this subset
     pioneer_lash_df = extract_json_footage(pioneer_df[pioneer_df["typeA45"].notna()], "typeA45", "LashFootage")
     pioneer_pull_df = extract_json_footage(pioneer_df[pioneer_df["fiberPull"].notna()], "fiberPull", "PullFootage")
     pioneer_strand_df = extract_json_footage(pioneer_df[pioneer_df["standInfo"].notna()], "standInfo", "StrandFootage")
@@ -124,11 +124,14 @@ def run_construction_dashboard():
     pioneer_lash_total = pioneer_lash_df["LashFootage"].sum()
     pioneer_pull_total = pioneer_pull_df["PullFootage"].sum()
     pioneer_strand_total = pioneer_strand_df["StrandFootage"].sum()
+    pioneer_total_hours = pd.to_numeric(pioneer_df['workHours'], errors='coerce').sum()
 
-    p_col1, p_col2, p_col3 = st.columns(3)
+    p_col1, p_col2, p_col3, p_col4 = st.columns(4)
     p_col1.metric("Pioneer Lash Footage", f"{pioneer_lash_total:,}")
     p_col2.metric("Pioneer Pull Footage", f"{pioneer_pull_total:,}")
     p_col3.metric("Pioneer Strand Footage", f"{pioneer_strand_total:,}")
+    p_col4.metric("Pioneer Total Hours", f"{pioneer_total_hours:,.2f}")
+
 
     # --- END: KPI for Pioneer Trucks ---
 
