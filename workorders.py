@@ -156,9 +156,9 @@ def run_workorders_dashboard():
             st.error(f"An error occurred while calculating main KPIs: {e}")
 
     # =====================================================
-    # MODIFIED SECTION: Overall Average by Work Type (as KPIs)
+    # MODIFIED SECTION: Bar chart for Overall Average by Work Type
     # =====================================================
-    st.markdown("### 📋 Overall Average Duration by Work Type (mins)")
+    st.markdown("### 📊 Overall Average Duration by Work Type")
     df_avg_calc = df_filtered.dropna(subset=['Duration'])
 
     if df_avg_calc.empty:
@@ -171,23 +171,25 @@ def run_workorders_dashboard():
             final_work_type_avg = tech_work_type_avg.groupby('Work Type')['Duration_Mins'].mean().reset_index()
             final_work_type_avg.rename(columns={'Duration_Mins': 'Overall Average Duration (mins)'}, inplace=True)
             
-            # Create a dynamic row of KPIs
-            num_work_types = len(final_work_type_avg)
-            if num_work_types > 0:
-                cols = st.columns(num_work_types)
-                for i, row in final_work_type_avg.iterrows():
-                    work_type = row['Work Type']
-                    avg_duration = row['Overall Average Duration (mins)']
-                    with cols[i]:
-                        st.metric(label=f"{work_type}", value=f"{avg_duration:.1f} mins")
+            # Create a new bar chart for the overall average
+            fig_overall_avg = px.bar(
+                final_work_type_avg,
+                x='Work Type',
+                y='Overall Average Duration (mins)',
+                title="Overall Average Job Time by Work Type",
+                template="plotly_dark",
+                labels={'Overall Average Duration (mins)': 'Avg Duration (mins)'}
+            )
+            fig_overall_avg.update_traces(marker_color='#8BC53F') # Use a distinct color
+            st.plotly_chart(fig_overall_avg, use_container_width=True)
 
         except Exception as e:
-            st.error(f"Could not calculate Overall Average by Work Type: {e}")
+            st.error(f"Could not create Overall Average by Work Type chart: {e}")
 
     # =====================================================
     # SECTION 3: CHARTS
     # =====================================================
-    st.markdown("### 📊 Work Orders Charts")
+    st.markdown("### 📊 Work Orders Charts by Technician")
     df_charts = df_filtered.dropna(subset=['Duration']) 
 
     if df_charts.empty:
