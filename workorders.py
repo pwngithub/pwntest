@@ -78,7 +78,7 @@ def run_workorders_dashboard():
         if st.sidebar.button("🗑 Delete Selected Work Orders File"):
             os.remove(os.path.join(saved_folder, selected_file))
             st.sidebar.success(f"Deleted {selected_file}")
-            st.rerun() # Use st.rerun() for modern Streamlit
+            st.rerun()
 
     if df is None:
         st.info("Please upload or load a Work Orders file to begin.")
@@ -120,13 +120,49 @@ def run_workorders_dashboard():
         st.stop()
 
     # =====================================================
-    # SECTION 2: KPIs (DIAGNOSTIC TEST)
+    # SECTION 2: KPIs (FINAL VERSION WITH ERROR HANDLING)
     # =====================================================
     st.markdown("### 📌 Work Orders KPIs")
-    st.success("--- KPI SECTION IS RUNNING ---") # <-- THIS IS THE TEST MESSAGE
+    
+    try:
+        # --- Defensive Column Check ---
+        required_cols = ['WO#', 'Duration', 'Technician', 'Work Type']
+        missing_cols = [col for col in required_cols if col not in df_filtered.columns]
+        if missing_cols:
+            st.error(f"Error: Required columns are missing: {', '.join(missing_cols)}. Please check your CSV for exact column names (case-sensitive).")
+            st.stop()
 
-    # The original KPI code is temporarily disabled for our test.
-    # We will restore it after this test is successful.
+        # --- KPI Calculations ---
+        duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
+        total_jobs = df_filtered["WO#"].nunique()
+        avg_duration = duration.mean() or 0
+        max_duration = duration.max() or 0
+        min_duration = duration.min() or 0
+        tech_count = df_filtered["Technician"].nunique()
+        avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
+        
+        df_calc = df_filtered.copy()
+        df_calc['Duration_numeric'] = pd.to_numeric(df_calc['Duration'].str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
+        avg_duration_per_type = df_calc.groupby('Work Type')['Duration_numeric'].mean()
+        combined_avg_duration_by_type = avg_duration_per_type.mean() or 0
+
+        # --- KPI Display ---
+        k1, k2, k3 = st.columns(3)
+        k1.metric("🔧 Total Jobs", total_jobs)
+        k2.metric("👨‍🔧 Technicians", tech_count)
+        k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
+
+        k4, k5, k6, k7 = st.columns(4)
+        k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
+        k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
+        k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
+        k7.metric("📋 Avg by Work Type (hrs)", f"{combined_avg_duration_by_type:.2f}")
+
+    except Exception as e:
+        st.error("An error occurred while calculating KPIs. The dashboard cannot be displayed.")
+        st.error(f"Error details: {e}")
+        st.info("This is likely due to an unexpected format in the 'Duration' column or another data issue. Please check your CSV file.")
+        st.stop()
 
     # =====================================================
     # SECTION 3: CHARTS
@@ -182,7 +218,6 @@ def run_workorders_dashboard():
 
     if df_rework is not None and not df_rework.empty:
         try:
-            # (Rework parsing code is unchanged)
             parsed_rows = []
             for _, row in df_rework.iterrows():
                 values = row.tolist()
@@ -220,12 +255,7 @@ def run_workorders_dashboard():
                 elif val < 10: return 'background-color: #FFD700; color: black;'
                 else: return 'background-color: #FF6347; color: white;'
 
-            # --- FIX for DeprecationWarning ---
-            # Changed .applymap to .map
             styled_table = (df_combined.style.map(color_rework, subset=['Rework_Percentage']).format({'Rework_Percentage': '{:.1f}%', 'Total_Installations': '{:.0f}', 'Rework': '{:.0f}'}))
-            
-            # --- FIX for DeprecationWarning ---
-            # Removed use_container_width from st.dataframe
             st.dataframe(styled_table)
 
             st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
