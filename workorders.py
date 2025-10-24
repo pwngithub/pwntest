@@ -120,46 +120,74 @@ def run_workorders_dashboard():
         st.stop()
 
     # =====================================================
-    # SECTION 2: DATA DIAGNOSTIC
+    # NEW: ROBUST COLUMN CHECK
     # =====================================================
-    st.markdown("### 📌 Data Diagnostic")
-    st.info("Displaying the first 5 rows of filtered data to check formats.")
-    st.write("Column data types:")
-    st.write(df_filtered.dtypes.astype(str))
-    st.write("First 5 rows of data being used for calculations:")
-    st.dataframe(df_filtered.head())
+    required_cols = ['WO#', 'Duration', 'Technician', 'Work Type']
+    missing_cols = [col for col in required_cols if col not in df_filtered.columns]
+    if missing_cols:
+        st.error(f"❌ **Error:** Your CSV file is missing required columns. Please check your file for the following exact column names (they are case-sensitive): **{', '.join(missing_cols)}**")
+        st.stop()
+        
+    # =====================================================
+    # SECTION 2: KPIs (FINAL VERSION)
+    # =====================================================
+    st.markdown("### 📌 Work Orders KPIs")
+    try:
+        # KPI Calculations
+        duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
+        total_jobs = df_filtered["WO#"].nunique()
+        avg_duration = duration.mean() or 0
+        max_duration = duration.max() or 0
+        min_duration = duration.min() or 0
+        tech_count = df_filtered["Technician"].nunique()
+        avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
+        
+        df_calc = df_filtered.copy()
+        df_calc['Duration_numeric'] = pd.to_numeric(df_calc['Duration'].str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
+        avg_duration_per_type = df_calc.groupby('Work Type')['Duration_numeric'].mean()
+        combined_avg_duration_by_type = avg_duration_per_type.mean() or 0
 
+        # KPI Display
+        k1, k2, k3 = st.columns(3)
+        k1.metric("🔧 Total Jobs", total_jobs)
+        k2.metric("👨‍🔧 Technicians", tech_count)
+        k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
+
+        k4, k5, k6, k7 = st.columns(4)
+        k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
+        k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
+        k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
+        k7.metric("📋 Avg by Work Type (hrs)", f"{combined_avg_duration_by_type:.2f}")
+
+    except Exception as e:
+        st.error(f"An unexpected error occurred while calculating KPIs: {e}")
+        st.stop()
 
     # =====================================================
     # SECTION 3: CHARTS
     # =====================================================
     try:
-        st.subheader("📊 Work Orders Charts")
-        # Defensive check for required columns for charts
-        chart_cols = ['Technician', 'Work Type', 'WO#', 'Duration']
-        missing_chart_cols = [col for col in chart_cols if col not in df_filtered.columns]
-        if missing_chart_cols:
-            st.warning(f"Cannot display charts because columns are missing: {', '.join(missing_chart_cols)}")
-        else:
-            grouped_overall = (
-                df_filtered.groupby(["Technician", "Work Type"])
-                .agg(Total_Jobs=("WO#", "nunique"),
-                     Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-                .reset_index()
-            )
-            fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
-                          color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
-            st.plotly_chart(fig1, use_container_width=True)
+        grouped_overall = (
+            df_filtered.groupby(["Technician", "Work Type"])
+            .agg(Total_Jobs=("WO#", "nunique"),
+                 Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+            .reset_index()
+        )
 
-            fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
-                          color="Technician", title="Avg Duration by Work Type & Technician", template="plotly_dark")
-            st.plotly_chart(fig2, use_container_width=True)
+        st.subheader("📊 Work Orders Charts")
+        fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
+                      color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
+        st.plotly_chart(fig1, use_container_width=True)
+
+        fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
+                      color="Technician", title="Avg Duration by Work Type & Technician", template="plotly_dark")
+        st.plotly_chart(fig2, use_container_width=True)
     except Exception as e:
         st.error(f"An error occurred while creating charts: {e}")
 
     st.markdown("---")
     
-    # ... The rest of your code for Rework Analysis remains unchanged ...
+    # ... The rest of your Rework Analysis code is unchanged ...
     # =====================================================
     # SECTION 4: INSTALLATION REWORK ANALYSIS
     # =====================================================
