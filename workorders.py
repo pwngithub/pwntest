@@ -78,7 +78,7 @@ def run_workorders_dashboard():
         if st.sidebar.button("🗑 Delete Selected Work Orders File"):
             os.remove(os.path.join(saved_folder, selected_file))
             st.sidebar.success(f"Deleted {selected_file}")
-            st.experimental_rerun()
+            st.rerun() # Use st.rerun() for modern Streamlit
 
     if df is None:
         st.info("Please upload or load a Work Orders file to begin.")
@@ -120,52 +120,13 @@ def run_workorders_dashboard():
         st.stop()
 
     # =====================================================
-    # SECTION 2: KPIs (NEW ROBUST VERSION)
+    # SECTION 2: KPIs (DIAGNOSTIC TEST)
     # =====================================================
     st.markdown("### 📌 Work Orders KPIs")
+    st.success("--- KPI SECTION IS RUNNING ---") # <-- THIS IS THE TEST MESSAGE
 
-    # --- Defensive Column Check ---
-    required_cols = ['WO#', 'Duration', 'Technician', 'Work Type']
-    missing_cols = [col for col in required_cols if col not in df_filtered.columns]
-
-    if missing_cols:
-        st.error(f"Error: The following required columns are missing from your CSV file: {', '.join(missing_cols)}")
-        st.warning("Please check your uploaded file. The column names are case-sensitive and must match exactly.")
-        st.stop()
-
-    # --- Main KPI Logic with Error Catching ---
-    try:
-        # KPI Calculations
-        duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
-        total_jobs = df_filtered["WO#"].nunique()
-        avg_duration = duration.mean() or 0
-        max_duration = duration.max() or 0
-        min_duration = duration.min() or 0
-        tech_count = df_filtered["Technician"].nunique()
-        avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
-        
-        df_calc = df_filtered.copy()
-        df_calc['Duration_numeric'] = pd.to_numeric(df_calc['Duration'].str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
-        avg_duration_per_type = df_calc.groupby('Work Type')['Duration_numeric'].mean()
-        combined_avg_duration_by_type = avg_duration_per_type.mean() or 0
-
-        # KPI Display
-        k1, k2, k3 = st.columns(3)
-        k1.metric("🔧 Total Jobs", total_jobs)
-        k2.metric("👨‍🔧 Technicians", tech_count)
-        k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
-
-        k4, k5, k6, k7 = st.columns(4)
-        k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
-        k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
-        k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
-        k7.metric("📋 Avg by Work Type (hrs)", f"{combined_avg_duration_by_type:.2f}")
-
-    except Exception as e:
-        st.error("An unexpected error occurred while calculating KPIs. The dashboard cannot be displayed.")
-        st.error(f"Error details: {e}")
-        st.info("This might be caused by an unusual format in the 'Duration' column or another data issue. Please check your CSV file for errors.")
-        st.stop()
+    # The original KPI code is temporarily disabled for our test.
+    # We will restore it after this test is successful.
 
     # =====================================================
     # SECTION 3: CHARTS
@@ -189,14 +150,12 @@ def run_workorders_dashboard():
     except Exception as e:
         st.error(f"An error occurred while creating charts: {e}")
 
-
     st.markdown("---")
 
     # =====================================================
     # SECTION 4: INSTALLATION REWORK ANALYSIS
     # =====================================================
     st.markdown("<h2 style='color:#8BC53F;'>🔁 Installation Rework Analysis</h2>", unsafe_allow_html=True)
-    # ... (The rest of the code is unchanged) ...
     re_mode = st.sidebar.radio("Select Mode for Installation Rework File", ["Upload New File", "Load Existing File"], key="re_mode")
     df_rework = None
 
@@ -223,6 +182,7 @@ def run_workorders_dashboard():
 
     if df_rework is not None and not df_rework.empty:
         try:
+            # (Rework parsing code is unchanged)
             parsed_rows = []
             for _, row in df_rework.iterrows():
                 values = row.tolist()
@@ -260,8 +220,13 @@ def run_workorders_dashboard():
                 elif val < 10: return 'background-color: #FFD700; color: black;'
                 else: return 'background-color: #FF6347; color: white;'
 
-            styled_table = (df_combined.style.applymap(color_rework, subset=['Rework_Percentage']).format({'Rework_Percentage': '{:.1f}%', 'Total_Installations': '{:.0f}', 'Rework': '{:.0f}'}))
-            st.dataframe(styled_table, use_container_width=True)
+            # --- FIX for DeprecationWarning ---
+            # Changed .applymap to .map
+            styled_table = (df_combined.style.map(color_rework, subset=['Rework_Percentage']).format({'Rework_Percentage': '{:.1f}%', 'Total_Installations': '{:.0f}', 'Rework': '{:.0f}'}))
+            
+            # --- FIX for DeprecationWarning ---
+            # Removed use_container_width from st.dataframe
+            st.dataframe(styled_table)
 
             st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
             fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
