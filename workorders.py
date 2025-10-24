@@ -72,7 +72,7 @@ def run_workorders_dashboard():
 if "Techinician" in df.columns and "Technician" not in df.columns:
     df.rename(columns={"Techinician": "Technician"}, inplace=True)
 
-        elif uploaded_wo:
+    elif uploaded_wo:
             st.sidebar.warning("Please enter a filename before saving.")
     else:
         saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
