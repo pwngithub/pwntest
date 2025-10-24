@@ -224,22 +224,46 @@ def run_workorders_dashboard():
                 fig.update_traces(texttemplate='%{text:.1f} min', textposition='outside')
                 st.plotly_chart(fig, use_container_width=True)
 
-                # --- Average Duration per Technician per Work Order Type ---
-                all_techs = sorted(df_filtered["Technician"].unique())
-                all_types = sorted([t for t in df_filtered["Work Type"].unique() if t != "Unknown"]) + ["Unknown"]
+                # --- Average Duration per Technician per Work Order Type (Minutes) ---
+all_techs = sorted(df_filtered["Technician"].unique())
 
-                pivot = (
-                    df_filtered.pivot_table(index="Technician", columns="Work Type", values="Duration_Num", aggfunc="mean")
-                    .reindex(index=all_techs, columns=all_types)
-                    .round(1)
-                )
-                pivot["Overall Avg (min)"] = pivot.mean(axis=1, skipna=True).round(1)
-                pivot = pivot.sort_values("Overall Avg (min)", ascending=False)
+# keep Unknown last (optional)
+all_types = sorted([t for t in df_filtered["Work Type"].unique() if t != "Unknown"]) + ["Unknown"]
 
-                styled = pivot.style.format(lambda x: "—" if pd.isna(x) else f"{x:.1f}").background_gradient(cmap="viridis", axis=None)
-                st.markdown("""
-                <div style='margin-top:25px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
-                background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
-                <h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per Work Order Type (Minutes)</h4></div>
-                """, unsafe_allow_html=True)
-                st.dataframe(styled, use_container_width=True)
+pivot = (
+    df_filtered.pivot_table(
+        index="Technician",
+        columns="Work Type",
+        values="Duration_Num",
+        aggfunc="mean"     # NaNs are ignored by default
+    )
+    .reindex(index=all_techs, columns=all_types)
+)
+
+# Ensure any Python None or stray "None" strings become real NaNs
+pivot = pivot.replace({None: pd.NA, "None": pd.NA})
+
+# Use nullable float so NaNs behave + keep numeric for gradient
+pivot = pivot.astype("Float64")
+
+# Overall average per tech (ignores NaNs)
+pivot["Overall Avg (min)"] = pivot.mean(axis=1, skipna=True).astype("Float64").round(1)
+
+# Sort by overall average (NaNs will sort last automatically)
+pivot = pivot.sort_values("Overall Avg (min)", ascending=False)
+
+# Style: show '—' for missing, keep gradient and 1-decimal formatting
+styled = (
+    pivot.style
+    .format("{:.1f}", na_rep="—")
+    .background_gradient(cmap="viridis", axis=None)
+)
+
+st.markdown("""
+<div style='margin-top:25px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
+background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
+<h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per Work Order Type (Minutes)</h4></div>
+""", unsafe_allow_html=True)
+
+st.dataframe(styled, use_container_width=True)
+
