@@ -68,16 +68,21 @@ def run_workorders_dashboard():
                 f.write(uploaded_wo.getbuffer())
             st.sidebar.success(f"✅ File saved as: {custom_wo_name}.csv")
             df = pd.read_csv(save_path)
-            # --- Normalize technician column spelling ---
-if "Techinician" in df.columns and "Technician" not in df.columns:
-    df.rename(columns={"Techinician": "Technician"}, inplace=True)
-    elif uploaded_wo:
+
+            # Fix common column typos
+            if "Techinician" in df.columns and "Technician" not in df.columns:
+                df.rename(columns={"Techinician": "Technician"}, inplace=True)
+        elif uploaded_wo:
             st.sidebar.warning("Please enter a filename before saving.")
     else:
         saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
         selected_wo = st.sidebar.selectbox("Select Saved File", saved_files, key="wo_select")
         if selected_wo:
             df = pd.read_csv(os.path.join(saved_folder, selected_wo))
+
+            # Fix common column typos
+            if "Techinician" in df.columns and "Technician" not in df.columns:
+                df.rename(columns={"Techinician": "Technician"}, inplace=True)
 
     # --- Rework Upload ---
     st.sidebar.subheader("🔁 Installation Rework File")
