@@ -101,167 +101,177 @@ def run_workorders_dashboard():
     st.markdown("---")
 
     # =====================================================
-    # 🧾 WORK ORDERS SECTION
-    # =====================================================
-    if df is not None:
-        with st.expander("🧾 Work Orders Dashboard", expanded=True):
+# 🧾 WORK ORDERS SECTION
+# =====================================================
+if df is not None:
+    with st.expander("🧾 Work Orders Dashboard", expanded=True):
 
-            # --- Auto-detect date column ---
-            date_cols = [col for col in df.columns if str(col).lower() in ["date when", "date", "work date", "completed", "completion date"]]
-            if not date_cols:
-                st.error("⚠️ No date column found. Please include 'Date When' or 'Date' column.")
-                st.stop()
-            date_col = date_cols[0]
-            df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-            df = df.dropna(subset=[date_col])
-            df["Day"] = df[date_col].dt.date
+        # --- Auto-detect date column ---
+        date_cols = [col for col in df.columns if str(col).lower() in ["date when", "date", "work date", "completed", "completion date"]]
+        if not date_cols:
+            st.error("⚠️ No date column found. Please include 'Date When' or 'Date' column.")
+            st.stop()
+        date_col = date_cols[0]
+        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+        df = df.dropna(subset=[date_col])
+        df["Day"] = df[date_col].dt.date
 
-            if "Techinician" in df.columns and "Technician" not in df.columns:
-                df.rename(columns={"Techinician": "Technician"}, inplace=True)
+        if "Techinician" in df.columns and "Technician" not in df.columns:
+            df.rename(columns={"Techinician": "Technician"}, inplace=True)
 
-            # --- Filters ---
-            min_day, max_day = df["Day"].min(), df["Day"].max()
-            st.subheader("📅 Filters")
-            start_date, end_date = st.date_input("Select Date Range:", [min_day, max_day], min_value=min_day, max_value=max_day)
-            df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
+        # --- Filters ---
+        min_day, max_day = df["Day"].min(), df["Day"].max()
+        st.subheader("📅 Filters")
+        start_date, end_date = st.date_input("Select Date Range:", [min_day, max_day], min_value=min_day, max_value=max_day)
+        df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
-            techs = sorted(df_filtered["Technician"].unique())
-            work_types = sorted(df_filtered["Work Type"].unique())
-            col1, col2 = st.columns(2)
-            with col1:
-                selected_techs = st.multiselect("👨‍🔧 Technicians", techs, default=techs)
-            with col2:
-                selected_work_types = st.multiselect("📋 Work Types", work_types, default=work_types)
-            df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
+        techs = sorted(df_filtered["Technician"].unique())
+        work_types = sorted(df_filtered["Work Type"].unique())
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_techs = st.multiselect("👨‍🔧 Technicians", techs, default=techs)
+        with col2:
+            selected_work_types = st.multiselect("📋 Work Types", work_types, default=work_types)
+        df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
 
-            if df_filtered.empty:
-                st.warning("No data matches your filters.")
-            else:
-                # --- Clean Work Type ---
-                df_filtered["Work Type"] = (
-                    df_filtered["Work Type"]
-                    .astype(str)
-                    .str.strip()
-                    .str.title()
-                    .replace({"Nan": "Unknown", "": "Unknown"})
-                )
+        if df_filtered.empty:
+            st.warning("No data matches your filters.")
+        else:
+            # --- Clean Work Type ---
+            df_filtered["Work Type"] = (
+                df_filtered["Work Type"]
+                .astype(str)
+                .str.strip()
+                .str.title()
+                .replace({"Nan": "Unknown", "": "Unknown"})
+            )
 
-                # --- Robust Duration Parser ---
-                def parse_duration(val):
-                    if pd.isna(val):
-                        return None
-                    val = str(val).strip().lower().replace(" ", "")
-                    if re.match(r"^\d+:\d+$", val):
-                        try:
-                            h, m = val.split(":")
-                            return float(h) * 60 + float(m)
-                        except Exception:
-                            return None
-                    match = re.match(r"(?:(\d+(?:\.\d+)?)h(?:r|rs)?)?(?:(\d+(?:\.\d+)?)m(?:in|ins)?)?", val)
-                    if match:
-                        h = float(match.group(1)) if match.group(1) else 0
-                        m = float(match.group(2)) if match.group(2) else 0
-                        if h == 0 and m == 0:
-                            return None
-                        return h * 60 + m
-                    if "h" in val:
-                        try:
-                            num = float(re.findall(r"[\d\.]+", val)[0])
-                            return num * 60
-                        except Exception:
-                            return None
-                    if "m" in val:
-                        try:
-                            num = float(re.findall(r"[\d\.]+", val)[0])
-                            return num
-                        except Exception:
-                            return None
+            # --- Robust Duration Parser ---
+            def parse_duration(val):
+                if pd.isna(val):
+                    return None
+                val = str(val).strip().lower().replace(" ", "")
+                if re.match(r"^\d+:\d+$", val):
                     try:
-                        num = float(val)
-                        return num if num > 0 else None
+                        h, m = val.split(":")
+                        return float(h) * 60 + float(m)
                     except Exception:
                         return None
+                match = re.match(r"(?:(\d+(?:\.\d+)?)h(?:r|rs)?)?(?:(\d+(?:\.\d+)?)m(?:in|ins)?)?", val)
+                if match:
+                    h = float(match.group(1)) if match.group(1) else 0
+                    m = float(match.group(2)) if match.group(2) else 0
+                    if h == 0 and m == 0:
+                        return None
+                    return h * 60 + m
+                if "h" in val:
+                    try:
+                        num = float(re.findall(r"[\d\.]+", val)[0])
+                        return num * 60
+                    except Exception:
+                        return None
+                if "m" in val:
+                    try:
+                        num = float(re.findall(r"[\d\.]+", val)[0])
+                        return num
+                    except Exception:
+                        return None
+                try:
+                    num = float(val)
+                    return num if num > 0 else None
+                except Exception:
+                    return None
 
-                df_filtered["Duration_Num"] = df_filtered["Duration"].apply(parse_duration)
+            df_filtered["Duration_Num"] = df_filtered["Duration"].apply(parse_duration)
 
-                # --- KPIs ---
-                total_jobs = df_filtered["WO#"].nunique()
-                avg_duration = df_filtered["Duration_Num"].mean()
-                max_duration = df_filtered["Duration_Num"].max()
-                min_duration = df_filtered["Duration_Num"].min()
-                tech_count = df_filtered["Technician"].nunique()
-                avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
+            # --- KPIs ---
+            total_jobs = df_filtered["WO#"].nunique()
+            avg_duration = df_filtered["Duration_Num"].mean()
+            max_duration = df_filtered["Duration_Num"].max()
+            min_duration = df_filtered["Duration_Num"].min()
+            tech_count = df_filtered["Technician"].nunique()
+            avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
 
-                c1, c2, c3 = st.columns(3)
-                c1.metric("🔧 Total Jobs", total_jobs)
-                c2.metric("👨‍🔧 Technicians", tech_count)
-                c3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
+            st.markdown("""
+            <div style='margin-top:10px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
+                        background:linear-gradient(90deg,#1c1c1c 0%,#004aad 100%);'>
+                <h3 style='color:white;margin:0;'>📊 Work Orders KPIs</h3>
+            </div>
+            """, unsafe_allow_html=True)
 
-                c4, c5, c6 = st.columns(3)
-                c4.metric("🕒 Avg Duration (min)", f"{avg_duration:.1f}")
-                c5.metric("⏱️ Longest Duration (min)", f"{max_duration:.1f}")
-                c6.metric("⚡ Shortest Duration (min)", f"{min_duration:.1f}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("🔧 Total Jobs", total_jobs)
+            c2.metric("👨‍🔧 Technicians", tech_count)
+            c3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
 
-                # --- Average Duration by Work Order Type ---
-                avg_by_type = (
-                    df_filtered.groupby("Work Type", as_index=False)["Duration_Num"]
-                    .mean()
-                    .rename(columns={"Duration_Num": "Avg_Duration_Min"})
-                    .sort_values("Avg_Duration_Min", ascending=False)
+            c4, c5, c6 = st.columns(3)
+            c4.metric("🕒 Avg Duration (min)", f"{avg_duration:.1f}")
+            c5.metric("⏱️ Longest Duration (min)", f"{max_duration:.1f}")
+            c6.metric("⚡ Shortest Duration (min)", f"{min_duration:.1f}")
+
+            # --- Average Duration by Work Type Chart ---
+            avg_by_type = (
+                df_filtered.groupby("Work Type", as_index=False)["Duration_Num"]
+                .mean()
+                .rename(columns={"Duration_Num": "Avg_Duration_Min"})
+                .sort_values("Avg_Duration_Min", ascending=False)
+            )
+            overall_avg = df_filtered["Duration_Num"].mean()
+
+            st.markdown("""
+            <div style='margin-top:18px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
+                        background:linear-gradient(90deg,#1c1c1c 0%,#5AA9E6 100%);'>
+                <h4 style='color:white;margin:0;'>⏳ Average Duration by Work Order Type (Minutes)</h4>
+            </div>
+            """, unsafe_allow_html=True)
+
+            fig = px.bar(
+                avg_by_type,
+                x="Work Type",
+                y="Avg_Duration_Min",
+                text="Avg_Duration_Min",
+                color="Avg_Duration_Min",
+                color_continuous_scale="Viridis",
+                template="plotly_dark"
+            )
+            fig.add_hline(
+                y=overall_avg,
+                line_dash="dash",
+                line_color="cyan",
+                annotation_text=f"Overall Avg ({overall_avg:.1f} min)",
+                annotation_font_color="cyan"
+            )
+            fig.update_traces(texttemplate='%{text:.1f} min', textposition='outside')
+            st.plotly_chart(fig, use_container_width=True)
+
+            # --- Pivot Table: Average Duration per Technician per Work Type ---
+            all_techs = sorted(df_filtered["Technician"].unique())
+            all_types = sorted([t for t in df_filtered["Work Type"].unique() if t != "Unknown"]) + ["Unknown"]
+
+            pivot = (
+                df_filtered.pivot_table(
+                    index="Technician",
+                    columns="Work Type",
+                    values="Duration_Num",
+                    aggfunc="mean"
                 )
-                overall_avg = df_filtered["Duration_Num"].mean()
+                .reindex(index=all_techs, columns=all_types)
+            )
 
-                st.markdown("""
-                <div style='margin-top:18px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
-                background:linear-gradient(90deg,#1c1c1c 0%,#5AA9E6 100%);'>
-                <h4 style='color:white;margin:0;'>⏳ Average Duration by Work Order Type (Minutes)</h4></div>
-                """, unsafe_allow_html=True)
+            pivot = pivot.replace({None: pd.NA, "None": pd.NA}).astype("Float64")
+            pivot["Overall Avg (min)"] = pivot.mean(axis=1, skipna=True).astype("Float64").round(1)
+            pivot = pivot.sort_values("Overall Avg (min)", ascending=False)
 
-                fig = px.bar(avg_by_type, x="Work Type", y="Avg_Duration_Min", text="Avg_Duration_Min",
-                             color="Avg_Duration_Min", color_continuous_scale="Viridis", template="plotly_dark")
-                fig.add_hline(y=overall_avg, line_dash="dash", line_color="cyan",
-                              annotation_text=f"Overall Avg ({overall_avg:.1f} min)", annotation_font_color="cyan")
-                fig.update_traces(texttemplate='%{text:.1f} min', textposition='outside')
-                st.plotly_chart(fig, use_container_width=True)
+            styled = (
+                pivot.style
+                .format("{:.1f}", na_rep="—")
+                .background_gradient(cmap="viridis", axis=None)
+            )
 
-                # --- Average Duration per Technician per Work Order Type (Minutes) ---
-if "df_filtered" in locals() and not df_filtered.empty:
-
-    all_techs = sorted(df_filtered["Technician"].unique())
-    all_types = sorted([t for t in df_filtered["Work Type"].unique() if t != "Unknown"]) + ["Unknown"]
-
-    pivot = (
-        df_filtered.pivot_table(
-            index="Technician",
-            columns="Work Type",
-            values="Duration_Num",
-            aggfunc="mean"     # NaNs automatically ignored
-        )
-        .reindex(index=all_techs, columns=all_types)
-    )
-
-    # Normalize and enforce numeric type
-    pivot = pivot.replace({None: pd.NA, "None": pd.NA}).astype("Float64")
-
-    # Add overall average column
-    pivot["Overall Avg (min)"] = pivot.mean(axis=1, skipna=True).astype("Float64").round(1)
-
-    # Sort by overall average (puts NaNs last)
-    pivot = pivot.sort_values("Overall Avg (min)", ascending=False)
-
-    # Style it cleanly
-    styled = (
-        pivot.style
-        .format("{:.1f}", na_rep="—")
-        .background_gradient(cmap="viridis", axis=None)
-    )
-
-    st.markdown("""
-    <div style='margin-top:25px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
-    background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
-    <h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per Work Order Type (Minutes)</h4></div>
-    """, unsafe_allow_html=True)
-
-    st.dataframe(styled, use_container_width=True)
-else:
-    st.info("Please upload and filter a Work Orders file to view the technician averages.")
+            st.markdown("""
+            <div style='margin-top:25px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
+                        background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
+                <h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per Work Order Type (Minutes)</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            st.dataframe(styled, use_container_width=True)
