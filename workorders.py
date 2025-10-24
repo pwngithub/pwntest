@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
-import io
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -124,100 +123,100 @@ def run_workorders_dashboard():
         st.stop()
 
     # =====================================================
-    # FINAL DIAGNOSTIC SECTION
-    # =====================================================
-    st.markdown("### 🕵️ Data Diagnostic")
-    st.info("This section shows the exact data being used for calculations. Please screenshot this if KPIs don't appear.")
-    
-    buffer = io.StringIO()
-    df_filtered.info(buf=buffer)
-    s = buffer.getvalue()
-    
-    st.text("DataFrame Info (Column Names, Counts, Data Types):")
-    st.text(s)
-    
-    st.text("First 5 Rows of Filtered Data:")
-    st.dataframe(df_filtered.head())
-    
-    # =====================================================
     # ROBUST COLUMN CHECK
     # =====================================================
     required_cols = ['WO#', 'Duration', 'Technician', 'Work Type']
     missing_cols = [col for col in required_cols if col not in df_filtered.columns]
     if missing_cols:
-        st.error(f"❌ **Error:** Your CSV file is missing required columns. Please check your file for the following exact column names (they are case-sensitive): **{', '.join(missing_cols)}**")
+        st.error(f"❌ **Error:** Your CSV file is missing required columns: **{', '.join(missing_cols)}**")
         st.stop()
 
     # =====================================================
     # SECTION 2: KPIs
     # =====================================================
     st.markdown("### 📌 Work Orders KPIs")
-    try:
-        # --- KPI Calculations ---
-        duration_in_mins = pd.to_numeric(df_filtered["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
-        duration_in_hours = duration_in_mins / 60
-        
-        total_jobs = df_filtered["WO#"].nunique()
-        avg_duration_hrs = duration_in_hours.mean() or 0
-        max_duration_hrs = duration_in_hours.max() or 0
-        min_duration_hrs = duration_in_hours.min() or 0
-        tech_count = df_filtered["Technician"].nunique()
-        avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
-        
-        df_calc = df_filtered.copy()
-        df_calc['Duration_numeric_hrs'] = pd.to_numeric(df_calc['Duration'].astype(str).str.extract(r'(\d+\.?\d*)')[0], errors='coerce') / 60
-        avg_duration_per_type_hrs = df_calc.groupby('Work Type')['Duration_numeric_hrs'].mean()
-        combined_avg_duration_by_type_hrs = avg_duration_per_type_hrs.mean() or 0
-        
-        df_calc['Duration_numeric_mins'] = pd.to_numeric(df_calc['Duration'].astype(str).str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
-        avg_duration_per_type_mins = df_calc.groupby('Work Type')['Duration_numeric_mins'].mean()
-        combined_avg_duration_by_type_mins = avg_duration_per_type_mins.mean() or 0
+    
+    # <<< FINAL FIX: Remove rows where Duration is missing before calculations >>>
+    df_kpi = df_filtered.dropna(subset=['Duration'])
 
-        # --- KPI Display ---
-        k1, k2, k3 = st.columns(3)
-        k1.metric("🔧 Total Jobs", total_jobs)
-        k2.metric("👨‍🔧 Technicians", tech_count)
-        k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
-        
-        k4, k5, k6, k7, k8 = st.columns(5)
-        k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration_hrs:.2f}")
-        k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration_hrs:.2f}")
-        k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration_hrs:.2f}")
-        k7.metric("📋 Avg by Type (hrs)", f"{combined_avg_duration_by_type_hrs:.2f}")
-        k8.metric("📋 Avg by Type (mins)", f"{combined_avg_duration_by_type_mins:.1f}")
+    if df_kpi.empty:
+        st.warning("No work orders with duration data found in the selected date range.")
+    else:
+        try:
+            # --- KPI Calculations ---
+            duration_in_mins = pd.to_numeric(df_kpi["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
+            duration_in_hours = duration_in_mins / 60
+            
+            total_jobs = df_kpi["WO#"].nunique()
+            avg_duration_hrs = duration_in_hours.mean() or 0
+            max_duration_hrs = duration_in_hours.max() or 0
+            min_duration_hrs = duration_in_hours.min() or 0
+            tech_count = df_kpi["Technician"].nunique()
+            avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
+            
+            # Create a clean DataFrame for groupby operations
+            df_calc = df_kpi[['Work Type']].copy()
+            df_calc['Duration_numeric_hrs'] = duration_in_hours
+            df_calc['Duration_numeric_mins'] = duration_in_mins
 
-    except Exception as e:
-        st.error(f"An unexpected error occurred while calculating KPIs: {e}")
-        st.stop()
+            # Calculate averages by Work Type
+            avg_duration_per_type_hrs = df_calc.groupby('Work Type')['Duration_numeric_hrs'].mean()
+            combined_avg_duration_by_type_hrs = avg_duration_per_type_hrs.mean() or 0
+            
+            avg_duration_per_type_mins = df_calc.groupby('Work Type')['Duration_numeric_mins'].mean()
+            combined_avg_duration_by_type_mins = avg_duration_per_type_mins.mean() or 0
+
+            # --- KPI Display ---
+            k1, k2, k3 = st.columns(3)
+            k1.metric("🔧 Total Jobs (with duration)", total_jobs)
+            k2.metric("👨‍🔧 Technicians", tech_count)
+            k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
+            
+            k4, k5, k6, k7, k8 = st.columns(5)
+            k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration_hrs:.2f}")
+            k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration_hrs:.2f}")
+            k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration_hrs:.2f}")
+            k7.metric("📋 Avg by Type (hrs)", f"{combined_avg_duration_by_type_hrs:.2f}")
+            k8.metric("📋 Avg by Type (mins)", f"{combined_avg_duration_by_type_mins:.1f}")
+
+        except Exception as e:
+            st.error(f"An unexpected error occurred while calculating KPIs: {e}")
+            st.stop()
 
     # =====================================================
     # SECTION 3: CHARTS
     # =====================================================
-    try:
-        grouped_overall = (
-            df_filtered.groupby(["Technician", "Work Type"])
-            .agg(Total_Jobs=("WO#", "nunique"),
-                 Average_Duration=("Duration", lambda x: pd.to_numeric(x.astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-            .reset_index()
-        )
+    st.markdown("### 📊 Work Orders Charts")
+    df_charts = df_filtered.dropna(subset=['Duration']) # Also ignore empty durations for charts
 
-        st.subheader("📊 Work Orders Charts")
-        fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
-                      color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
-        st.plotly_chart(fig1, use_container_width=True)
+    if df_charts.empty:
+        st.warning("No work orders with duration data found to create charts.")
+    else:
+        try:
+            # Chart calculation using MINUTES
+            grouped_overall = (
+                df_charts.groupby(["Technician", "Work Type"])
+                .agg(Total_Jobs=("WO#", "nunique"),
+                     Average_Duration_Mins=("Duration", lambda x: pd.to_numeric(x.astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+                .reset_index()
+            )
 
-        fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
-                      color="Technician", title="Avg Duration by Work Type & Technician (mins)", template="plotly_dark")
-        st.plotly_chart(fig2, use_container_width=True)
-    except Exception as e:
-        st.error(f"An error occurred while creating charts: {e}")
+            fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
+                          color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
+            st.plotly_chart(fig1, use_container_width=True)
+
+            fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration_Mins",
+                          color="Technician", title="Avg Duration by Work Type & Technician (mins)", template="plotly_dark", labels={'Average_Duration_Mins': 'Avg Duration (mins)'})
+            st.plotly_chart(fig2, use_container_width=True)
+        except Exception as e:
+            st.error(f"An error occurred while creating charts: {e}")
 
     st.markdown("---")
     
+    # (The rest of the Rework Analysis code is unchanged)
     # =====================================================
     # SECTION 4: INSTALLATION REWORK ANALYSIS
     # =====================================================
-    # (The rest of the code is unchanged)
     st.markdown("<h2 style='color:#8BC53F;'>🔁 Installation Rework Analysis</h2>", unsafe_allow_html=True)
     re_mode = st.sidebar.radio("Select Mode for Installation Rework File", ["Upload New File", "Load Existing File"], key="re_mode")
     df_rework = None
