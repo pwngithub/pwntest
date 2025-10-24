@@ -225,45 +225,43 @@ def run_workorders_dashboard():
                 st.plotly_chart(fig, use_container_width=True)
 
                 # --- Average Duration per Technician per Work Order Type (Minutes) ---
-all_techs = sorted(df_filtered["Technician"].unique())
+if "df_filtered" in locals() and not df_filtered.empty:
 
-# keep Unknown last (optional)
-all_types = sorted([t for t in df_filtered["Work Type"].unique() if t != "Unknown"]) + ["Unknown"]
+    all_techs = sorted(df_filtered["Technician"].unique())
+    all_types = sorted([t for t in df_filtered["Work Type"].unique() if t != "Unknown"]) + ["Unknown"]
 
-pivot = (
-    df_filtered.pivot_table(
-        index="Technician",
-        columns="Work Type",
-        values="Duration_Num",
-        aggfunc="mean"     # NaNs are ignored by default
+    pivot = (
+        df_filtered.pivot_table(
+            index="Technician",
+            columns="Work Type",
+            values="Duration_Num",
+            aggfunc="mean"     # NaNs automatically ignored
+        )
+        .reindex(index=all_techs, columns=all_types)
     )
-    .reindex(index=all_techs, columns=all_types)
-)
 
-# Ensure any Python None or stray "None" strings become real NaNs
-pivot = pivot.replace({None: pd.NA, "None": pd.NA})
+    # Normalize and enforce numeric type
+    pivot = pivot.replace({None: pd.NA, "None": pd.NA}).astype("Float64")
 
-# Use nullable float so NaNs behave + keep numeric for gradient
-pivot = pivot.astype("Float64")
+    # Add overall average column
+    pivot["Overall Avg (min)"] = pivot.mean(axis=1, skipna=True).astype("Float64").round(1)
 
-# Overall average per tech (ignores NaNs)
-pivot["Overall Avg (min)"] = pivot.mean(axis=1, skipna=True).astype("Float64").round(1)
+    # Sort by overall average (puts NaNs last)
+    pivot = pivot.sort_values("Overall Avg (min)", ascending=False)
 
-# Sort by overall average (NaNs will sort last automatically)
-pivot = pivot.sort_values("Overall Avg (min)", ascending=False)
+    # Style it cleanly
+    styled = (
+        pivot.style
+        .format("{:.1f}", na_rep="—")
+        .background_gradient(cmap="viridis", axis=None)
+    )
 
-# Style: show '—' for missing, keep gradient and 1-decimal formatting
-styled = (
-    pivot.style
-    .format("{:.1f}", na_rep="—")
-    .background_gradient(cmap="viridis", axis=None)
-)
+    st.markdown("""
+    <div style='margin-top:25px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
+    background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
+    <h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per Work Order Type (Minutes)</h4></div>
+    """, unsafe_allow_html=True)
 
-st.markdown("""
-<div style='margin-top:25px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
-background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
-<h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per Work Order Type (Minutes)</h4></div>
-""", unsafe_allow_html=True)
-
-st.dataframe(styled, use_container_width=True)
-
+    st.dataframe(styled, use_container_width=True)
+else:
+    st.info("Please upload and filter a Work Orders file to view the technician averages.")
