@@ -1,11 +1,10 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import json
+import requests
 
 def run_construction_dashboard():
-    import streamlit as st
-    import pandas as pd
-    import plotly.express as px
-    import json
-    import requests
-
     # Pioneer theme styling
     st.markdown(
         '''
@@ -99,12 +98,15 @@ def run_construction_dashboard():
     pull_total = pull_df["PullFootage"].sum()
     strand_total = strand_df["StrandFootage"].sum()
     total_projects = df["projectOr"].nunique()
+    total_hours = pd.to_numeric(df['workHours'], errors='coerce').sum()
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Lash Footage", f"{lash_total:,}")
     col2.metric("Pull Footage", f"{pull_total:,}")
     col3.metric("Strand Footage", f"{strand_total:,}")
     col4.metric("Projects", f"{total_projects}")
+    col5.metric("Total Hours", f"{total_hours:,.2f}")
+
 
     st.markdown("---")
     st.header("Average Lash, Pull, Strand per Truck per Week (Filtered Range)")
@@ -146,6 +148,38 @@ def run_construction_dashboard():
     )
     fig_avg_truck.update_traces(texttemplate='%{x:.0f}', textposition='auto', marker_line_width=0.5)
     st.plotly_chart(fig_avg_truck, use_container_width=True)
+
+    # --- START: New Graph for Total Footage per Truck ---
+
+    st.header("Total Lash, Pull, & Strand Footage per Truck (Filtered Range)")
+
+    melted_totals = pd.melt(
+        merged,
+        id_vars=["whatTruck"],
+        value_vars=["LashFootage", "PullFootage", "StrandFootage"],
+        var_name="Type",
+        value_name="TotalFootage"
+    )
+
+    fig_total_truck = px.bar(
+        melted_totals,
+        x="TotalFootage",
+        y="whatTruck",
+        color="Type",
+        barmode="group",
+        orientation="h",
+        title="Total Lash, Pull, & Strand Footage per Truck (Filtered Range)",
+        template="plotly_dark",
+        color_discrete_map={
+            "LashFootage": "#375EAB",
+            "PullFootage": "#8BC53F",
+            "StrandFootage": "#999999"
+        }
+    )
+    fig_total_truck.update_traces(texttemplate='%{x:,.0f}', textposition='auto', marker_line_width=0.5)
+    st.plotly_chart(fig_total_truck, use_container_width=True)
+
+    # --- END: New Graph for Total Footage per Truck ---
 
     st.header("Total Average per Week (All Trucks Combined)")
 
