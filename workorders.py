@@ -289,5 +289,130 @@ def run_workorders_dashboard():
                 </div>
                 """, unsafe_allow_html=True)
                 st.dataframe(styled, use_container_width=True)
+
     else:
         st.info("📁 Please upload or select a Tech Workflow file to view the Work Orders dashboard.")
+
+    # =====================================================
+    # 🔁 INSTALLATION REWORK SECTION
+    # =====================================================
+    if "df_rework" in locals() and df_rework is not None and not df_rework.empty:
+        with st.expander("🔁 Installation Rework Analysis", expanded=False):
+            try:
+                parsed_rows = []
+                for _, row in df_rework.iterrows():
+                    vals = row.tolist()
+                    if len(vals) > 1 and str(vals[1]).startswith("Install"):
+                        cols = [vals[i] for i in [0, 2, 3, 4] if i < len(vals)]
+                    else:
+                        cols = [vals[i] for i in [0, 1, 2, 3] if i < len(vals)]
+                    while len(cols) < 4:
+                        cols.append(None)
+                    parsed_rows.append(cols)
+
+                df_r = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Installations", "Rework", "Rework_Percentage"])
+                df_r["Technician"] = df_r["Technician"].astype(str).str.replace('"', '').str.strip()
+                df_r["Total_Installations"] = pd.to_numeric(df_r["Total_Installations"], errors="coerce")
+                df_r["Rework"] = pd.to_numeric(df_r["Rework"], errors="coerce")
+                df_r["Rework_Percentage"] = pd.to_numeric(df_r["Rework_Percentage"].astype(str).str.replace("%", "").str.strip(), errors="coerce")
+
+                total_installs = df_r["Total_Installations"].sum()
+                total_reworks = df_r["Rework"].sum()
+                avg_pct = df_r["Rework_Percentage"].mean()
+
+                st.markdown("""
+                <div style='margin-top:10px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
+                            background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
+                    <h3 style='color:white;margin:0;'>📊 Installation Rework KPIs</h3>
+                </div>
+                """, unsafe_allow_html=True)
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("🏗️ Total Installations", int(total_installs))
+                c2.metric("🔁 Total Reworks", int(total_reworks))
+                c3.metric("📈 Avg Rework %", f"{avg_pct:.1f}%")
+
+                # --- Table ---
+                st.markdown("<hr>", unsafe_allow_html=True)
+                st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
+                max_inst = df_r["Total_Installations"].max()
+                max_rew = df_r["Rework"].max()
+                max_pct = df_r["Rework_Percentage"].max()
+
+                def highlight(val, max_val):
+                    if val == max_val:
+                        return 'background-color:#FFD700;color:black;font-weight:bold;'
+                    return 'color:white;background-color:black;'
+
+                styled = (
+                    df_r.style
+                    .applymap(lambda v: highlight(v, max_inst), subset=["Total_Installations"])
+                    .applymap(lambda v: highlight(v, max_rew), subset=["Rework"])
+                    .applymap(lambda v: highlight(v, max_pct), subset=["Rework_Percentage"])
+                    .format({
+                        "Total_Installations": "{:.0f}",
+                        "Rework": "{:.0f}",
+                        "Rework_Percentage": "{:.1f}%"
+                    })
+                )
+                st.dataframe(styled, use_container_width=True)
+
+                # --- Chart ---
+                df_r = df_r.sort_values("Total_Installations", ascending=False)
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                fig.add_trace(
+                    go.Bar(
+                        x=df_r["Technician"],
+                        y=df_r["Total_Installations"],
+                        name="Total Installations",
+                        marker_color="#1E90FF",
+                        text=df_r["Total_Installations"],
+                        textposition="outside"
+                    ),
+                    secondary_y=False
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_r["Technician"],
+                        y=df_r["Rework_Percentage"],
+                        name="Rework %",
+                        mode="lines+markers+text",
+                        line=dict(color="#FFA500", width=3),
+                        text=[f"{v:.1f}%" for v in df_r["Rework_Percentage"]],
+                        textposition="top center"
+                    ),
+                    secondary_y=True
+                )
+                fig.add_hline(
+                    y=avg_pct,
+                    line_dash="dot",
+                    line_color="cyan",
+                    annotation_text=f"Avg Rework % ({avg_pct:.1f}%)",
+                    annotation_font_color="cyan",
+                    secondary_y=True
+                )
+                fig.update_layout(
+                    title="Technician Installations vs Rework %",
+                    template="plotly_dark",
+                    height=550
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # --- CSV Download ---
+                csv = df_r.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "⬇️ Download Installation Rework Summary CSV",
+                    data=csv,
+                    file_name="installation_rework_summary.csv",
+                    mime="text/csv"
+                )
+
+            except Exception as e:
+                st.error(f"Error parsing installation rework file: {e}")
+    else:
+        st.info("📁 Please upload or select an Installation Rework file to view that report.")
+
+
+# --- Run the app ---
+if __name__ == "__main__":
+    run_workorders_dashboard()
