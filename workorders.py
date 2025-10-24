@@ -136,35 +136,17 @@ def run_workorders_dashboard():
     # =====================================================
     st.markdown("### 📌 Work Orders KPIs")
     
-    # <<< FINAL FIX: Remove rows where Duration is missing before calculations >>>
     df_kpi = df_filtered.dropna(subset=['Duration'])
 
     if df_kpi.empty:
         st.warning("No work orders with duration data found in the selected date range.")
     else:
         try:
-            # --- KPI Calculations ---
             duration_in_mins = pd.to_numeric(df_kpi["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
-            duration_in_hours = duration_in_mins / 60
             
             total_jobs = df_kpi["WO#"].nunique()
-            avg_duration_hrs = duration_in_hours.mean() or 0
-            max_duration_hrs = duration_in_hours.max() or 0
-            min_duration_hrs = duration_in_hours.min() or 0
             tech_count = df_kpi["Technician"].nunique()
             avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
-            
-            # Create a clean DataFrame for groupby operations
-            df_calc = df_kpi[['Work Type']].copy()
-            df_calc['Duration_numeric_hrs'] = duration_in_hours
-            df_calc['Duration_numeric_mins'] = duration_in_mins
-
-            # Calculate averages by Work Type
-            avg_duration_per_type_hrs = df_calc.groupby('Work Type')['Duration_numeric_hrs'].mean()
-            combined_avg_duration_by_type_hrs = avg_duration_per_type_hrs.mean() or 0
-            
-            avg_duration_per_type_mins = df_calc.groupby('Work Type')['Duration_numeric_mins'].mean()
-            combined_avg_duration_by_type_mins = avg_duration_per_type_mins.mean() or 0
 
             # --- KPI Display ---
             k1, k2, k3 = st.columns(3)
@@ -172,32 +154,48 @@ def run_workorders_dashboard():
             k2.metric("👨‍🔧 Technicians", tech_count)
             k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
             
-            k4, k5, k6, k7, k8 = st.columns(5)
-            k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration_hrs:.2f}")
-            k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration_hrs:.2f}")
-            k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration_hrs:.2f}")
-            k7.metric("📋 Avg by Type (hrs)", f"{combined_avg_duration_by_type_hrs:.2f}")
-            k8.metric("📋 Avg by Type (mins)", f"{combined_avg_duration_by_type_mins:.1f}")
+        except Exception as e:
+            st.error(f"An error occurred while calculating main KPIs: {e}")
+
+    # =====================================================
+    # NEW SECTION: Overall Average by Work Type
+    # =====================================================
+    st.markdown("### 📋 Overall Average Duration by Work Type")
+    df_avg_calc = df_filtered.dropna(subset=['Duration'])
+
+    if df_avg_calc.empty:
+        st.warning("No data with duration to calculate work type averages.")
+    else:
+        try:
+            # Step 1: Calculate the average duration in minutes for each Technician/Work Type pair
+            df_avg_calc['Duration_Mins'] = pd.to_numeric(df_avg_calc['Duration'].astype(str).str.extract(r"(\d+\.?\d*)")[0], errors='coerce')
+            tech_work_type_avg = df_avg_calc.groupby(['Work Type', 'Technician'])['Duration_Mins'].mean().reset_index()
+
+            # Step 2: Now, for each Work Type, calculate the average of those technician averages
+            final_work_type_avg = tech_work_type_avg.groupby('Work Type')['Duration_Mins'].mean().reset_index()
+            final_work_type_avg.rename(columns={'Duration_Mins': 'Overall Average Duration (mins)'}, inplace=True)
+            final_work_type_avg['Overall Average Duration (mins)'] = final_work_type_avg['Overall Average Duration (mins)'].round(1)
+
+            st.info("This table shows the average job time for a work type, averaged across all technicians who performed it.")
+            st.dataframe(final_work_type_avg, use_container_width=True)
 
         except Exception as e:
-            st.error(f"An unexpected error occurred while calculating KPIs: {e}")
-            st.stop()
+            st.error(f"Could not calculate Overall Average by Work Type: {e}")
 
     # =====================================================
     # SECTION 3: CHARTS
     # =====================================================
     st.markdown("### 📊 Work Orders Charts")
-    df_charts = df_filtered.dropna(subset=['Duration']) # Also ignore empty durations for charts
+    df_charts = df_filtered.dropna(subset=['Duration']) 
 
     if df_charts.empty:
         st.warning("No work orders with duration data found to create charts.")
     else:
         try:
-            # Chart calculation using MINUTES
             grouped_overall = (
                 df_charts.groupby(["Technician", "Work Type"])
                 .agg(Total_Jobs=("WO#", "nunique"),
-                     Average_Duration_Mins=("Duration", lambda x: pd.to_numeric(x.astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+                     Average_Duration_Mins=("Duration", lambda x: pd.to_numeric(x.astype(str).str.extract(r"(\d+\.?\d*)")[0], errors='coerce').mean()))
                 .reset_index()
             )
 
@@ -213,7 +211,6 @@ def run_workorders_dashboard():
 
     st.markdown("---")
     
-    # (The rest of the Rework Analysis code is unchanged)
     # =====================================================
     # SECTION 4: INSTALLATION REWORK ANALYSIS
     # =====================================================
