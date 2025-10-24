@@ -157,6 +157,25 @@ def run_workorders_dashboard():
 
     st.markdown("---")
 
+    # --- Average Duration by Work Type (KPI Summary) ---
+st.markdown("""
+<div style='margin-top:20px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
+            background:linear-gradient(90deg,#1c1c1c 0%,#5AA9E6 100%);'>
+    <h4 style='color:white;margin:0;'>🕒 Average Duration by Work Type (All Technicians)</h4>
+</div>
+""", unsafe_allow_html=True)
+
+avg_by_type = (
+    df_filtered.groupby(type_col, as_index=False)["Duration_Num"]
+    .mean()
+    .rename(columns={"Duration_Num": "Avg_Duration_Min"})
+    .sort_values("Avg_Duration_Min", ascending=False)
+)
+
+cols = st.columns(len(avg_by_type))
+for i, row in enumerate(avg_by_type.itertuples(index=False)):
+    cols[i].metric(f"{getattr(row, type_col)}", f"{getattr(row, 'Avg_Duration_Min'):.1f} min")
+
     # =====================================================
     # SECTION 2: INSTALLATION REWORK ANALYSIS
     # =====================================================
