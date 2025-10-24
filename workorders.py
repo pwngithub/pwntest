@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
+import io
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -106,7 +107,7 @@ def run_workorders_dashboard():
     df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
     if not df_filtered.empty:
-        if 'Work Type' in df_filtered.columns:
+        if 'Work Type' in df_filtered.columns and 'Technician' in df_filtered.columns:
             techs = sorted(df_filtered["Technician"].unique())
             work_types = sorted(df_filtered["Work Type"].unique())
             col1, col2 = st.columns(2)
@@ -116,15 +117,28 @@ def run_workorders_dashboard():
                 selected_work_types = st.multiselect("📋 Select Work Type(s)", work_types, default=work_types)
             df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
         else:
-            st.warning("Column 'Work Type' not found. Skipping Work Type filter.")
-            techs = sorted(df_filtered["Technician"].unique())
-            selected_techs = st.multiselect("👨‍🔧 Select Technician(s)", techs, default=techs)
-            df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs)]
+            st.warning("Missing 'Technician' or 'Work Type' columns for filtering.")
 
     if df_filtered.empty:
         st.warning("No data available for the selected filters.")
         st.stop()
 
+    # =====================================================
+    # FINAL DIAGNOSTIC SECTION
+    # =====================================================
+    st.markdown("### 🕵️ Data Diagnostic")
+    st.info("This section shows the exact data being used for calculations. Please screenshot this if KPIs don't appear.")
+    
+    buffer = io.StringIO()
+    df_filtered.info(buf=buffer)
+    s = buffer.getvalue()
+    
+    st.text("DataFrame Info (Column Names, Counts, Data Types):")
+    st.text(s)
+    
+    st.text("First 5 Rows of Filtered Data:")
+    st.dataframe(df_filtered.head())
+    
     # =====================================================
     # ROBUST COLUMN CHECK
     # =====================================================
@@ -155,12 +169,9 @@ def run_workorders_dashboard():
         avg_duration_per_type_hrs = df_calc.groupby('Work Type')['Duration_numeric_hrs'].mean()
         combined_avg_duration_by_type_hrs = avg_duration_per_type_hrs.mean() or 0
         
-        # <<< START NEW CODE >>>
-        # New KPI for combined average in MINUTES
         df_calc['Duration_numeric_mins'] = pd.to_numeric(df_calc['Duration'].astype(str).str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
         avg_duration_per_type_mins = df_calc.groupby('Work Type')['Duration_numeric_mins'].mean()
         combined_avg_duration_by_type_mins = avg_duration_per_type_mins.mean() or 0
-        # <<< END NEW CODE >>>
 
         # --- KPI Display ---
         k1, k2, k3 = st.columns(3)
@@ -168,15 +179,12 @@ def run_workorders_dashboard():
         k2.metric("👨‍🔧 Technicians", tech_count)
         k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
         
-        # <<< START MODIFIED CODE >>>
-        # Changed to 5 columns to fit new KPI
         k4, k5, k6, k7, k8 = st.columns(5)
         k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration_hrs:.2f}")
         k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration_hrs:.2f}")
         k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration_hrs:.2f}")
         k7.metric("📋 Avg by Type (hrs)", f"{combined_avg_duration_by_type_hrs:.2f}")
         k8.metric("📋 Avg by Type (mins)", f"{combined_avg_duration_by_type_mins:.1f}")
-        # <<< END MODIFIED CODE >>>
 
     except Exception as e:
         st.error(f"An unexpected error occurred while calculating KPIs: {e}")
@@ -186,8 +194,6 @@ def run_workorders_dashboard():
     # SECTION 3: CHARTS
     # =====================================================
     try:
-        # <<< START MODIFIED CODE >>>
-        # Chart calculation now uses MINUTES (removed / 60)
         grouped_overall = (
             df_filtered.groupby(["Technician", "Work Type"])
             .agg(Total_Jobs=("WO#", "nunique"),
@@ -200,11 +206,9 @@ def run_workorders_dashboard():
                       color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
         st.plotly_chart(fig1, use_container_width=True)
 
-        # Updated chart title to reflect minutes
         fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
                       color="Technician", title="Avg Duration by Work Type & Technician (mins)", template="plotly_dark")
         st.plotly_chart(fig2, use_container_width=True)
-        # <<< END MODIFIED CODE >>>
     except Exception as e:
         st.error(f"An error occurred while creating charts: {e}")
 
@@ -213,6 +217,7 @@ def run_workorders_dashboard():
     # =====================================================
     # SECTION 4: INSTALLATION REWORK ANALYSIS
     # =====================================================
+    # (The rest of the code is unchanged)
     st.markdown("<h2 style='color:#8BC53F;'>🔁 Installation Rework Analysis</h2>", unsafe_allow_html=True)
     re_mode = st.sidebar.radio("Select Mode for Installation Rework File", ["Upload New File", "Load Existing File"], key="re_mode")
     df_rework = None
