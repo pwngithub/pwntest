@@ -120,52 +120,50 @@ def run_workorders_dashboard():
         st.warning("No data available for the selected filters.")
         st.stop()
 
-    # --- KPIs ---
-    st.markdown("### 📌 Work Orders KPIs")
-    duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
-    total_jobs = df_filtered["WO#"].nunique()
-    avg_duration = duration.mean() or 0
-    max_duration = duration.max() or 0
-    min_duration = duration.min() or 0
-    tech_count = df_filtered["Technician"].nunique()
-    avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
+   # --- KPIs ---
+st.markdown("### 📌 Work Orders KPIs")
+duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
+total_jobs = df_filtered["WO#"].nunique()
+avg_duration = duration.mean() or 0
+max_duration = duration.max() or 0
+min_duration = duration.min() or 0
+tech_count = df_filtered["Technician"].nunique()
+avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
 
-    # --- New KPI Calculation: Combined Average Duration per Work Type ---
-    df_calc = df_filtered.copy()
-    df_calc['Duration_numeric'] = pd.to_numeric(df_calc['Duration'].str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
-    avg_duration_per_type = df_calc.groupby('Work Type')['Duration_numeric'].mean()
-    combined_avg_duration_by_type = avg_duration_per_type.mean() or 0
+# --- New KPI Calculation with Live Debugging ---
+combined_avg_duration_by_type = 0 # Default value
+with st.expander("Expand to see KPI Debug Info"):
+    try:
+        st.write("--- Starting KPI Debug ---")
+        df_calc = df_filtered.copy()
+        df_calc['Duration_numeric'] = pd.to_numeric(df_calc['Duration'].str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
+        
+        st.write("Available Work Types found in filtered data:")
+        st.write(df_calc['Work Type'].unique().tolist())
 
-    k1, k2, k3 = st.columns(3)
-    k1.metric("🔧 Total Jobs", total_jobs)
-    k2.metric("👨‍🔧 Technicians", tech_count)
-    k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
+        avg_duration_per_type = df_calc.groupby('Work Type')['Duration_numeric'].mean()
+        
+        st.write("Average duration calculated for each work type:")
+        st.dataframe(avg_duration_per_type) # Display the intermediate calculation
+        
+        combined_avg_duration_by_type = avg_duration_per_type.mean() or 0
+        st.write(f"Final Calculated KPI Value (average of the above): **{combined_avg_duration_by_type}**")
+        st.write("--- End KPI Debug ---")
 
-    # --- KPI Display with the new metric ---
-    k4, k5, k6, k7 = st.columns(4)
-    k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
-    k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
-    k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
-    k7.metric("📋 Avg by Work Type (hrs)", f"{combined_avg_duration_by_type:.2f}")
+    except Exception as e:
+        st.error(f"An error occurred during calculation: {e}")
+        combined_avg_duration_by_type = 0
 
-    # --- Charts ---
-    grouped_overall = (
-        df_filtered.groupby(["Technician", "Work Type"])
-        .agg(Total_Jobs=("WO#", "nunique"),
-             Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
-        .reset_index()
-    )
+k1, k2, k3 = st.columns(3)
+k1.metric("🔧 Total Jobs", total_jobs)
+k2.metric("👨‍🔧 Technicians", tech_count)
+k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
 
-    st.subheader("📊 Work Orders Charts")
-    fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
-                  color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
-    st.plotly_chart(fig1, use_container_width=True)
-
-    fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
-                  color="Technician", title="Avg Duration by Work Type & Technician", template="plotly_dark")
-    st.plotly_chart(fig2, use_container_width=True)
-
-    st.markdown("---")
+k4, k5, k6, k7 = st.columns(4)
+k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
+k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
+k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
+k7.metric("📋 Avg by Work Type (hrs)", f"{combined_avg_duration_by_type:.2f}")
 
     # =====================================================
     # SECTION 2: INSTALLATION REWORK ANALYSIS
