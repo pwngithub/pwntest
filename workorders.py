@@ -71,7 +71,6 @@ def run_workorders_dashboard():
             # --- Normalize technician column spelling ---
 if "Techinician" in df.columns and "Technician" not in df.columns:
     df.rename(columns={"Techinician": "Technician"}, inplace=True)
-
     elif uploaded_wo:
             st.sidebar.warning("Please enter a filename before saving.")
     else:
