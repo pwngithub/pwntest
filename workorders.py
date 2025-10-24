@@ -106,7 +106,6 @@ def run_workorders_dashboard():
     df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
     if not df_filtered.empty:
-        # Check for 'Work Type' existence before creating filters
         if 'Work Type' in df_filtered.columns:
             techs = sorted(df_filtered["Technician"].unique())
             work_types = sorted(df_filtered["Work Type"].unique())
@@ -122,7 +121,6 @@ def run_workorders_dashboard():
             selected_techs = st.multiselect("👨‍🔧 Select Technician(s)", techs, default=techs)
             df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs)]
 
-
     if df_filtered.empty:
         st.warning("No data available for the selected filters.")
         st.stop()
@@ -137,36 +135,48 @@ def run_workorders_dashboard():
         st.stop()
 
     # =====================================================
-    # SECTION 2: KPIs (FINAL VERSION)
+    # SECTION 2: KPIs
     # =====================================================
     st.markdown("### 📌 Work Orders KPIs")
     try:
-        # --- KPI Calculations (with minutes to hours conversion) ---
-        duration_in_hours = pd.to_numeric(df_filtered["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce") / 60
+        # --- KPI Calculations ---
+        duration_in_mins = pd.to_numeric(df_filtered["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
+        duration_in_hours = duration_in_mins / 60
         
         total_jobs = df_filtered["WO#"].nunique()
-        avg_duration = duration_in_hours.mean() or 0
-        max_duration = duration_in_hours.max() or 0
-        min_duration = duration_in_hours.min() or 0
+        avg_duration_hrs = duration_in_hours.mean() or 0
+        max_duration_hrs = duration_in_hours.max() or 0
+        min_duration_hrs = duration_in_hours.min() or 0
         tech_count = df_filtered["Technician"].nunique()
         avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
         
         df_calc = df_filtered.copy()
         df_calc['Duration_numeric_hrs'] = pd.to_numeric(df_calc['Duration'].astype(str).str.extract(r'(\d+\.?\d*)')[0], errors='coerce') / 60
-        avg_duration_per_type = df_calc.groupby('Work Type')['Duration_numeric_hrs'].mean()
-        combined_avg_duration_by_type = avg_duration_per_type.mean() or 0
+        avg_duration_per_type_hrs = df_calc.groupby('Work Type')['Duration_numeric_hrs'].mean()
+        combined_avg_duration_by_type_hrs = avg_duration_per_type_hrs.mean() or 0
+        
+        # <<< START NEW CODE >>>
+        # New KPI for combined average in MINUTES
+        df_calc['Duration_numeric_mins'] = pd.to_numeric(df_calc['Duration'].astype(str).str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
+        avg_duration_per_type_mins = df_calc.groupby('Work Type')['Duration_numeric_mins'].mean()
+        combined_avg_duration_by_type_mins = avg_duration_per_type_mins.mean() or 0
+        # <<< END NEW CODE >>>
 
         # --- KPI Display ---
         k1, k2, k3 = st.columns(3)
         k1.metric("🔧 Total Jobs", total_jobs)
         k2.metric("👨‍🔧 Technicians", tech_count)
         k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
-
-        k4, k5, k6, k7 = st.columns(4)
-        k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
-        k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
-        k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
-        k7.metric("📋 Avg by Work Type (hrs)", f"{combined_avg_duration_by_type:.2f}")
+        
+        # <<< START MODIFIED CODE >>>
+        # Changed to 5 columns to fit new KPI
+        k4, k5, k6, k7, k8 = st.columns(5)
+        k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration_hrs:.2f}")
+        k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration_hrs:.2f}")
+        k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration_hrs:.2f}")
+        k7.metric("📋 Avg by Type (hrs)", f"{combined_avg_duration_by_type_hrs:.2f}")
+        k8.metric("📋 Avg by Type (mins)", f"{combined_avg_duration_by_type_mins:.1f}")
+        # <<< END MODIFIED CODE >>>
 
     except Exception as e:
         st.error(f"An unexpected error occurred while calculating KPIs: {e}")
@@ -176,11 +186,12 @@ def run_workorders_dashboard():
     # SECTION 3: CHARTS
     # =====================================================
     try:
-        # --- Chart Calculation (with minutes to hours conversion) ---
+        # <<< START MODIFIED CODE >>>
+        # Chart calculation now uses MINUTES (removed / 60)
         grouped_overall = (
             df_filtered.groupby(["Technician", "Work Type"])
             .agg(Total_Jobs=("WO#", "nunique"),
-                 Average_Duration=("Duration", lambda x: (pd.to_numeric(x.astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce") / 60).mean()))
+                 Average_Duration=("Duration", lambda x: pd.to_numeric(x.astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
             .reset_index()
         )
 
@@ -189,9 +200,11 @@ def run_workorders_dashboard():
                       color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
         st.plotly_chart(fig1, use_container_width=True)
 
+        # Updated chart title to reflect minutes
         fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
-                      color="Technician", title="Avg Duration by Work Type & Technician (hrs)", template="plotly_dark")
+                      color="Technician", title="Avg Duration by Work Type & Technician (mins)", template="plotly_dark")
         st.plotly_chart(fig2, use_container_width=True)
+        # <<< END MODIFIED CODE >>>
     except Exception as e:
         st.error(f"An error occurred while creating charts: {e}")
 
