@@ -60,19 +60,19 @@ def run_workorders_dashboard():
     df = None
 
     if mode_wo == "Upload New":
-        uploaded_wo = st.sidebar.file_uploader("Upload Work Orders CSV", type=["csv"], key="wo_upload")
+        uploaded_wo = st.sidebar.file_uploader("Upload Tech Workflow CSV", type=["csv"], key="wo_upload")
         custom_wo_name = st.sidebar.text_input("Save as (no extension):", key="wo_name")
         if uploaded_wo and custom_wo_name:
             save_path = os.path.join(saved_folder, custom_wo_name + ".csv")
             with open(save_path, "wb") as f:
                 f.write(uploaded_wo.getbuffer())
-            st.sidebar.success(f"✅ Work Orders saved as: {custom_wo_name}.csv")
+            st.sidebar.success(f"✅ File saved as: {custom_wo_name}.csv")
             df = pd.read_csv(save_path)
         elif uploaded_wo:
             st.sidebar.warning("Please enter a filename before saving.")
     else:
         saved_files = [f for f in os.listdir(saved_folder) if f.endswith(".csv")]
-        selected_wo = st.sidebar.selectbox("Select Work Orders File", saved_files, key="wo_select")
+        selected_wo = st.sidebar.selectbox("Select Saved File", saved_files, key="wo_select")
         if selected_wo:
             df = pd.read_csv(os.path.join(saved_folder, selected_wo))
 
@@ -106,18 +106,20 @@ def run_workorders_dashboard():
     if "df" in locals() and df is not None and not df.empty:
         with st.expander("🧾 Work Orders Dashboard", expanded=True):
 
-            # --- Auto-detect date column ---
-            date_cols = [col for col in df.columns if str(col).lower() in ["date when", "date", "work date", "completed", "completion date"]]
-            if not date_cols:
-                st.error("⚠️ No date column found. Please include 'Date When' or 'Date' column.")
+            # --- Ensure Date and Type Columns Exist ---
+            if "Type" not in df.columns:
+                st.error("⚠️ The uploaded file must include a 'Type' column.")
                 st.stop()
+
+            date_cols = [c for c in df.columns if str(c).lower() in ["date", "date when", "work date", "completed", "completion date"]]
+            if not date_cols:
+                st.error("⚠️ No date column found. Please include a date field.")
+                st.stop()
+
             date_col = date_cols[0]
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
             df = df.dropna(subset=[date_col])
             df["Day"] = df[date_col].dt.date
-
-            if "Techinician" in df.columns and "Technician" not in df.columns:
-                df.rename(columns={"Techinician": "Technician"}, inplace=True)
 
             # --- Filters ---
             min_day, max_day = df["Day"].min(), df["Day"].max()
@@ -126,21 +128,23 @@ def run_workorders_dashboard():
             df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
             techs = sorted(df_filtered["Technician"].unique())
-            work_types = sorted(df_filtered["Work Type"].unique())
+            types = sorted(df_filtered["Type"].unique())
             col1, col2 = st.columns(2)
             with col1:
                 selected_techs = st.multiselect("👨‍🔧 Technicians", techs, default=techs)
             with col2:
-                selected_work_types = st.multiselect("📋 Work Types", work_types, default=work_types)
-            df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
+                selected_types = st.multiselect("📋 Types", types, default=types)
+            df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Type"].isin(selected_types)]
 
             if df_filtered.empty:
                 st.warning("No data matches your filters.")
             else:
-                # --- Clean Work Type ---
-                df_filtered["Work Type"] = (
-                    df_filtered["Work Type"]
+                # --- Clean Type values ---
+                df_filtered["Type"] = (
+                    df_filtered["Type"]
                     .astype(str)
+                    .str.replace(r"[:_\-]+", " ", regex=True)
+                    .str.replace(r"\s+", " ", regex=True)
                     .str.strip()
                     .str.title()
                     .replace({"Nan": "Unknown", "": "Unknown"})
@@ -209,9 +213,9 @@ def run_workorders_dashboard():
                 c5.metric("⏱️ Longest Duration (min)", f"{max_duration:.1f}")
                 c6.metric("⚡ Shortest Duration (min)", f"{min_duration:.1f}")
 
-                # --- Average Duration by Work Order Type Chart ---
+                # --- Average Duration by Type ---
                 avg_by_type = (
-                    df_filtered.groupby("Work Type", as_index=False)["Duration_Num"]
+                    df_filtered.groupby("Type", as_index=False)["Duration_Num"]
                     .mean()
                     .rename(columns={"Duration_Num": "Avg_Duration_Min"})
                     .sort_values("Avg_Duration_Min", ascending=False)
@@ -221,13 +225,13 @@ def run_workorders_dashboard():
                 st.markdown("""
                 <div style='margin-top:18px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
                             background:linear-gradient(90deg,#1c1c1c 0%,#5AA9E6 100%);'>
-                    <h4 style='color:white;margin:0;'>⏳ Average Duration by Work Order Type (Minutes)</h4>
+                    <h4 style='color:white;margin:0;'>⏳ Average Duration by Type (Minutes)</h4>
                 </div>
                 """, unsafe_allow_html=True)
 
                 fig = px.bar(
                     avg_by_type,
-                    x="Work Type",
+                    x="Type",
                     y="Avg_Duration_Min",
                     text="Avg_Duration_Min",
                     color="Avg_Duration_Min",
@@ -244,14 +248,14 @@ def run_workorders_dashboard():
                 fig.update_traces(texttemplate='%{text:.1f} min', textposition='outside')
                 st.plotly_chart(fig, use_container_width=True)
 
-                # --- Pivot Table ---
+                # --- Pivot: Average Duration per Technician per Type ---
                 all_techs = sorted(df_filtered["Technician"].unique())
-                all_types = sorted([t for t in df_filtered["Work Type"].unique() if t != "Unknown"]) + ["Unknown"]
+                all_types = sorted([t for t in df_filtered["Type"].unique() if t != "Unknown"]) + ["Unknown"]
 
                 pivot = (
                     df_filtered.pivot_table(
                         index="Technician",
-                        columns="Work Type",
+                        columns="Type",
                         values="Duration_Num",
                         aggfunc="mean"
                     )
@@ -271,12 +275,12 @@ def run_workorders_dashboard():
                 st.markdown("""
                 <div style='margin-top:25px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
                             background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
-                    <h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per Work Order Type (Minutes)</h4>
+                    <h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per Type (Minutes)</h4>
                 </div>
                 """, unsafe_allow_html=True)
                 st.dataframe(styled, use_container_width=True)
     else:
-        st.info("📁 Please upload or select a Work Orders file from the sidebar to load this report.")
+        st.info("📁 Please upload or select a Tech Workflow file to view the Work Orders dashboard.")
 
     # =====================================================
     # 🔁 INSTALLATION REWORK SECTION
@@ -347,4 +351,4 @@ def run_workorders_dashboard():
             except Exception as e:
                 st.error(f"Error parsing installation rework file: {e}")
     else:
-        st.info("📁 Please upload or select an Installation Rework file to view that report.")
+        st
