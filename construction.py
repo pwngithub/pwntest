@@ -100,6 +100,7 @@ def run_construction_dashboard():
     total_projects = df["projectOr"].nunique()
     total_hours = pd.to_numeric(df['workHours'], errors='coerce').sum()
 
+    st.header("Overall Totals (Filtered Range)")
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Lash Footage", f"{lash_total:,}")
     col2.metric("Pull Footage", f"{pull_total:,}")
@@ -107,6 +108,29 @@ def run_construction_dashboard():
     col4.metric("Projects", f"{total_projects}")
     col5.metric("Total Hours", f"{total_hours:,.2f}")
 
+    # --- START: KPI for Pioneer Trucks ---
+
+    st.header("Pioneer Truck Totals (Filtered Range)")
+    pioneer_trucks = ['Ford', 'Freightliner', 'F550', 'New Freightliner #44']
+    
+    # Filter the already date-filtered dataframe for Pioneer trucks
+    pioneer_df = df[df['whatTruck'].isin(pioneer_trucks)]
+
+    # Recalculate footage specifically for this subset
+    pioneer_lash_df = extract_json_footage(pioneer_df[pioneer_df["typeA45"].notna()], "typeA45", "LashFootage")
+    pioneer_pull_df = extract_json_footage(pioneer_df[pioneer_df["fiberPull"].notna()], "fiberPull", "PullFootage")
+    pioneer_strand_df = extract_json_footage(pioneer_df[pioneer_df["standInfo"].notna()], "standInfo", "StrandFootage")
+
+    pioneer_lash_total = pioneer_lash_df["LashFootage"].sum()
+    pioneer_pull_total = pioneer_pull_df["PullFootage"].sum()
+    pioneer_strand_total = pioneer_strand_df["StrandFootage"].sum()
+
+    p_col1, p_col2, p_col3 = st.columns(3)
+    p_col1.metric("Pioneer Lash Footage", f"{pioneer_lash_total:,}")
+    p_col2.metric("Pioneer Pull Footage", f"{pioneer_pull_total:,}")
+    p_col3.metric("Pioneer Strand Footage", f"{pioneer_strand_total:,}")
+
+    # --- END: KPI for Pioneer Trucks ---
 
     st.markdown("---")
     st.header("Average Lash, Pull, Strand per Truck per Week (Filtered Range)")
@@ -149,8 +173,6 @@ def run_construction_dashboard():
     fig_avg_truck.update_traces(texttemplate='%{x:.0f}', textposition='auto', marker_line_width=0.5)
     st.plotly_chart(fig_avg_truck, use_container_width=True)
 
-    # --- START: New Graph for Total Footage per Truck ---
-
     st.header("Total Lash, Pull, & Strand Footage per Truck (Filtered Range)")
 
     melted_totals = pd.melt(
@@ -178,8 +200,6 @@ def run_construction_dashboard():
     )
     fig_total_truck.update_traces(texttemplate='%{x:,.0f}', textposition='auto', marker_line_width=0.5)
     st.plotly_chart(fig_total_truck, use_container_width=True)
-
-    # --- END: New Graph for Total Footage per Truck ---
 
     st.header("Total Average per Week (All Trucks Combined)")
 
