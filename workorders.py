@@ -7,7 +7,7 @@ from plotly.subplots import make_subplots
 
 def run_workorders_dashboard():
     st.set_page_config(
-        page_title="PBB Work Orders Dashboard", 
+        page_title="PBB Work Orders Dashboard",
         layout="wide",
         initial_sidebar_state="expanded"
     )
@@ -80,12 +80,11 @@ def run_workorders_dashboard():
             st.sidebar.success(f"Deleted {selected_file}")
             st.experimental_rerun()
 
-    # --- Load Work Orders Data ---
     if df is None:
         st.info("Please upload or load a Work Orders file to begin.")
         st.stop()
 
-    # --- Auto-detect date column ---
+    # --- Data Cleaning and Preparation ---
     date_cols = [col for col in df.columns if str(col).lower() in ["date when", "date", "work date", "completed", "completion date"]]
     if not date_cols:
         st.error("No date column found. Please include a 'Date When', 'Date', or 'Completed' column in your CSV.")
@@ -120,50 +119,69 @@ def run_workorders_dashboard():
         st.warning("No data available for the selected filters.")
         st.stop()
 
-   # --- KPIs ---
-st.markdown("### 📌 Work Orders KPIs")
-duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
-total_jobs = df_filtered["WO#"].nunique()
-avg_duration = duration.mean() or 0
-max_duration = duration.max() or 0
-min_duration = duration.min() or 0
-tech_count = df_filtered["Technician"].nunique()
-avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
+    # --- KPIs ---
+    st.markdown("### 📌 Work Orders KPIs")
+    duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
+    total_jobs = df_filtered["WO#"].nunique()
+    avg_duration = duration.mean() or 0
+    max_duration = duration.max() or 0
+    min_duration = duration.min() or 0
+    tech_count = df_filtered["Technician"].nunique()
+    avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
 
-# --- New KPI Calculation with Live Debugging ---
-combined_avg_duration_by_type = 0 # Default value
-with st.expander("Expand to see KPI Debug Info"):
-    try:
-        st.write("--- Starting KPI Debug ---")
-        df_calc = df_filtered.copy()
-        df_calc['Duration_numeric'] = pd.to_numeric(df_calc['Duration'].str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
-        
-        st.write("Available Work Types found in filtered data:")
-        st.write(df_calc['Work Type'].unique().tolist())
+    # --- New KPI Calculation with Live Debugging ---
+    combined_avg_duration_by_type = 0 # Default value
+    with st.expander("Expand to see KPI Debug Info"):
+        try:
+            st.write("--- Starting KPI Debug ---")
+            df_calc = df_filtered.copy()
+            df_calc['Duration_numeric'] = pd.to_numeric(df_calc['Duration'].str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
+            
+            st.write("Available Work Types found in filtered data:")
+            st.write(df_calc['Work Type'].unique().tolist())
 
-        avg_duration_per_type = df_calc.groupby('Work Type')['Duration_numeric'].mean()
-        
-        st.write("Average duration calculated for each work type:")
-        st.dataframe(avg_duration_per_type) # Display the intermediate calculation
-        
-        combined_avg_duration_by_type = avg_duration_per_type.mean() or 0
-        st.write(f"Final Calculated KPI Value (average of the above): **{combined_avg_duration_by_type}**")
-        st.write("--- End KPI Debug ---")
+            avg_duration_per_type = df_calc.groupby('Work Type')['Duration_numeric'].mean()
+            
+            st.write("Average duration calculated for each work type:")
+            st.dataframe(avg_duration_per_type) # Display the intermediate calculation
+            
+            combined_avg_duration_by_type = avg_duration_per_type.mean() or 0
+            st.write(f"Final Calculated KPI Value (average of the above): **{combined_avg_duration_by_type}**")
+            st.write("--- End KPI Debug ---")
 
-    except Exception as e:
-        st.error(f"An error occurred during calculation: {e}")
-        combined_avg_duration_by_type = 0
+        except Exception as e:
+            st.error(f"An error occurred during calculation: {e}")
+            combined_avg_duration_by_type = 0
 
-k1, k2, k3 = st.columns(3)
-k1.metric("🔧 Total Jobs", total_jobs)
-k2.metric("👨‍🔧 Technicians", tech_count)
-k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
+    k1, k2, k3 = st.columns(3)
+    k1.metric("🔧 Total Jobs", total_jobs)
+    k2.metric("👨‍🔧 Technicians", tech_count)
+    k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs_per_tech:.1f}")
 
-k4, k5, k6, k7 = st.columns(4)
-k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
-k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
-k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
-k7.metric("📋 Avg by Work Type (hrs)", f"{combined_avg_duration_by_type:.2f}")
+    k4, k5, k6, k7 = st.columns(4)
+    k4.metric("🕒 Avg Duration (hrs)", f"{avg_duration:.2f}")
+    k5.metric("⏱️ Longest Duration (hrs)", f"{max_duration:.2f}")
+    k6.metric("⚡ Shortest Duration (hrs)", f"{min_duration:.2f}")
+    k7.metric("📋 Avg by Work Type (hrs)", f"{combined_avg_duration_by_type:.2f}")
+
+    # --- Charts ---
+    grouped_overall = (
+        df_filtered.groupby(["Technician", "Work Type"])
+        .agg(Total_Jobs=("WO#", "nunique"),
+             Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+        .reset_index()
+    )
+
+    st.subheader("📊 Work Orders Charts")
+    fig1 = px.bar(grouped_overall, x="Work Type", y="Total_Jobs",
+                  color="Technician", title="Jobs by Work Type & Technician", template="plotly_dark")
+    st.plotly_chart(fig1, use_container_width=True)
+
+    fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
+                  color="Technician", title="Avg Duration by Work Type & Technician", template="plotly_dark")
+    st.plotly_chart(fig2, use_container_width=True)
+
+    st.markdown("---")
 
     # =====================================================
     # SECTION 2: INSTALLATION REWORK ANALYSIS
@@ -194,44 +212,28 @@ k7.metric("📋 Avg by Work Type (hrs)", f"{combined_avg_duration_by_type:.2f}")
         else:
             st.sidebar.warning("No saved files found for Installation Rework.")
 
-    # --- Parse Installation Rework File ---
     if df_rework is not None and not df_rework.empty:
         try:
             parsed_rows = []
-
             for _, row in df_rework.iterrows():
                 values = row.tolist()
-
-                # Detect Install rows
                 if len(values) > 1 and str(values[1]).startswith("Install"):
                     base_subset = [values[i] for i in [0, 2, 3, 4] if i < len(values)]
                 else:
                     base_subset = [values[i] for i in [0, 1, 2, 3] if i < len(values)]
-
                 while len(base_subset) < 4:
                     base_subset.append(None)
-
                 parsed_rows.append(base_subset)
 
-            # Convert to DataFrame
             df_combined = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Installations", "Rework", "Rework_Percentage"])
             df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
             df_combined["Total_Installations"] = pd.to_numeric(df_combined["Total_Installations"], errors="coerce")
             df_combined["Rework"] = pd.to_numeric(df_combined["Rework"], errors="coerce")
-            df_combined["Rework_Percentage"] = (
-                df_combined["Rework_Percentage"].astype(str)
-                .str.replace("%", "")
-                .str.replace('"', "")
-                .str.strip()
-            )
+            df_combined["Rework_Percentage"] = (df_combined["Rework_Percentage"].astype(str).str.replace("%", "").str.replace('"', "").str.strip())
             df_combined["Rework_Percentage"] = pd.to_numeric(df_combined["Rework_Percentage"], errors="coerce")
             df_combined.dropna(subset=["Technician", "Total_Installations"], inplace=True)
-
-
-            # Sort technicians by Total Installations (descending)
             df_combined = df_combined.sort_values("Total_Installations", ascending=False)
 
-            # --- KPIs ---
             st.markdown("### 📌 Installation Rework KPIs")
             total_jobs_rw = df_combined["Total_Installations"].sum()
             total_repeats = df_combined["Rework"].sum()
@@ -242,94 +244,31 @@ k7.metric("📋 Avg by Work Type (hrs)", f"{combined_avg_duration_by_type:.2f}")
             c2.metric("🔁 Total Reworks", int(total_repeats))
             c3.metric("📈 Avg Rework %", f"{avg_repeat_pct:.1f}%")
 
-            # --- Heatmap Summary Table ---
             st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
-
             def color_rework(val):
-                if pd.isna(val):
-                    return ''
-                elif val < 5:
-                    return 'background-color: #3CB371; color: white;'
-                elif val < 10:
-                    return 'background-color: #FFD700; color: black;'
-                else:
-                    return 'background-color: #FF6347; color: white;'
+                if pd.isna(val): return ''
+                elif val < 5: return 'background-color: #3CB371; color: white;'
+                elif val < 10: return 'background-color: #FFD700; color: black;'
+                else: return 'background-color: #FF6347; color: white;'
 
-            styled_table = (
-                df_combined.style
-                .applymap(color_rework, subset=['Rework_Percentage'])
-                .format({
-                    'Rework_Percentage': '{:.1f}%',
-                    'Total_Installations': '{:.0f}',
-                    'Rework': '{:.0f}'
-                })
-            )
+            styled_table = (df_combined.style.applymap(color_rework, subset=['Rework_Percentage']).format({'Rework_Percentage': '{:.1f}%', 'Total_Installations': '{:.0f}', 'Rework': '{:.0f}'}))
             st.dataframe(styled_table, use_container_width=True)
 
-            # --- Combined Bar + Line Chart (with Secondary Y-Axis) ---
             st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
-
             fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
-
-            # Bars: Total Installations
-            fig_combo.add_trace(
-                go.Bar(
-                    x=df_combined["Technician"],
-                    y=df_combined["Total_Installations"],
-                    name="Total Installations",
-                    marker_color="#00BFFF"
-                ),
-                secondary_y=False
-            )
-
-            # Line: Rework %
-            fig_combo.add_trace(
-                go.Scatter(
-                    x=df_combined["Technician"],
-                    y=df_combined["Rework_Percentage"],
-                    name="Rework %",
-                    mode="lines+markers",
-                    line=dict(color="#FF6347", width=3)
-                ),
-                secondary_y=True
-            )
-
-            # Add average line for Rework %
-            fig_combo.add_hline(
-                y=avg_repeat_pct,
-                line_dash="dash",
-                line_color="cyan",
-                annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)",
-                annotation_font_color="cyan",
-                secondary_y=True
-            )
-
-            # Layout adjustments
-            fig_combo.update_layout(
-                title_text="Technician Total Installations vs Rework %",
-                template="plotly_dark",
-                xaxis_title="Technician",
-                yaxis_title="Total Installations",
-                legend=dict(x=0.01, y=0.99, bgcolor="rgba(0,0,0,0)"),
-                bargap=0.25
-            )
+            fig_combo.add_trace(go.Bar(x=df_combined["Technician"], y=df_combined["Total_Installations"], name="Total Installations", marker_color="#00BFFF"), secondary_y=False)
+            fig_combo.add_trace(go.Scatter(x=df_combined["Technician"], y=df_combined["Rework_Percentage"], name="Rework %", mode="lines+markers", line=dict(color="#FF6347", width=3)), secondary_y=True)
+            fig_combo.add_hline(y=avg_repeat_pct, line_dash="dash", line_color="cyan", annotation_text=f"Avg Rework % ({avg_repeat_pct:.1f}%)", annotation_font_color="cyan", secondary_y=True)
+            fig_combo.update_layout(title_text="Technician Total Installations vs Rework %", template="plotly_dark", xaxis_title="Technician", yaxis_title="Total Installations", legend=dict(x=0.01, y=0.99, bgcolor="rgba(0,0,0,0)"), bargap=0.25)
             fig_combo.update_yaxes(title_text="Total Installations", secondary_y=False)
             fig_combo.update_yaxes(title_text="Rework %", secondary_y=True)
-
             st.plotly_chart(fig_combo, use_container_width=True)
 
-            # --- Download option ---
             csv_rework = df_combined.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "⬇️ Download Installation Rework Summary CSV",
-                data=csv_rework,
-                file_name="installation_rework_summary.csv",
-                mime="text/csv"
-            )
+            st.download_button("⬇️ Download Installation Rework Summary CSV", data=csv_rework, file_name="installation_rework_summary.csv", mime="text/csv")
 
         except Exception as e:
             st.error(f"Error parsing installation rework file: {e}")
 
-# This ensures the app runs when the script is executed
 if __name__ == "__main__":
     run_workorders_dashboard()
