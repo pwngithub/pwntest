@@ -106,21 +106,29 @@ def run_workorders_dashboard():
     df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
     if not df_filtered.empty:
-        techs = sorted(df_filtered["Technician"].unique())
-        work_types = sorted(df_filtered["Work Type"].unique())
-        col1, col2 = st.columns(2)
-        with col1:
+        # Check for 'Work Type' existence before creating filters
+        if 'Work Type' in df_filtered.columns:
+            techs = sorted(df_filtered["Technician"].unique())
+            work_types = sorted(df_filtered["Work Type"].unique())
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_techs = st.multiselect("👨‍🔧 Select Technician(s)", techs, default=techs)
+            with col2:
+                selected_work_types = st.multiselect("📋 Select Work Type(s)", work_types, default=work_types)
+            df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
+        else:
+            st.warning("Column 'Work Type' not found. Skipping Work Type filter.")
+            techs = sorted(df_filtered["Technician"].unique())
             selected_techs = st.multiselect("👨‍🔧 Select Technician(s)", techs, default=techs)
-        with col2:
-            selected_work_types = st.multiselect("📋 Select Work Type(s)", work_types, default=work_types)
-        df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Work Type"].isin(selected_work_types)]
+            df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs)]
+
 
     if df_filtered.empty:
         st.warning("No data available for the selected filters.")
         st.stop()
 
     # =====================================================
-    # NEW: ROBUST COLUMN CHECK
+    # ROBUST COLUMN CHECK
     # =====================================================
     required_cols = ['WO#', 'Duration', 'Technician', 'Work Type']
     missing_cols = [col for col in required_cols if col not in df_filtered.columns]
@@ -133,21 +141,22 @@ def run_workorders_dashboard():
     # =====================================================
     st.markdown("### 📌 Work Orders KPIs")
     try:
-        # KPI Calculations
-        duration = pd.to_numeric(df_filtered["Duration"].str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
+        # --- KPI Calculations (with minutes to hours conversion) ---
+        duration_in_hours = pd.to_numeric(df_filtered["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce") / 60
+        
         total_jobs = df_filtered["WO#"].nunique()
-        avg_duration = duration.mean() or 0
-        max_duration = duration.max() or 0
-        min_duration = duration.min() or 0
+        avg_duration = duration_in_hours.mean() or 0
+        max_duration = duration_in_hours.max() or 0
+        min_duration = duration_in_hours.min() or 0
         tech_count = df_filtered["Technician"].nunique()
         avg_jobs_per_tech = total_jobs / tech_count if tech_count else 0
         
         df_calc = df_filtered.copy()
-        df_calc['Duration_numeric'] = pd.to_numeric(df_calc['Duration'].str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
-        avg_duration_per_type = df_calc.groupby('Work Type')['Duration_numeric'].mean()
+        df_calc['Duration_numeric_hrs'] = pd.to_numeric(df_calc['Duration'].astype(str).str.extract(r'(\d+\.?\d*)')[0], errors='coerce') / 60
+        avg_duration_per_type = df_calc.groupby('Work Type')['Duration_numeric_hrs'].mean()
         combined_avg_duration_by_type = avg_duration_per_type.mean() or 0
 
-        # KPI Display
+        # --- KPI Display ---
         k1, k2, k3 = st.columns(3)
         k1.metric("🔧 Total Jobs", total_jobs)
         k2.metric("👨‍🔧 Technicians", tech_count)
@@ -167,10 +176,11 @@ def run_workorders_dashboard():
     # SECTION 3: CHARTS
     # =====================================================
     try:
+        # --- Chart Calculation (with minutes to hours conversion) ---
         grouped_overall = (
             df_filtered.groupby(["Technician", "Work Type"])
             .agg(Total_Jobs=("WO#", "nunique"),
-                 Average_Duration=("Duration", lambda x: pd.to_numeric(x.str.extract(r"(\d+\.?\d*)")[0], errors="coerce").mean()))
+                 Average_Duration=("Duration", lambda x: (pd.to_numeric(x.astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce") / 60).mean()))
             .reset_index()
         )
 
@@ -180,7 +190,7 @@ def run_workorders_dashboard():
         st.plotly_chart(fig1, use_container_width=True)
 
         fig2 = px.bar(grouped_overall, x="Work Type", y="Average_Duration",
-                      color="Technician", title="Avg Duration by Work Type & Technician", template="plotly_dark")
+                      color="Technician", title="Avg Duration by Work Type & Technician (hrs)", template="plotly_dark")
         st.plotly_chart(fig2, use_container_width=True)
     except Exception as e:
         st.error(f"An error occurred while creating charts: {e}")
