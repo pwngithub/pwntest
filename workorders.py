@@ -106,12 +106,15 @@ def run_workorders_dashboard():
     if "df" in locals() and df is not None and not df.empty:
         with st.expander("🧾 Work Orders Dashboard", expanded=True):
 
-            # --- Ensure Date and Type Columns Exist ---
-            if "Type" not in df.columns:
-                st.error("⚠️ The uploaded file must include a 'Type' column.")
+            # --- Identify correct work type column ---
+            type_candidates = [c for c in df.columns if c.strip().lower() in ["type", "work type", "wo type"]]
+            if not type_candidates:
+                st.error("⚠️ No 'Work Type' or 'Type' column found in the uploaded file.")
                 st.stop()
+            type_col = type_candidates[0]
 
-            date_cols = [c for c in df.columns if str(c).lower() in ["date", "date when", "work date", "completed", "completion date"]]
+            # --- Identify a valid date column ---
+            date_cols = [c for c in df.columns if str(c).lower() in ["date when", "date", "work date", "completed", "completion date"]]
             if not date_cols:
                 st.error("⚠️ No date column found. Please include a date field.")
                 st.stop()
@@ -128,26 +131,25 @@ def run_workorders_dashboard():
             df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
             techs = sorted(df_filtered["Technician"].unique())
-            types = sorted(df_filtered["Type"].unique())
+            types = sorted(df_filtered[type_col].unique())
             col1, col2 = st.columns(2)
             with col1:
                 selected_techs = st.multiselect("👨‍🔧 Technicians", techs, default=techs)
             with col2:
-                selected_types = st.multiselect("📋 Types", types, default=types)
-            df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered["Type"].isin(selected_types)]
+                selected_types = st.multiselect(f"📋 {type_col}", types, default=types)
+            df_filtered = df_filtered[df_filtered["Technician"].isin(selected_techs) & df_filtered[type_col].isin(selected_types)]
 
             if df_filtered.empty:
                 st.warning("No data matches your filters.")
             else:
-                # --- Clean Type values ---
-                df_filtered["Type"] = (
-                    df_filtered["Type"]
+                # --- Clean work type ---
+                df_filtered[type_col] = (
+                    df_filtered[type_col]
                     .astype(str)
                     .str.replace(r"[:_\-]+", " ", regex=True)
                     .str.replace(r"\s+", " ", regex=True)
                     .str.strip()
-                    .str.title()
-                    .replace({"Nan": "Unknown", "": "Unknown"})
+                    .str.upper()
                 )
 
                 # --- Duration Parser ---
@@ -213,25 +215,25 @@ def run_workorders_dashboard():
                 c5.metric("⏱️ Longest Duration (min)", f"{max_duration:.1f}")
                 c6.metric("⚡ Shortest Duration (min)", f"{min_duration:.1f}")
 
-                # --- Average Duration by Type ---
+                # --- Average Duration by Work Type ---
                 avg_by_type = (
-                    df_filtered.groupby("Type", as_index=False)["Duration_Num"]
+                    df_filtered.groupby(type_col, as_index=False)["Duration_Num"]
                     .mean()
                     .rename(columns={"Duration_Num": "Avg_Duration_Min"})
                     .sort_values("Avg_Duration_Min", ascending=False)
                 )
                 overall_avg = df_filtered["Duration_Num"].mean()
 
-                st.markdown("""
+                st.markdown(f"""
                 <div style='margin-top:18px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
                             background:linear-gradient(90deg,#1c1c1c 0%,#5AA9E6 100%);'>
-                    <h4 style='color:white;margin:0;'>⏳ Average Duration by Type (Minutes)</h4>
+                    <h4 style='color:white;margin:0;'>⏳ Average Duration by {type_col} (Minutes)</h4>
                 </div>
                 """, unsafe_allow_html=True)
 
                 fig = px.bar(
                     avg_by_type,
-                    x="Type",
+                    x=type_col,
                     y="Avg_Duration_Min",
                     text="Avg_Duration_Min",
                     color="Avg_Duration_Min",
@@ -248,14 +250,14 @@ def run_workorders_dashboard():
                 fig.update_traces(texttemplate='%{text:.1f} min', textposition='outside')
                 st.plotly_chart(fig, use_container_width=True)
 
-                # --- Pivot: Average Duration per Technician per Type ---
+                # --- Pivot: Avg Duration per Technician per Work Type ---
                 all_techs = sorted(df_filtered["Technician"].unique())
-                all_types = sorted([t for t in df_filtered["Type"].unique() if t != "Unknown"]) + ["Unknown"]
+                all_types = sorted(df_filtered[type_col].unique())
 
                 pivot = (
                     df_filtered.pivot_table(
                         index="Technician",
-                        columns="Type",
+                        columns=type_col,
                         values="Duration_Num",
                         aggfunc="mean"
                     )
@@ -272,83 +274,12 @@ def run_workorders_dashboard():
                     .background_gradient(cmap="viridis", axis=None)
                 )
 
-                st.markdown("""
+                st.markdown(f"""
                 <div style='margin-top:25px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
                             background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
-                    <h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per Type (Minutes)</h4>
+                    <h4 style='color:white;margin:0;'>👨‍🔧 Average Duration per Technician per {type_col} (Minutes)</h4>
                 </div>
                 """, unsafe_allow_html=True)
                 st.dataframe(styled, use_container_width=True)
     else:
         st.info("📁 Please upload or select a Tech Workflow file to view the Work Orders dashboard.")
-
-    # =====================================================
-    # 🔁 INSTALLATION REWORK SECTION
-    # =====================================================
-    if "df_rework" in locals() and df_rework is not None and not df_rework.empty:
-        with st.expander("🔁 Installation Rework Analysis", expanded=False):
-            try:
-                parsed_rows = []
-                for _, row in df_rework.iterrows():
-                    vals = row.tolist()
-                    if str(row[1]).startswith("Install"):
-                        cols = [vals[i] for i in [0, 2, 3, 4] if i < len(vals)]
-                    else:
-                        cols = [vals[i] for i in [0, 1, 2, 3] if i < len(vals)]
-                    while len(cols) < 4:
-                        cols.append(None)
-                    parsed_rows.append(cols)
-
-                df_r = pd.DataFrame(parsed_rows, columns=["Technician", "Total_Installations", "Rework", "Rework_Percentage"])
-                df_r["Technician"] = df_r["Technician"].astype(str).str.replace('"', '').str.strip()
-                df_r["Total_Installations"] = pd.to_numeric(df_r["Total_Installations"], errors="coerce")
-                df_r["Rework"] = pd.to_numeric(df_r["Rework"], errors="coerce")
-                df_r["Rework_Percentage"] = pd.to_numeric(df_r["Rework_Percentage"].astype(str).str.replace("%", "").str.strip(), errors="coerce")
-
-                total_installs = df_r["Total_Installations"].sum()
-                total_reworks = df_r["Rework"].sum()
-                avg_pct = df_r["Rework_Percentage"].mean()
-
-                st.markdown("""
-                <div style='margin-top:10px;margin-bottom:10px;padding:10px 15px;border-radius:10px;
-                background:linear-gradient(90deg,#1c1c1c 0%,#8BC53F 100%);'>
-                <h3 style='color:white;margin:0;'>📊 Installation Rework KPIs</h3></div>
-                """, unsafe_allow_html=True)
-                c1, c2, c3 = st.columns(3)
-                c1.metric("🏗️ Total Installations", int(total_installs))
-                c2.metric("🔁 Total Reworks", int(total_reworks))
-                c3.metric("📈 Avg Rework %", f"{avg_pct:.1f}%")
-
-                st.markdown("<hr>", unsafe_allow_html=True)
-                st.markdown("### 🧾 Installation Rework Summary Table (Visualized)")
-                max_inst, max_rew, max_pct = df_r["Total_Installations"].max(), df_r["Rework"].max(), df_r["Rework_Percentage"].max()
-
-                def highlight(val, max_val):
-                    if val == max_val:
-                        return 'background-color:#FFD700;color:black;font-weight:bold;'
-                    return 'color:white;background-color:black;'
-
-                styled = (
-                    df_r.style
-                    .applymap(lambda v: highlight(v, max_inst), subset=["Total_Installations"])
-                    .applymap(lambda v: highlight(v, max_rew), subset=["Rework"])
-                    .applymap(lambda v: highlight(v, max_pct), subset=["Rework_Percentage"])
-                    .format({"Total_Installations": "{:.0f}", "Rework": "{:.0f}", "Rework_Percentage": "{:.1f}%"})
-                )
-                st.dataframe(styled, use_container_width=True)
-
-                df_r = df_r.sort_values("Total_Installations", ascending=False)
-                fig = make_subplots(specs=[[{"secondary_y": True}]])
-                fig.add_trace(go.Bar(x=df_r["Technician"], y=df_r["Total_Installations"], name="Total Installations", marker_color="#1E90FF", text=df_r["Total_Installations"], textposition="outside"), secondary_y=False)
-                fig.add_trace(go.Scatter(x=df_r["Technician"], y=df_r["Rework_Percentage"], name="Rework %", mode="lines+markers+text", line=dict(color="#FFA500", width=3), text=[f"{v:.1f}%" for v in df_r["Rework_Percentage"]], textposition="top center"), secondary_y=True)
-                fig.add_hline(y=avg_pct, line_dash="dot", line_color="cyan", annotation_text=f"Avg Rework % ({avg_pct:.1f}%)", annotation_font_color="cyan", secondary_y=True)
-                fig.update_layout(title="Technician Installations vs Rework %", template="plotly_dark", height=550)
-                st.plotly_chart(fig, use_container_width=True)
-
-                csv = df_r.to_csv(index=False).encode("utf-8")
-                st.download_button("⬇️ Download Installation Rework Summary CSV", data=csv, file_name="installation_rework_summary.csv", mime="text/csv")
-
-            except Exception as e:
-                st.error(f"Error parsing installation rework file: {e}")
-    else:
-        st
