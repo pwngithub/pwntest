@@ -17,7 +17,7 @@ report = st.sidebar.selectbox(
         "Accounting",
         "Projects",
         "Network",
-        "Prep"           # Added back
+        "Preps"           # Added back
     ],
     index=0
 )
@@ -63,16 +63,16 @@ try:
         import network as network_module
         importlib.reload(network_module)
 
-    elif report == "Prep":
+    elif report == "Preps":
         try:
             from utils import fetch_jotform_data
-            from prep import run_prep_dashboard
+            from preps import run_preps_dashboard
             df = fetch_jotform_data(form_id="232136783361054", api_key="32c62a1b6c1a350caed2f989c1be4e48")
-            st.sidebar.success(f"Loaded Prep data: {df.shape[0]} rows")
-            run_prep_dashboard()
+            st.sidebar.success(f"Loaded Preps data: {df.shape[0]} rows")
+            run_preps_dashboard()
         except Exception as e:
-            st.sidebar.error(f"Failed to load data for Prep: {e}")
-            st.error("Unable to load Prep dashboard.")
+            st.sidebar.error(f"Failed to load data for Preps: {e}")
+            st.error("Unable to load Preps dashboard.")
 
 except Exception as e:
     st.error(f"Could not load {report} report: {e}")
