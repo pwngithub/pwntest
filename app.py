@@ -1,5 +1,7 @@
 import streamlit as st
 import branding
+from prep import run_preps_dashboard
+from utils import fetch_jotform_data
 
 # -------------------------------
 # Sidebar: Report Selector
@@ -65,9 +67,10 @@ try:
 
     elif report == "Preps":
         try:
-            from utils import fetch_jotform_data
-            from preps import run_preps_dashboard
-            df = fetch_jotform_data(form_id="232136783361054", api_key="32c62a1b6c1a350caed2f989c1be4e48")
+            df = fetch_jotform_data(
+                form_id="232136783361054",
+                api_key="32c62a1b6c1a350caed2f989c1be4e48"
+            )
             st.sidebar.success(f"Loaded Preps data: {df.shape[0]} rows")
             run_preps_dashboard()
         except Exception as e:
