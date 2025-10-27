@@ -1,10 +1,11 @@
-
 import streamlit as st
 import branding
 # -------------------------------
 # Sidebar: Report Selector
 # -------------------------------
 st.sidebar.title("📊 Reports")
+
+# Always define report before try/except
 report = st.sidebar.selectbox(
     "Select Report",
     [
@@ -13,7 +14,8 @@ report = st.sidebar.selectbox(
         "Construction",
         "Tally",
         "Accounting",
-        "Projects"
+        "Projects",
+        "Network"
     ],
     index=0
 )
@@ -35,7 +37,7 @@ try:
     elif report == "Work Orders":
         import workorders
         workorders.run_workorders_dashboard()
-
+        
     elif report == "Construction":
         import construction
         construction.run_construction_dashboard()
@@ -45,14 +47,19 @@ try:
         dashboard.run_dashboard()
 
     elif report == "Accounting":
-        import importlib, accounting
-        importlib.reload(accounting)  # Runs accounting.py as standalone
+        import importlib
+        import accounting as accounting_module
+        importlib.reload(accounting_module)
 
     elif report == "Projects":
-        import importlib, projects
-        importlib.reload(projects)  # Runs projects.py as standalone
+        import importlib
+        import projects as projects_module
+        importlib.reload(projects_module)
+
+    elif report == "Network":
+        import importlib
+        import network as network_module
+        importlib.reload(network_module)
 
 except Exception as e:
     st.error(f"Could not load {report} report: {e}")
-
-
