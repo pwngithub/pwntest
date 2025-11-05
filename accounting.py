@@ -157,27 +157,13 @@ subs = num(df, subs_r, col_idx) if subs_r is not None else 0
 mrr = num(df, mrr_r, col_idx) if mrr_r is not None else 0
 arpu = (mrr / subs) if subs > 0 else 0
 
-# --- ROI values (auto-detected by 'ROI' label in column A) ---
-roi_row = find_row(df, ["roi"])  # looks for 'ROI' text in first column
+# --- ROI values (row 55) ---
+roi_row = 54  # row 55 in the sheet (0-based index)
+roi_monthly_col = next((i for i, c in enumerate(df.columns) if re.search(r"month", c, re.IGNORECASE)), None)
+roi_ytd_col = next((i for i, c in enumerate(df.columns) if re.search(r"ytd", c, re.IGNORECASE)), None)
 
-roi_monthly = 0
-roi_ytd = 0
-
-if roi_row is not None:
-    roi_monthly_col = next(
-        (i for i, c in enumerate(df.columns) if re.search(r"month", c, re.IGNORECASE)),
-        None,
-    )
-    roi_ytd_col = next(
-        (i for i, c in enumerate(df.columns) if re.search(r"ytd", c, re.IGNORECASE)),
-        None,
-    )
-
-    if roi_monthly_col is not None:
-        roi_monthly = num(df, roi_row, roi_monthly_col)
-
-    if roi_ytd_col is not None:
-        roi_ytd = num(df, roi_row, roi_ytd_col)
+roi_monthly = num(df, roi_row, roi_monthly_col) if roi_monthly_col is not None else 0
+roi_ytd = num(df, roi_row, roi_ytd_col) if roi_ytd_col is not None else 0
 
 # -------------------------------
 # KPI DISPLAY
