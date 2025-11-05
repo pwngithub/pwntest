@@ -66,11 +66,11 @@ try:
         importlib.reload(network_module)
 
     elif report == "Preps":
-    try:
-        run_preps_dashboard()
-    except Exception as e:
-        st.sidebar.error(f"Failed to load data for Preps: {e}")
-        st.error("Unable to load Preps dashboard.")
+        try:
+            run_preps_dashboard()
+        except Exception as e:
+            st.sidebar.error(f"Failed to load data for Preps: {e}")
+            st.error("Unable to load Preps dashboard.")
 
 
 except Exception as e:
