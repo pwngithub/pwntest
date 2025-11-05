@@ -122,11 +122,20 @@ except Exception as e:
 # HELPERS
 # -------------------------------
 def find_row(df, keys):
+    """Find first row where column A CONTAINS any of the keys (case-insensitive)."""
     col = df.iloc[:, 0].astype(str).str.lower()
     for k in keys:
         m = col[col.str.contains(k.lower())]
         if not m.empty:
             return m.index[0]
+    return None
+
+def find_exact_row(df, key):
+    """Find first row where column A EQUALS the key (case-insensitive, trimmed)."""
+    col = df.iloc[:, 0].astype(str).str.strip().str.lower()
+    m = col[col == key.lower()]
+    if not m.empty:
+        return m.index[0]
     return None
 
 def find_col(df, key):
@@ -157,8 +166,8 @@ subs = num(df, subs_r, col_idx) if subs_r is not None else 0
 mrr = num(df, mrr_r, col_idx) if mrr_r is not None else 0
 arpu = (mrr / subs) if subs > 0 else 0
 
-# --- ROI values (auto-detected by 'ROI' label in column A) ---
-roi_row = find_row(df, ["roi"])  # looks for 'ROI' text in first column
+# --- ROI values (auto-detected by exact 'ROI' label in column A) ---
+roi_row = find_exact_row(df, "roi")
 
 roi_monthly = 0
 roi_ytd = 0
@@ -217,15 +226,15 @@ def kpi_box(label, value, is_percent=False, is_number=False):
     """
 
 # Row 1
-c1.markdown(kpi_box("Monthly Recurring Revenue", f"{mrr}", False), unsafe_allow_html=True)
-c2.markdown(kpi_box("Subscriber Count", f"{subs}", False, is_number=True), unsafe_allow_html=True)
-c3.markdown(kpi_box("Average Revenue Per User", f"{arpu}", False), unsafe_allow_html=True)
-c4.markdown(kpi_box("EBITDA", f"{ebitda}", False), unsafe_allow_html=True)
+c1.markdown(kpi_box("Monthly Recurring Revenue", f"{mrr}"), unsafe_allow_html=True)
+c2.markdown(kpi_box("Subscriber Count", f"{subs}", is_number=True), unsafe_allow_html=True)
+c3.markdown(kpi_box("Average Revenue Per User", f"{arpu}"), unsafe_allow_html=True)
+c4.markdown(kpi_box("EBITDA", f"{ebitda}"), unsafe_allow_html=True)
 
 # Row 2 – ROI
 r1, r2 = st.columns(2)
-r1.markdown(kpi_box("ROI Monthly", f"{roi_monthly}", True), unsafe_allow_html=True)
-r2.markdown(kpi_box("ROI Year To Date", f"{roi_ytd}", True), unsafe_allow_html=True)
+r1.markdown(kpi_box("ROI Monthly", f"{roi_monthly}", is_percent=True), unsafe_allow_html=True)
+r2.markdown(kpi_box("ROI Year To Date", f"{roi_ytd}", is_percent=True), unsafe_allow_html=True)
 
 # -------------------------------
 # SIDEBAR OPTIONS + DOWNLOAD
