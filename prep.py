@@ -88,20 +88,16 @@ def run_preps_dashboard():
     if selected_drops:
         filtered_df = filtered_df[filtered_df['Drop Size'].isin(selected_drops)]
     
-    # Output
-    st.subheader("📋 Filtered Results")
+        # Output
     if filtered_df.empty:
+        st.subheader("📋 Filtered Results")
         st.info("ℹ️ No data found. Try changing your filters.")
     else:
-        st.dataframe(filtered_df)
-    
-        st.subheader("📌 Summary by Date, Tech, and Drop Size")
-        summary = filtered_df.groupby(['Date', 'Tech', 'Drop Size']).size().reset_index(name='Count')
-        st.dataframe(summary)
-    
-        st.markdown("---")
+        # -------------------------
+        # Visualizations (top)
+        # -------------------------
         st.header("📊 Visualizations")
-    
+
         preps_over_time = filtered_df.groupby('Date').size().reset_index(name='Prep Count')
         chart1 = alt.Chart(preps_over_time).mark_bar().encode(
             x='Date:T',
@@ -109,7 +105,7 @@ def run_preps_dashboard():
             tooltip=['Date', 'Prep Count']
         ).properties(title='Preps Over Time', width="container")
         st.altair_chart(chart1)
-    
+
         preps_per_tech = filtered_df.groupby('Tech').size().reset_index(name='Prep Count')
         chart2 = alt.Chart(preps_per_tech).mark_bar().encode(
             x='Tech:N',
@@ -117,7 +113,7 @@ def run_preps_dashboard():
             tooltip=['Tech', 'Prep Count']
         ).properties(title='Preps per Technician', width="container")
         st.altair_chart(chart2)
-    
+
         drop_dist = filtered_df['Drop Size'].value_counts().reset_index()
         drop_dist.columns = ['Drop Size', 'Count']
         chart3 = alt.Chart(drop_dist).mark_bar().encode(
@@ -126,7 +122,7 @@ def run_preps_dashboard():
             tooltip=['Drop Size', 'Count']
         ).properties(title='Drop Size Distribution', width="container")
         st.altair_chart(chart3)
-    
+
         stacked_df = filtered_df.groupby(['Tech', 'Drop Size']).size().reset_index(name='Count')
         chart4 = alt.Chart(stacked_df).mark_bar().encode(
             x='Tech:N',
@@ -135,10 +131,23 @@ def run_preps_dashboard():
             tooltip=['Tech', 'Drop Size', 'Count']
         ).properties(title='Drop Size by Technician', width="container")
         st.altair_chart(chart4)
-    
+
+        # Prep Trend Over Time (the one everything should go under)
         line_chart = alt.Chart(preps_over_time).mark_line(point=True).encode(
             x='Date:T',
             y='Prep Count:Q',
             tooltip=['Date', 'Prep Count']
         ).properties(title='Prep Trend Over Time', width="container")
         st.altair_chart(line_chart)
+
+        # -------------------------
+        # Tables under trend chart
+        # -------------------------
+        st.markdown("---")
+        st.subheader("📋 Filtered Results")
+        st.dataframe(filtered_df)
+
+        st.subheader("📌 Summary by Date, Tech, and Drop Size")
+        summary = filtered_df.groupby(['Date', 'Tech', 'Drop Size']).size().reset_index(name='Count')
+        st.dataframe(summary)
+)
