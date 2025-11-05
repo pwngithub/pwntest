@@ -70,6 +70,12 @@ except Exception:
     st.stop()
 
 # -------------------------------
+# FALLBACK FOR rerun (compatibility)
+# -------------------------------
+if not hasattr(st, "rerun") and hasattr(st, "experimental_rerun"):
+    st.rerun = st.experimental_rerun
+
+# -------------------------------
 # FETCH SHEET NAMES
 # -------------------------------
 @st.cache_data(ttl=300)
