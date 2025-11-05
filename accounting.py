@@ -164,7 +164,7 @@ mrr = num(df, mrr_r, col_idx) if mrr_r is not None else 0
 arpu = (mrr / subs) if subs > 0 else 0
 
 # --- ROI values (row 55) ---
-roi_row = 54  # row 55 in the sheet (0-based index)
+roi_row = 55  # row 55 in the sheet (0-based index)
 roi_monthly_col = next((i for i, c in enumerate(df.columns) if re.search(r"month", c, re.IGNORECASE)), None)
 roi_ytd_col = next((i for i, c in enumerate(df.columns) if re.search(r"ytd", c, re.IGNORECASE)), None)
 
