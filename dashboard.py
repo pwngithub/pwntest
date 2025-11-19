@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import timedelta
 
 st.set_page_config(page_title="Talley Customer Dashboard", layout="wide")
@@ -19,36 +20,27 @@ def load_from_jotform():
     limit = 1000
 
     while True:
-        params = {
-            "apiKey": api_key,
-            "limit": limit,
-            "offset": offset,
-            "orderby": "created_at"
-        }
+        params = {"apiKey": api_key, "limit": limit, "offset": offset, "orderby": "created_at"}
         try:
             r = requests.get(url, params=params, timeout=30)
             r.raise_for_status()
             data = r.json()
-            if not data.get("content"):
+            if not data.get("
+
+content"):
                 break
 
             for item in data["content"]:
-                row = {
-                    "Submission Date": item["created_at"],
-                    "Submission ID": item["id"]
-                }
-                answers = item.get("answers", {})
-                for ans in answers.values():
+                row = {"Submission Date": item["created_at"], "Submission ID": item["id"]}
+                for ans in item.get("answers", {}).values():
                     name = ans.get("name") or ans.get("text") or "unknown"
                     answer = ans.get("answer")
 
                     if isinstance(answer, dict):
                         parts = []
                         for v in answer.values():
-                            if isinstance(v, list):
-                                parts.extend(v)
-                            else:
-                                parts.append(str(v))
+                            if isinstance(v, list): parts.extend(v)
+                            else: parts.append(str(v))
                         answer = ", ".join(parts) if parts else ""
                     elif isinstance(answer, list):
                         answer = ", ".join(str(x) for x in answer)
@@ -70,9 +62,6 @@ def load_from_jotform():
     return pd.DataFrame(submissions)
 
 
-# ===============================================
-# CACHED & CLEANED DATA
-# ===============================================
 @st.cache_data(ttl=300)
 def get_data():
     df = load_from_jotform()
@@ -80,15 +69,9 @@ def get_data():
         return df
 
     rename_map = {
-        "customerName": "Customer Name",
-        "date": "Date",
-        "employee": "Employee",
-        "location": "Location",
-        "status": "Status",
-        "category": "Category",
-        "reason": "Reason",
-        "mrc": "MRC",
-        "reasonOther": "Reason Other",
+        "customerName": "Customer Name", "date": "Date", "employee": "Employee",
+        "location": "Location", "status": "Status", "category": "Category",
+        "reason": "Reason", "mrc": "MRC", "reasonOther": "Reason Other",
         "disconnectReason": "Disconnect Reason Detail",
     }
     df.rename(columns=rename_map, inplace=True)
@@ -102,9 +85,6 @@ def get_data():
     return df
 
 
-# ===============================================
-# MAIN DASHBOARD FUNCTION
-# ===============================================
 def run_dashboard():
     st.title("Talley Customer Dashboard")
     st.markdown("### True Churn + Growth Analytics")
@@ -113,12 +93,12 @@ def run_dashboard():
         df = get_data()
 
     if df.empty:
-        st.error("No data loaded. Please check your JotForm API key and form ID.")
+        st.error("No data loaded.")
         st.stop()
 
     min_date = df["Submission Date"].min().date()
     max_date = df["Submission Date"].max().date()
-    default_start = max_date - timedelta(days=29)
+    default_start = max_date - timedelta(days=365)  # 1 year for good cohort view
     if default_start < min_date:
         default_start = min_date
 
@@ -136,16 +116,12 @@ def run_dashboard():
             st.rerun()
 
     period_start = pd.Timestamp(start_date)
-    period_df = df[
-        (df["Submission Date"].dt.date >= start_date) &
-        (df["Submission Date"].dt.date <= end_date)
-    ].copy()
+    period_df = df[(df["Submission Date"].dt.date >= start_date) & (df["Submission Date"].dt.date <= end_date)].copy()
 
-    # ==================== TRUE CHURN CALCULATION ====================
+    # True Churn Calculation (unchanged)
     new_before = df[(df["Status"] == "NEW") & (df["Submission Date"] <= period_start)]
     disc_before = df[(df["Status"] == "DISCONNECT") & (df["Submission Date"] <= period_start)]
     active_customers_start = set(new_before["Customer Name"]) - set(disc_before["Customer Name"])
-
     beginning_customers = len(active_customers_start)
     beginning_mrc = new_before[new_before["Customer Name"].isin(active_customers_start)]["MRC"].sum()
 
@@ -157,35 +133,82 @@ def run_dashboard():
     new_mrc = new_in_period["MRC"].sum()
     churn_mrc = churn_in_period["MRC"].sum()
 
-    ending_customers = beginning_customers + new_count - churn_count
-    churn_rate = (churn_count / beginning_customers * 100) if beginning_customers else 0
-    growth_rate = ((ending_customers - beginning_customers) / beginning_customers * 100) if beginning_customers else 0
-    rev_churn_rate = (churn_mrc / beginning_mrc * 100) if beginning_mrc > 0 else 0
-
-    # ==================== DISPLAY KPIs ====================
+    # KPIs
     st.markdown("### True Churn Metrics")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Beginning Customers", f"{beginning_customers:,}")
     c2.metric("New Customers", f"{new_count:,}", delta=f"+{new_count}")
     c3.metric("Churned Customers", f"{churn_count:,}", delta=f"-{churn_count}")
-    c4.metric("Ending Customers", f"{ending_customers:,}", delta=f"{ending_customers - beginning_customers:+,}")
+    c4.metric("Ending Customers", f"{beginning_customers + new_count - churn_count:,}")
 
     c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Customer Churn Rate", f"{churn_rate:.2f}%", delta_color="inverse")
-    c6.metric("Net Growth Rate", f"{growth_rate:+.2f}%")
+    c5.metric("Customer Churn Rate", f"{(churn_count/beginning_customers*100):.2f}%" if beginning_customers else "0%", delta_color="inverse")
+    c6.metric("Net Growth Rate", f"{((beginning_customers + new_count - churn_count - beginning_customers)/beginning_customers*100):+.2f}%" if beginning_customers else "0%")
     c7.metric("Lost MRC", f"${churn_mrc:,.0f}", delta_color="inverse")
-    c8.metric("Revenue Churn Rate", f"{rev_churn_rate:.2f}%", delta_color="inverse")
-
-    with st.expander("How is True Churn calculated?"):
-        st.caption(f"""
-        • Beginning = Customers active on/before **{start_date}** with no prior disconnect
-        • Churned = Customers who submitted a DISCONNECT in the selected period
-        • Rates calculated against true starting base
-        """)
+    c8.metric("Revenue Churn Rate", f"{(churn_mrc/beginning_mrc*100):.2f}%" if beginning_mrc > 0 else "0%", delta_color="inverse")
 
     st.divider()
 
-    # ==================== TOTAL CHURN BY REASON (KEPT) ====================
+    # ==================== COHORT ANALYSIS ====================
+    st.subheader("Cohort Analysis – Customer Retention by Signup Month")
+
+    # Get all new customers and their first signup month
+    new_customers = df[df["Status"] == "NEW"].copy()
+    new_customers["Cohort Month"] = new_customers["Submission Date"].dt.to_period("M")
+    first_signup = new_customers.groupby("Customer Name")["Submission Date"].min().reset_index()
+    first_signup["Cohort Month"] = first_signup["Submission Date"].dt.to_period("M")
+    cohort_data = first_signup[["Customer Name", "Cohort Month"]]
+
+    # Get all disconnects
+    disconnects = df[df["Status"] == "DISCONNECT"][["Customer Name", "Submission Date"]].copy()
+    disconnects["Disconnect Month"] = disconnects["Submission Date"].dt.to_period("M")
+
+    # Merge to get cohort + disconnect month
+    cohort_full = cohort_data.merge(disconnects, on="Customer Name", how="left")
+    cohort_full["Months Active"] = ((cohort_full["Disconnect Month"] - cohort_full["Cohort Month"]).apply(lambda x: x.n if pd.notnull(x) else 24) ).astype(int)
+
+    # Cap at 12 months for clarity
+    cohort_full["Months Active"] = cohort_full["Months Active"].clip(upper=12)
+
+    # Count active customers per cohort per month
+    cohort_table = cohort_full.groupby(["Cohort Month", "Months Active"]).size().unstack(fill_value=0)
+    cohort_table = cohort_table.reindex(columns=range(0, 13), fill_value=0)
+
+    # Initial cohort size
+    cohort_sizes = cohort_table.iloc[:, 0]
+    retention = cohort_table.divide(cohort_sizes, axis=0) * 100
+
+    # Format for display
+    retention_display = retention.round(1).astype(str) + "%"
+    retention_display[0] = cohort_sizes.astype(str)
+
+    # Heatmap
+    fig = go.Figure(data=go.Heatmap(
+        z=retention.values,
+        x=list(retention.columns),
+        y=[str(c) for c in retention.index],
+        colorscale="RdYlGn",
+        text=retention_display.values,
+        texttemplate="%{text}",
+        textfont={"size": 12},
+        hoverongaps=False
+    ))
+
+    fig.update_layout(
+        title="Cohort Retention Heatmap (Month 0 = Signup Month)",
+        xaxis_title="Months Since Signup",
+        yaxis_title="Cohort (Signup Month)",
+        height=600
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("View Cohort Retention Table"):
+        st.dataframe(retention_display.style.background_gradient(cmap="RdYlGn"), use_container_width=True)
+
+    st.divider()
+
+    # ==================== TOTAL CHURN BY REASON ====================
     if not churn_in_period.empty:
         st.subheader("Churn by Reason")
         reason_df = (
@@ -220,8 +243,5 @@ def run_dashboard():
     st.caption("Auto-refreshes every 5 minutes • Source: JotForm")
 
 
-# ===============================================
-# REQUIRED FOR TALLY / STREAMLIT CLOUD
-# ===============================================
 if __name__ == "__main__":
     run_dashboard()
