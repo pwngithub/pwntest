@@ -123,7 +123,7 @@ def run_dashboard():
     churn_mrc = churn_in["MRC"].sum()
     net_mrr_movement = new_mrc - churn_mrc
 
-    # Big Net MRR at Top
+    # Big Net MRR
     st.markdown(f"""
     <div class="net-mrr {'positive' if net_mrr_movement >= 0 else 'negative'}">
         {'+$' if net_mrr_movement >= 0 else '-$'}{abs(net_mrr_movement):,.0f}
@@ -133,7 +133,7 @@ def run_dashboard():
 
     st.divider()
 
-    # ——————————————— DYNAMIC QUICK INSIGHTS (NO WHITE BOXES) ———————————————
+    # ——————————————— DYNAMIC QUICK INSIGHTS ———————————————
     st.markdown("### Quick Insights This Period")
     cards = []
 
@@ -166,39 +166,45 @@ def run_dashboard():
         for col, card in zip(cols, cards):
             with col: st.markdown(card, unsafe_allow_html=True)
     else:
-        st.success("All quiet — no churn or new wins this period!")
+        st.success("All quiet — no activity this period!")
 
     st.divider()
 
-    # ——————————————— TRUE CHURN & GROWTH — 100% CORRECT COLORS ———————————————
+    # ——————————————— TRUE CHURN & GROWTH — FINAL & CORRECT ———————————————
     col_left, col_right = st.columns(2)
 
+    # TRUE CHURN METRICS — ALWAYS NEGATIVE + RED DOWN ARROWS
     with col_left:
         st.markdown("### True Churn Metrics")
         st.caption("Loss from existing base only")
 
         ch1, ch2 = st.columns(2)
 
-        ch1.metric("Churned Customers", f"{churn_count:,}", delta=f"-{churn_count}")
+        # Churned Customers — negative
+        ch1.metric("Churned Customers", f"{churn_count:,}", delta=f"-{churn_count}", delta_color="inverse")
 
+        # Customer Churn Rate — always shown as negative %
         cust_churn_rate = (churn_count / beginning_customers * 100) if beginning_customers > 0 else 0
         ch1.metric(
             "Customer Churn Rate",
-            f"{cust_churn_rate:+.2f}%",
-            delta=f"{cust_churn_rate:+.2f}%",
-            delta_color="inverse" if cust_churn_rate > 0 else "normal"   # RED if loss, GREEN if gain
+            f"-{cust_churn_rate:.2f}%",
+            delta=f"-{cust_churn_rate:.2f}%",
+            delta_color="inverse"  # Always red + down arrow
         )
 
+        # Lost MRC — negative
         ch2.metric("Lost MRC", f"${churn_mrc:,.0f}", delta=f"-${churn_mrc:,.0f}", delta_color="inverse")
 
+        # Revenue Churn Rate — always shown as negative %
         rev_churn_rate = (churn_mrc / beginning_mrc * 100) if beginning_mrc > 0 else 0
         ch2.metric(
             "Revenue Churn Rate",
-            f"{rev_churn_rate:+.2f}%",
-            delta=f"{rev_churn_rate:+.2f}%",
-            delta_color="inverse" if rev_churn_rate > 0 else "normal"   # RED if loss, GREEN if expansion
+            f"-{rev_churn_rate:.2f}%",
+            delta=f"-{rev_churn_rate:.2f}%",
+            delta_color="inverse"  # Always red + down arrow
         )
 
+    # TRUE GROWTH METRICS — POSITIVE = GREEN, NEGATIVE = RED
     with col_right:
         st.markdown("### True Growth Metrics")
         st.caption("New wins + net recurring revenue impact")
@@ -208,7 +214,7 @@ def run_dashboard():
         g1.metric("New Customers", f"{new_count:,}", delta=f"+{new_count}")
         g2.metric("New MRC Added", f"${new_mrc:,.0f}", delta=f"+${new_mrc:,.0f}")
 
-        # NET MRC — RED when negative, GREEN when positive
+        # Net MRC — green if positive, red if negative
         g3.metric(
             "Net MRC",
             f"{'+' if net_mrr_movement >= 0 else '-'}${abs(net_mrr_movement):,.0f}",
@@ -238,9 +244,9 @@ def run_dashboard():
     with col_b:
         if not new_in.empty:
             st.subheader("New Customer Acquisition")
-            pie = px.pie(new_in["Category"].value_counts().reset_index(), names="Category", values="count", title="By Category")
+            pie = px.pie(new_in["Category"].value_counts().reset_index(), names="Category", values="count")
             st.plotly_chart(pie, use_container_width=True)
-            bar = px.bar(new_in["Location"].value_counts().head(10).reset_index(), x="Location", y="count", title="Top 10 Locations")
+            bar = px.bar(new_in["Location"].value_counts().head(10).reset_index(), x="Location", y="count")
             st.plotly_chart(bar, use_container_width=True)
             st.success(f"Added {new_count:,} new customers — +${new_mrc:,.0f} MRC")
 
