@@ -11,7 +11,7 @@ st.set_page_config(page_title="Talley Customer Dashboard", layout="wide")
 # ===============================================
 # SAFE JOTFORM DATA LOADER
 # ===============================================
-def swamp_from_jotform():
+def load_from_jotform():
     api_key = "22179825a79dba61013e4fc3b9d30fa4"
     form_id = "240073839937062"
     url = f"https://api.jotform.com/form/{form_id}/submissions"
@@ -62,7 +62,7 @@ def swamp_from_jotform():
 
 @st.cache_data(ttl=300)
 def get_data():
-    df = swamp_from_jotform()
+    df = load_from_jotform()
     if df.empty:
         return df
 
@@ -85,18 +85,18 @@ def get_data():
 
 def run_dashboard():
     st.title("Talley Customer Dashboard")
-    st.markdown("### True Churn + Growth Analytics")
+    st.markdown("### True Churn + Growth + Revenue Retention")
 
     with st.spinner("Loading latest data from JotForm..."):
         df = get_data()
 
     if df.empty:
-        st.error("No data loaded. Please check your JotForm API key and form ID.")
+        st.error("No data loaded.")
         st.stop()
 
     min_date = df["Submission Date"].min().date()
     max_date = df["Submission Date"].max().date()
-    default_start = max_date - timedelta(days=89)
+    default_start = max_date - timedelta(days=365)
     if default_start < min_date:
         default_start = min_date
 
@@ -116,7 +116,7 @@ def run_dashboard():
     period_start = pd.Timestamp(start_date)
     period_df = df[(df["Submission Date"].dt.date >= start_date) & (df["Submission Date"].dt.date <= end_date)].copy()
 
-    # ==================== TRUE CHURN CALCULATION ====================
+    # ==================== TRUE CHURN & GROWTH CALCULATION ====================
     new_before = df[(df["Status"] == "NEW") & (df["Submission Date"] <= period_start)]
     disc_before = df[(df["Status"] == "DISCONNECT") & (df["Submission Date"] <= period_start)]
     active_customers_start = set(new_before["Customer Name"]) - set(disc_before["Customer Name"])
@@ -134,9 +134,9 @@ def run_dashboard():
 
     ending_customers = beginning_customers + new_count - churn_count
 
-    # ==================== TRUE CHURN METRICS (ONLY CHURN) ====================
+    # ==================== TRUE CHURN METRICS ====================
     st.markdown("### True Churn Metrics")
-    st.markdown("*Customers and revenue lost from existing base*")
+    st.caption("Losses from existing customer base")
 
     ch1, ch2, ch3, ch4 = st.columns(4)
     ch1.metric("Churned Customers", f"{churn_count:,}", delta=f"-{churn_count}")
@@ -144,10 +144,10 @@ def run_dashboard():
     ch3.metric("Lost MRC", f"${churn_mrc:,.0f}", delta_color="inverse")
     ch4.metric("Revenue Churn Rate", f"{(churn_mrc/beginning_mrc*100):.2f}%" if beginning_mrc > 0 else "0%", delta_color="inverse")
 
-    # ==================== TRUE GROWTH METRICS (ONLY GROWTH) ====================
+    # ==================== TRUE GROWTH METRICS ====================
     st.divider()
     st.markdown("### True Growth Metrics")
-    st.markdown("*New customers and net expansion*")
+    st.caption("New customers and net expansion")
 
     gr1, gr2, gr3, gr4 = st.columns(4)
     gr1.metric("New Customers", f"{new_count:,}", delta=f"+{new_count}")
@@ -155,55 +155,70 @@ def run_dashboard():
     gr3.metric("Net Customer Change", f"{new_count - churn_count:+,}", delta=f"{new_count - churn_count:+,}")
     gr4.metric("Net Growth Rate", f"{((ending_customers / beginning_customers - 1)*100):+.2f}%" if beginning_customers else "N/A")
 
-    # Optional: Show ending vs beginning
-    with st.expander("Summary vs Starting Base"):
-        st.write(f"**Starting Active Customers:** {beginning_customers:,}")
-        st.write(f"**Ending Active Customers:** {ending_customers:,}")
-        st.write(f"**Net Change:** {ending_customers - beginning_customers:+,}")
-
     st.divider()
 
-    # ==================== COHORT ANALYSIS (KEPT) ====================
-    st.subheader("Cohort Analysis – Customer Retention by Signup Month")
+    # ==================== REVENUE COHORT ANALYSIS ====================
+    st.subheader("Revenue Cohort Analysis – MRC Retention by Signup Month")
 
-    new_customers = df[df["Status"] == "NEW"].copy()
-    new_customers["Cohort Month"] = new_customers["Submission Date"].dt.to_period("M")
-    first_signup = new_customers.groupby("Customer Name")["Submission Date"].min().reset_index()
-    first_signup["Cohort Month"] = first_signup["Submission Date"].dt.to_period("M")
-    cohort_data = first_signup[["Customer Name", "Cohort Month"]]
+    # Get first NEW record + MRC for each customer
+    new_records = df[df["Status"] == "NEW"].sort_values("Submission Date")
+    first_new = new_records.drop_duplicates("Customer Name", keep="first")[["Customer Name", "Submission Date", "MRC"]]
+    first_new["Cohort Month"] = first_new["Submission Date"].dt.to_period("M")
 
-    disconnects = df[df["Status"] == "DISCONNECT"][["Customer Name", "Submission Date"]].copy()
-    disconnects["Disconnect Month"] = disconnects["Submission Date"].dt.to_period("M")
+    # Get all DISCONNECT dates
+    disconnects = df[df["Status"] == "DISCONNECT"][["Customer Name", "Submission Date"]]
+    disconnects = disconnects.sort_values("Submission Date").drop_duplicates("Customer Name", keep="last")
 
-    cohort_full = cohort_data.merge(disconnects, on="Customer Name", how="left")
-    cohort_full["Months Active"] = ((cohort_full["Disconnect Month"] - cohort_full["Cohort Month"]).apply(lambda x: x.n if pd.notnull(x) else 24)).astype(int)
-    cohort_full["Months Active"] = cohort_full["Months Active"].clip(upper=12)
+    # Combine to get active period
+    cohort_mrc = first_new.merge(disconnects, on="Customer Name", how="left", suffixes=("_start", "_end"))
+    cohort_mrc["End Month"] = cohort_mrc["Submission Date_end"].dt.to_period("M").fillna(pd.Period(year=2100, month=1, freq="M"))
 
-    cohort_table = cohort_full.groupby(["Cohort Month", "Months Active"]).size().unstack(fill_value=0)
-    cohort_table = cohort_table.reindex(columns=range(0, 13), fill_value=0)
-    cohort_sizes = cohort_table.iloc[:, 0]
-    retention = cohort_table.divide(cohort_sizes, axis=0) * 100
+    # Expand each customer into monthly rows
+    rows = []
+    for _, row in cohort_mrc.iterrows():
+        start = row["Cohort Month"]
+        end = row["End Month"]
+        mrc = row["MRC"]
+        months = pd.period_range(start, end, freq="M")
+        for i, month in enumerate(months):
+            rows.append({"Cohort Month": start, "Month Number": i, "Month": month, "MRC": mrc})
 
-    retention_display = retention.round(1).astype(str) + "%"
-    retention_display[0] = cohort_sizes.astype(str)
+    monthly_mrc = pd.DataFrame(rows)
 
+    # Aggregate MRC per cohort per month number
+    cohort_revenue = monthly_mrc.groupby(["Cohort Month", "Month Number"])["MRC"].sum().unstack(fill_value=0)
+    cohort_revenue = cohort_revenue.reindex(columns=range(13), fill_value=0)
+
+    # Calculate retention % vs Month 0
+    initial_mrc = cohort_revenue[0]
+    revenue_retention = cohort_revenue.divide(initial_mrc, axis=0) * 100
+
+    # Heatmap
     fig = go.Figure(data=go.Heatmap(
-        z=retention.values,
-        x=list(retention.columns),
-        y=[str(c) for c in retention.index],
+        z=revenue_retention.values,
+        x=list(revenue_retention.columns),
+        y=[str(c) for c in revenue_retention.index],
         colorscale="RdYlGn",
-        text=retention_display.values,
+        zmid=100,
+        text=[[f"{val:.1f}%" if val > 0 else "" for val in row] for row in revenue_retention.values],
         texttemplate="%{text}",
-        textfont={"size": 12},
+        textfont={"size": 11},
         hoverongaps=False
     ))
+
     fig.update_layout(
-        title="Cohort Retention Heatmap (Month 0 = Signup Month)",
+        title="Revenue Cohort Heatmap – % of Original MRC Retained",
         xaxis_title="Months Since Signup",
         yaxis_title="Cohort (Signup Month)",
-        height=600
+        height=650
     )
+
     st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("View Revenue Cohort Table"):
+        display_table = revenue_retention.round(1).astype(str) + "%"
+        display_table.insert(0, "Initial MRC", initial_mrc.map("${:,.0f}".format))
+        st.dataframe(display_table, use_container_width=True)
 
     st.divider()
 
