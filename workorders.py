@@ -470,8 +470,7 @@ st.markdown("---")
     # INSTALLATION REWORK SECTION (UNCHANGED)
     # =========================================================
 
-    st.markdown("---")
-    st.markdown("<h2 style='color:#8BC53F;'>🔁 Installation Rework Analysis</h2>", unsafe_allow_html=True)
+  st.markdown("<h2 style='color:#8BC53F;'>🔁 Installation Rework Analysis</h2>", unsafe_allow_html=True)
 
     re_mode = st.sidebar.radio(
         "Installation Rework File",
