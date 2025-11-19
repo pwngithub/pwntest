@@ -14,7 +14,6 @@ def load_from_jotform():
     api_key = "22179825a79dba61013e4fc3b9d30fa4"
     form_id = "240073839937062"
     url = f"https://api.jotform.com/form/{form_id}/submissions"
-
     submissions = []
     offset = 0
     limit = 1000
@@ -30,7 +29,6 @@ def load_from_jotform():
             r = requests.get(url, params=params, timeout=30)
             r.raise_for_status()
             data = r.json()
-
             if not data.get("content"):
                 break
 
@@ -39,13 +37,11 @@ def load_from_jotform():
                     "Submission Date": item["created_at"],
                     "Submission ID": item["id"]
                 }
-
                 answers = item.get("answers", {})
                 for ans in answers.values():
                     name = ans.get("name") or ans.get("text") or "unknown"
                     answer = ans.get("answer")
 
-                    # Handle checkboxes, multi-select, etc. safely
                     if isinstance(answer, dict):
                         parts = []
                         for v in answer.values():
@@ -77,13 +73,12 @@ def load_from_jotform():
 # ===============================================
 # CACHED & CLEANED DATA
 # ===============================================
-@st.cache_data(ttl=300)  # 5-minute cache
+@st.cache_data(ttl=300)
 def get_data():
     df = load_from_jotform()
     if df.empty:
         return df
 
-    # Rename columns
     rename_map = {
         "customerName": "Customer Name",
         "date": "Date",
@@ -98,7 +93,6 @@ def get_data():
     }
     df.rename(columns=rename_map, inplace=True)
 
-    # Clean core columns
     df["Submission Date"] = pd.to_datetime(df["Submission Date"], errors="coerce")
     df = df.dropna(subset=["Submission Date"]).copy()
     df["Status"] = df["Status"].astype(str).str.upper().str.strip()
@@ -122,11 +116,9 @@ def run_dashboard():
         st.error("No data loaded. Please check your JotForm API key and form ID.")
         st.stop()
 
-    # Date range selector
     min_date = df["Submission Date"].min().date()
     max_date = df["Submission Date"].max().date()
-
-    default_start = max_date - timedelta(days=29)
+    default_start = max_date - timedelta(days=89)  # Default: last 90 days for monthly view
     if default_start < min_date:
         default_start = min_date
 
@@ -144,23 +136,19 @@ def run_dashboard():
             st.rerun()
 
     period_start = pd.Timestamp(start_date)
-
-    # Filter data for selected period
     period_df = df[
         (df["Submission Date"].dt.date >= start_date) &
         (df["Submission Date"].dt.date <= end_date)
     ].copy()
 
     # ==================== TRUE CHURN CALCULATION ====================
-    # Active customers at start of period
     new_before = df[(df["Status"] == "NEW") & (df["Submission Date"] <= period_start)]
     disc_before = df[(df["Status"] == "DISCONNECT") & (df["Submission Date"] <= period_start)]
-
     active_customers_start = set(new_before["Customer Name"]) - set(disc_before["Customer Name"])
+
     beginning_customers = len(active_customers_start)
     beginning_mrc = new_before[new_before["Customer Name"].isin(active_customers_start)]["MRC"].sum()
 
-    # During the period
     new_in_period = period_df[period_df["Status"] == "NEW"]
     churn_in_period = period_df[period_df["Status"] == "DISCONNECT"]
 
@@ -170,14 +158,12 @@ def run_dashboard():
     churn_mrc = churn_in_period["MRC"].sum()
 
     ending_customers = beginning_customers + new_count - churn_count
-
     churn_rate = (churn_count / beginning_customers * 100) if beginning_customers else 0
     growth_rate = ((ending_customers - beginning_customers) / beginning_customers * 100) if beginning_customers else 0
     rev_churn_rate = (churn_mrc / beginning_mrc * 100) if beginning_mrc > 0 else 0
 
-    # ==================== DISPLAY KPIs ====================
+    # ==================== DISPLAY TRUE CHURN KPIs ====================
     st.markdown("### True Churn Metrics")
-
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Beginning Customers", f"{beginning_customers:,}")
     c2.metric("New Customers", f"{new_count:,}", delta=f"+{new_count}")
@@ -192,16 +178,101 @@ def run_dashboard():
 
     with st.expander("How is True Churn calculated?"):
         st.caption(f"""
-        • Beginning = Customers active on/before **{start_date}** with no prior disconnect  
-        • Churned = Customers who submitted a DISCONNECT in the selected period  
+        • Beginning = Customers active on/before **{start_date}** with no prior disconnect
+        • Churned = Customers who submitted a DISCONNECT in the selected period
         • Rates calculated against true starting base
         """)
 
     st.divider()
 
-    # ==================== CHURN BY REASON ====================
+    # ==================== NEW: CHURN BY REASON BY MONTH ====================
     if not churn_in_period.empty:
-        st.subheader("Churn by Reason")
+        st.subheader("Churn by Reason — Monthly Trend")
+
+        # Add Year-Month column
+        monthly_churn = churn_in_period.copy()
+        monthly_churn["Year-Month"] = monthly_churn["Submission Date"].dt.strftime("%Y - %b")
+
+        # Group by month and reason
+        trend_df = (
+            monthly_churn.groupby(["Year-Month", "Reason"])
+            .agg(
+                Customers_Lost=("Customer Name", "nunique"),
+                MRC_Lost=("MRC", "sum")
+            )
+            .reset_index()
+        )
+
+        # Sort months chronologically
+        trend_df["Year-Month"] = pd.Categorical(
+            trend_df["Year-Month"],
+            categories=sorted(trend_df["Year-Month"].unique()),
+            ordered=True
+        )
+        trend_df = trend_df.sort_values("Year-Month")
+
+        # Choose visualization
+        chart_type = st.radio(
+            "Show trend as:",
+            options=["Stacked (Total)", "Grouped (By Reason)"],
+            horizontal=True,
+            index=0
+        )
+
+        if chart_type == "Stacked (Total)":
+            fig = px.bar(
+                trend_df,
+                x="Year-Month",
+                y="Customers_Lost",
+                color="Reason",
+                title="Monthly Churn by Reason (Customer Count)",
+                labels={"Customers_Lost": "Customers Lost", "Year-Month": "Month"},
+                height=500
+            )
+            fig2 = px.bar(
+                trend_df,
+                x="Year-Month",
+                y="MRC_Lost",
+                color="Reason",
+                title="Monthly MRC Lost by Reason",
+                labels={"MRC_Lost": "MRC Lost ($)", "Year-Month": "Month"},
+                height=500
+            )
+        else:
+            fig = px.bar(
+                trend_df,
+                x="Year-Month",
+                y="Customers_Lost",
+                color="Reason",
+                barmode="group",
+                title="Monthly Churn by Reason (Side by Side)",
+                height=500
+            )
+            fig2 = px.bar(
+                trend_df,
+                x="Year-Month",
+                y="MRC_Lost",
+                color="Reason",
+                barmode="group",
+                title="Monthly MRC Lost by Reason",
+                height=500
+            )
+
+        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig2, use_container_width=True)
+
+        # Optional: Show raw table
+        with st.expander("View raw monthly data"):
+            st.dataframe(trend_df.sort_values(["Year-Month", "Customers_Lost"], ascending=[True, False]))
+
+    else:
+        st.info("No disconnects in the selected period.")
+
+    st.divider()
+
+    # ==================== ORIGINAL CHURN BY REASON (TOTAL) ====================
+    if not churn_in_period.empty:
+        st.subheader("Total Churn by Reason (Selected Period)")
         reason_df = (
             churn_in_period.groupby("Reason")
             .agg(Count=("Customer Name", "nunique"), MRC_Lost=("MRC", "sum"))
@@ -212,7 +283,7 @@ def run_dashboard():
 
         fig_reason = px.bar(
             reason_df, x="Count", y="Reason", orientation="h",
-            color="MRC_Lost", title="Churn Reasons (count + $ impact)",
+            color="MRC_Lost", title="Total Churn by Reason",
             color_continuous_scale="Reds"
         )
         st.plotly_chart(fig_reason, use_container_width=True)
@@ -221,17 +292,14 @@ def run_dashboard():
     if not new_in_period.empty:
         st.subheader("New Customer Acquisition")
         col_a, col_b = st.columns(2)
-
         with col_a:
             cat_pie = new_in_period["Category"].value_counts().reset_index()
             fig_pie = px.pie(cat_pie, names="Category", values="count", title="By Category")
             st.plotly_chart(fig_pie, use_container_width=True)
-
         with col_b:
             loc_bar = new_in_period["Location"].value_counts().head(15).reset_index()
             fig_bar = px.bar(loc_bar, x="Location", y="count", title="Top 15 Locations")
             st.plotly_chart(fig_bar, use_container_width=True)
-
         st.success(f"Added {new_count:,} new customers — +${new_mrc:,.0f} MRC")
 
     st.caption("Auto-refreshes every 5 minutes • Source: JotForm")
