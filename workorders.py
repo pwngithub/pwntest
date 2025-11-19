@@ -47,7 +47,7 @@ def list_github_workorders():
 def download_github_workorder_file(filename):
     """
     Download a file from GitHub/workorders/.
-    Uses download_url for large files or base64 fallback.
+    Handles both base64 content and raw download_url for large files.
     Saves the file to saved_uploads/ and returns the local path.
     """
     token, repo, branch, remote_prefix = get_github_config_workorders()
@@ -63,12 +63,12 @@ def download_github_workorder_file(filename):
 
     j = resp.json()
 
-    # --- Use raw download if available (large or normal files)
+    # PRIORITY: download_url (handles large files and normal files reliably)
     if j.get("download_url"):
         raw = requests.get(j["download_url"])
         file_bytes = raw.content
     else:
-        # Fallback: decode base64 content
+        # fallback: decode base64 content
         file_bytes = base64.b64decode(j["content"])
 
     # Save to local cache
@@ -97,7 +97,7 @@ def upload_workorders_file_to_github(filename: str, file_bytes: bytes):
         "Accept": "application/vnd.github+json"
     }
 
-    # Check if file exists to get SHA
+    # Check if file exists to obtain SHA
     sha = None
     get_resp = requests.get(api_url, headers=headers)
     if get_resp.status_code == 200:
@@ -183,7 +183,7 @@ def run_workorders_dashboard():
     df = None
 
     # -------------------------
-    # UPLOAD NEW FILE
+    # UPLOAD NEW WORK ORDERS
     # -------------------------
     if mode == "Upload New Work Orders File":
         uploaded_file = st.sidebar.file_uploader(
@@ -206,14 +206,14 @@ def run_workorders_dashboard():
             # Upload to GitHub
             upload_workorders_file_to_github(filename, file_bytes)
 
-            # Load into DataFrame
+            # Load DataFrame
             df = pd.read_csv(local_path)
 
         elif uploaded_file:
             st.sidebar.warning("Please enter a filename.")
 
     # -------------------------
-    # LOAD EXISTING FROM GITHUB
+    # LOAD EXISTING WORK ORDERS FROM GITHUB
     # -------------------------
     else:
         github_files = list_github_workorders()
@@ -339,8 +339,9 @@ def run_workorders_dashboard():
         fig = px.bar(
             final_avg, x="Work Type", y="Duration_Mins",
             title="Overall Average Job Time by Work Type",
-            template="template_dark"
+            template="plotly_dark"
         )
+        fig.update_traces(marker_color='#8BC53F')
         st.plotly_chart(fig, use_container_width=True)
 
     # =================================================
@@ -382,7 +383,7 @@ def run_workorders_dashboard():
     re_mode = st.sidebar.radio(
         "Installation Rework File",
         ["Upload New File", "Load Existing File"],
-        key="re_mode"
+        key="re_mode_file"
     )
     df_rework = None
 
@@ -392,18 +393,18 @@ def run_workorders_dashboard():
     if re_mode == "Upload New File":
         re_file = st.sidebar.file_uploader(
             "Upload Installation Assessment File", type=["csv", "txt"],
-            key="re_upload"
+            key="re_upload_file"
         )
         re_filename = st.sidebar.text_input(
             "Enter name to save (no extension):",
-            key="re_filename"
+            key="re_filename_input"
         )
 
         if re_file and re_filename:
             bytes_re = re_file.getvalue()
             filename = re_filename + ".csv"
 
-            # Save to local
+            # Save local
             local_path = os.path.join(saved_folder, filename)
             with open(local_path, "wb") as f:
                 f.write(bytes_re)
@@ -425,7 +426,7 @@ def run_workorders_dashboard():
             selected = st.sidebar.selectbox(
                 "Select Installation Rework File (GitHub)",
                 github_files,
-                key="re_select_github"
+                key="re_select_file"
             )
             if selected:
                 local = download_github_workorder_file(selected)
@@ -541,7 +542,7 @@ def run_workorders_dashboard():
                 data=csv_rework,
                 file_name="installation_rework_summary.csv",
                 mime="text/csv",
-                key="download_summary"
+                key="download_rework_summary"
             )
 
         except Exception as e:
