@@ -7,10 +7,9 @@ import matplotlib.pyplot as plt
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# --- Page Config ---
+# ==================================== CONFIG
 st.set_page_config(page_title="PRTG Bandwidth Dashboard", layout="wide", page_icon="Chart")
 
-# --- Credentials ---
 try:
     PRTG_USERNAME = st.secrets["prtg_username"]
     PRTG_PASSHASH = st.secrets["prtg_passhash"]
@@ -20,43 +19,31 @@ except KeyError:
 
 PRTG_URL = "https://prtg.pioneerbroadband.net"
 
-# --- Nice CSS ---
+# ==================================== CSS
 st.markdown("""
 <style>
-    .big-font { font-size: 19px !important; font-weight: bold; }
-    .metric-in  { color: #00ff88; background-color: rgba(0,255,136,0.15); padding: 12px; border-radius: 12px; border-left: 6px solid #00ff88; }
-    .metric-out { color: #ff3366; background-color: rgba(255,51,102,0.15); padding: 12px; border-radius: 12px; border-left: 6px solid #ff3366; }
-    .card {
-        background-color: var(--background-color);
-        padding: 20px;
-        border-radius: 16px;
-        box-shadow: 0 6px 16px rgba(0,0,0,0.2);
-        border: 1px solid #333;
-        margin-bottom: 25px;
-    }
-    hr { border: 1px solid #444; margin: 40px 0; }
+    .big-font {font-size:19px !important; font-weight:bold;}
+    .metric-in  {color:#00ee88; background:rgba(0,238,136,0.12); padding:14px; border-radius:12px; border-left:6px solid #00ee88;}
+    .metric-out {color:#ff3366; background:rgba(255,51,102,0.12); padding:14px; border-radius:12px; border-left:6px solid #ff3366;}
+    .card {background-color:var(--background-color); padding:22px; border-radius:16px; box-shadow:0 6px 20px rgba(0,0,0,0.25); border:1px solid #333; margin-bottom:30px;}
+    hr {border:1px solid #444; margin:50px 0;}
 </style>
 """, unsafe_allow_html=True)
 
 st.title("PRTG Bandwidth Dashboard")
-st.markdown("Real-time & historical bandwidth across all circuits")
+st.markdown("Live & historical bandwidth across all circuits")
 
-# --- Time Period ---
+# ==================================== TIME PERIOD
 graph_period = st.selectbox(
     "Select Time Period",
     ("Live (2 hours)", "Last 48 hours", "Last 30 days", "Last 365 days"),
     index=1
 )
 
-period_to_graphid = {
-    "Live (2 hours)": "0",
-    "Last 48 hours": "1",
-    "Last 30 days": "2",
-    "Last 365 days": "3",
-}
+period_to_graphid = {"Live (2 hours)": "0", "Last 48 hours": "1", "Last 30 days": "2", "Last 365 days": "3"}
 graphid = period_to_graphid[graph_period]
 
-# --- Sensors (clean names) ---
+# ==================================== SENSORS
 SENSORS = {
     "Firstlight":          "12435",
     "NNINIX":              "12506",
@@ -64,40 +51,39 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
-# --- Fetch exact "Traffic In (Speed)" and "Traffic Out (Speed)" channels ---
+# ==================================== FETCH STATS (ROBUST VERSION)
 def fetch_speed_stats(sensor_id):
-    url = (
-        f"{PRTG_URL}/api/table.json?"
-        f"content=channels&columns=name,maximum_raw,average_raw"
-        f"&id={sensor_id}&username={PRTG_USERNAME}&passhash={PRTG_PASSHASH}"
-    )
+    url = f"{PRTG_URL}/api/table.json?content=channels&columns=name,maximum_raw,average_raw&id={sensor_id}&username={PRTG_USERNAME}&passhash={PRTG_PASSHASH}"
+    
     try:
         r = requests.get(url, verify=False, timeout=15)
         r.raise_for_status()
         data = r.json()
 
-        stats = {"in_max": 0, "in_avg": 0, "out_max": 0, "out_avg": 0}
+        stats = {"in_max": 0.0, "in_avg": 0.0, "out_max": 0.0, "out_avg": 0.0}
 
-        for ch in data.get("channels", []):
-            name = ch.get("name", "").strip()
+        for channel in data.get("channels", []):
+            name = channel.get("name", "").strip()
 
-            if name == "Traffic In (Speed)":
-                if ch.get("maximum_raw"): stats["in_max"]  = round(float(ch["maximum_raw"])  / 1_000_000, 2)
-                if ch.get("average_raw"): stats["in_avg"]  = round(float(ch["average_raw"])  / 1_000_000, 2)
+            # This matches EXACTLY what your sensors return:
+            if "Traffic In (Speed)" in name:
+                if channel.get("maximum_raw"):  stats["in_max"]  = round(float(channel["maximum_raw"]) / 1_000_000, 2)
+                if channel.get("average_raw"):  stats["in_avg"]  = round(float(channel["average_raw"]) / 1_000_000, 2)
 
-            if name == "Traffic Out (Speed)":
-                if ch.get("maximum_raw"): stats["out_max"] = round(float(ch["maximum_raw"]) / 1_000_000, 2)
-                if ch.get("average_raw"): stats["out_avg"] = round(float(ch["average_raw"]) / 1_000_000, 2)
+            if "Traffic Out (Speed)" in name:
+                if channel.get("maximum_raw"):  stats["out_max"] = round(float(channel["maximum_raw"]) / 1_000_000, 2)
+                if channel.get("average_raw"):  stats["out_avg"] = round(float(channel["average_raw"]) / 1_000_000, 2)
 
         return stats
+
     except Exception as e:
-        st.error(f"Error fetching stats for sensor {sensor_id}: {e}")
+        st.error(f"Failed to fetch data for sensor {sensor_id}: {e}")
         return {"in_max": 0, "in_avg": 0, "out_max": 0, "out_avg": 0}
 
-# --- Display one sensor card ---
+# ==================================== DISPLAY CARD
 def display_sensor_card(name, sensor_id):
     stats = fetch_speed_stats(sensor_id)
-
+    
     in_max  = stats["in_max"]
     in_avg  = stats["in_avg"]
     out_max = stats["out_max"]
@@ -115,37 +101,38 @@ def display_sensor_card(name, sensor_id):
             st.markdown(f"<div class='metric-out big-font'>Out Peak  <b>{out_max:,} Mbps</b></div>", unsafe_allow_html=True)
             st.markdown(f"<div class='big-font'>Avg Out   {out_avg:,} Mbps</div>", unsafe_allow_html=True)
 
-        # High-res dark graph
+        # High-resolution dark graph
         graph_url = (
             f"{PRTG_URL}/chart.png?"
             f"type=graph&id={sensor_id}&graphid={graphid}"
-            f"&width=1900&height=850"
+            f"&width=2000&height=900"
             f"&bgcolor=1e1e1e&fontcolor=ffffff"
             f"&username={PRTG_USERNAME}&passhash={PRTG_PASSHASH}"
         )
         try:
             r = requests.get(graph_url, verify=False, timeout=20)
-            if r.status_code == 200 and len(r.content) > 5000:
+            if r.status_code == 200 and len(r.content) > 8000:
                 img = Image.open(BytesIO(r.content))
                 st.image(img, use_container_width=True)
             else:
-                st.warning("Graph temporarily unavailable")
-        except Exception:
-            st.error("Failed to load graph image")
+                st.warning("Graph not available right now")
+        except:
+            st.error("Could not load graph")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
     return in_max, out_max, in_avg, out_avg
 
-# --- Main Layout ---
-total_in_peak = total_out_peak = total_in_avg = total_out_avg = 0
+# ==================================== MAIN LOOP
+total_in_peak = total_out_peak = total_in_avg = total_out_avg = 0.0
 
 st.markdown(f"### {graph_period}")
 st.markdown("---")
 
-for i in range(0, len(SENSORS), 2):
+sensor_list = list(SENSORS.items())
+for i in range(0, len(sensor_list), 2):
     cols = st.columns(2)
-    for col, (name, sid) in zip(cols, list(SENSORS.items())[i:i+2]):
+    for col, (name, sid) in zip(cols, sensor_list[i:i+2]):
         with col:
             ip, op, ia, oa = display_sensor_card(name, sid)
             total_in_peak  += ip
@@ -153,7 +140,7 @@ for i in range(0, len(SENSORS), 2):
             total_in_avg   += ia
             total_out_avg  += oa
 
-# --- Summary Metrics ---
+# ==================================== SUMMARY
 st.markdown("## Aggregate Bandwidth Summary")
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Total Peak In",  f"{total_in_peak:,.0f} Mbps")
@@ -161,10 +148,10 @@ col2.metric("Total Peak Out", f"{total_out_peak:,.0f} Mbps")
 col3.metric("Total Avg In",   f"{total_in_avg:,.0f} Mbps")
 col4.metric("Total Avg Out",  f"{total_out_avg:,.0f} Mbps")
 
-# --- Beautiful Bar Chart ---
+# ==================================== BAR CHART
 fig, ax = plt.subplots(figsize=(10, 6), facecolor="#0e1117")
 bars = ax.bar(["Peak In", "Peak Out"], [total_in_peak, total_out_peak],
-              color=["#00ff88", "#ff3366"], edgecolor="white", linewidth=2, width=0.6)
+              color=["#00ee88", "#ff3366"], edgecolor="white", linewidth=2, width=0.6)
 
 ax.set_ylabel("Mbps", fontsize=14, color="white")
 ax.set_title("Total Combined Peak Bandwidth", fontsize=20, fontweight="bold", color="white", pad=30)
