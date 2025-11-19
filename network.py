@@ -20,11 +20,11 @@ except KeyError:
 
 PRTG_URL = "https://prtg.pioneerbroadband.net"
 
-# --- Custom CSS (keeps it gorgeous) ---
+# --- Nice CSS ---
 st.markdown("""
 <style>
     .big-font { font-size: 19px !important; font-weight: bold; }
-    .metric-in { color: #00ff88; background-color: rgba(0,255,136,0.15); padding: 12px; border-radius: 12px; border-left: 6px solid #00ff88; }
+    .metric-in  { color: #00ff88; background-color: rgba(0,255,136,0.15); padding: 12px; border-radius: 12px; border-left: 6px solid #00ff88; }
     .metric-out { color: #ff3366; background-color: rgba(255,51,102,0.15); padding: 12px; border-radius: 12px; border-left: 6px solid #ff3366; }
     .card {
         background-color: var(--background-color);
@@ -56,19 +56,19 @@ period_to_graphid = {
 }
 graphid = period_to_graphid[graph_period]
 
-# --- Your Sensors ---
+# --- Sensors (clean names) ---
 SENSORS = {
-    "Firstlight": "12435",
-    "NNINIX":    "12506",
-    "Hurricane Electric": "12363",
-    "Cogent":    "12340",
+    "Firstlight":          "12435",
+    "NNINIX":              "12506",
+    "Hurricane Electric":  "12363",
+    "Cogent":              "12340",
 }
 
-# --- Fetch Peak & Average from "Traffic In (Speed)" and "Traffic Out (Speed)" ---
+# --- Fetch exact "Traffic In (Speed)" and "Traffic Out (Speed)" channels ---
 def fetch_speed_stats(sensor_id):
     url = (
         f"{PRTG_URL}/api/table.json?"
-        f"content=channels&columns=name,maximum_raw,average_raw,lastvalue_raw"
+        f"content=channels&columns=name,maximum_raw,average_raw"
         f"&id={sensor_id}&username={PRTG_USERNAME}&passhash={PRTG_PASSHASH}"
     )
     try:
@@ -78,27 +78,23 @@ def fetch_speed_stats(sensor_id):
 
         stats = {"in_max": 0, "in_avg": 0, "out_max": 0, "out_avg": 0}
 
-        for channel in data.get("channels", []):
-            name = channel.get("name", "").strip()
+        for ch in data.get("channels", []):
+            name = ch.get("name", "").strip()
 
             if name == "Traffic In (Speed)":
-                if channel.get("maximum_raw"):
-                    stats["in_max"] = round(float(channel["maximum_raw"]) / 1_000_000, 2)
-                if channel.get("average_raw"):
-                    stats["in_avg"] = round(float(channel["average_raw"]) / 1_000_000, 2)
+                if ch.get("maximum_raw"): stats["in_max"]  = round(float(ch["maximum_raw"])  / 1_000_000, 2)
+                if ch.get("average_raw"): stats["in_avg"]  = round(float(ch["average_raw"])  / 1_000_000, 2)
 
-            elif name == "Traffic Out (Speed)":
-                if channel.get("maximum_raw"):
-                    stats["out_max"] = round(float(channel["maximum_raw"]) / 1_000_000, 2)
-                if channel.get("average_raw"):
-                    stats["out_avg"] = round(float(channel["average_raw"]) / 1_000_000, 2)
+            if name == "Traffic Out (Speed)":
+                if ch.get("maximum_raw"): stats["out_max"] = round(float(ch["maximum_raw"]) / 1_000_000, 2)
+                if ch.get("average_raw"): stats["out_avg"] = round(float(ch["average_raw"]) / 1_000_000, 2)
 
         return stats
     except Exception as e:
-        st.error(f"Failed to fetch stats for sensor {sensor_id}: {e}")
+        st.error(f"Error fetching stats for sensor {sensor_id}: {e}")
         return {"in_max": 0, "in_avg": 0, "out_max": 0, "out_avg": 0}
 
-# --- Display One Sensor Card ---
+# --- Display one sensor card ---
 def display_sensor_card(name, sensor_id):
     stats = fetch_speed_stats(sensor_id)
 
@@ -113,30 +109,29 @@ def display_sensor_card(name, sensor_id):
 
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown(f"<div class='metric-in big-font'>Down Arrow In Peak {big}{in_max:,} Mbps</big></div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='big-font>Down Arrow Avg In  {in_avg:,} Mbps</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-in big-font'>In Peak  <b>{in_max:,} Mbps</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='big-font'>Avg In   {in_avg:,} Mbps</div>", unsafe_allow_html=True)
         with c2:
-            st.markdown(f"<div class='metric-out big-font'>Up Arrow Out Peak {big}{out_max:,} Mbps</big></div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='big-font'>Up Arrow Avg Out  {out_avg:,} Mbps</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-out big-font'>Out Peak  <b>{out_max:,} Mbps</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='big-font'>Avg Out   {out_avg:,} Mbps</div>", unsafe_allow_html=True)
 
-        # High-quality dark PRTG graph
+        # High-res dark graph
         graph_url = (
             f"{PRTG_URL}/chart.png?"
-            f"type=graph&id={sensor_id}&graphid={sensor_id}&graphid={graphid}"
+            f"type=graph&id={sensor_id}&graphid={graphid}"
             f"&width=1900&height=850"
-            f"&graphstyling=showLegend%3D0%26baseFontSize%3D14"
             f"&bgcolor=1e1e1e&fontcolor=ffffff"
             f"&username={PRTG_USERNAME}&passhash={PRTG_PASSHASH}"
         )
         try:
             r = requests.get(graph_url, verify=False, timeout=20)
-            if r.status_code == 200 and len(r.content) > 1000:
+            if r.status_code == 200 and len(r.content) > 5000:
                 img = Image.open(BytesIO(r.content))
                 st.image(img, use_container_width=True)
             else:
-                st.warning("Graph not available")
-        except:
-            st.error("Failed to load graph")
+                st.warning("Graph temporarily unavailable")
+        except Exception:
+            st.error("Failed to load graph image")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -158,20 +153,18 @@ for i in range(0, len(SENSORS), 2):
             total_in_avg   += ia
             total_out_avg  += oa
 
-# --- Grand Summary ---
-st.markdown("## Global Aggregate Summary")
+# --- Summary Metrics ---
+st.markdown("## Aggregate Bandwidth Summary")
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total Peak In",  f"{total_in_peak:,.0f} Mbps",  delta=None)
-col2.metric("Total Peak Out", f"{total_out_peak:,.0f} Mbps", delta=None)
+col1.metric("Total Peak In",  f"{total_in_peak:,.0f} Mbps")
+col2.metric("Total Peak Out", f"{total_out_peak:,.0f} Mbps")
 col3.metric("Total Avg In",   f"{total_in_avg:,.0f} Mbps")
 col4.metric("Total Avg Out",  f"{total_out_avg:,.0f} Mbps")
 
-# --- Fancy Bar Chart ---
+# --- Beautiful Bar Chart ---
 fig, ax = plt.subplots(figsize=(10, 6), facecolor="#0e1117")
-bars = ax.bar(["Peak In", "Peak Out"],
-              [total_in_peak, total_out_peak],
-              color=["#00ff88", "#ff3366"],
-              edgecolor="white", linewidth=2, width=0.55)
+bars = ax.bar(["Peak In", "Peak Out"], [total_in_peak, total_out_peak],
+              color=["#00ff88", "#ff3366"], edgecolor="white", linewidth=2, width=0.6)
 
 ax.set_ylabel("Mbps", fontsize=14, color="white")
 ax.set_title("Total Combined Peak Bandwidth", fontsize=20, fontweight="bold", color="white", pad=30)
@@ -182,7 +175,7 @@ fig.patch.set_facecolor("#0e1117")
 
 for bar in bars:
     h = bar.get_height()
-    ax.text(bar.get_x() + bar.get_width()/2., h + total_in_peak*0.015,
+    ax.text(bar.get_x() + bar.get_width()/2., h + max(total_in_peak, total_out_peak)*0.02,
             f'{h:,.0f}', ha='center', va='bottom', fontsize=16, fontweight='bold', color='white')
 
-st.pyplot(fig, use_container_width=True)
+st.pyplot(fig)
