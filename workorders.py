@@ -4,7 +4,7 @@ import plotly.express as px
 import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import requests  # <-- NEW: for GitHub upload
+import requests  # <-- for GitHub upload
 
 # =================================================
 # GITHUB HELPERS FOR WORK ORDERS
@@ -142,7 +142,7 @@ def run_workorders_dashboard():
                 f.write(file_bytes)
             st.sidebar.success(f"File saved as: {custom_filename}.csv")
 
-            # NEW: Upload to GitHub in workorders/ folder
+            # Upload to GitHub in workorders/ folder
             try:
                 upload_workorders_file_to_github(custom_filename + ".csv", file_bytes)
             except Exception as e:
@@ -361,9 +361,17 @@ def run_workorders_dashboard():
 
         if re_file and re_filename:
             save_path = os.path.join(saved_folder, re_filename + ".csv")
+            file_bytes_re = re_file.getvalue()
             with open(save_path, "wb") as f:
-                f.write(re_file.getbuffer())
+                f.write(file_bytes_re)
             st.sidebar.success(f"File saved as: {re_filename}.csv")
+
+            # NEW: upload rework file to GitHub workorders/ folder
+            try:
+                upload_workorders_file_to_github(re_filename + ".csv", file_bytes_re)
+            except Exception as e:
+                st.sidebar.error(f"GitHub upload error (rework file): {e}")
+
             df_rework = pd.read_csv(save_path, header=None)
         elif re_file:
             st.sidebar.warning("Please enter a file name to save.")
