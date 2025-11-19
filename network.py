@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-st.set_page_config(page_title="PRTG — Working Peaks", layout="wide", page_icon="Chart")
+st.set_page_config(page_title="PRTG — Finally Working", layout="wide", page_icon="Chart")
 
 # ====================== CREDENTIALS ======================
 try:
@@ -19,15 +19,21 @@ except:
 
 BASE = "https://prtg.pioneerbroadband.net"
 
-# ====================== PERIOD ======================
+# ====================== PERIOD (includes 2 hours) ======================
 period = st.selectbox(
     "Time Period",
-    ["Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
-    index=0,
-    key="period"
+    ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
+    index=1,
+    key="period_select"
 )
 
-graphid = {"Last 48 hours": "1", "Last 7 days": "-7", "Last 30 days": "2", "Last 365 days": "3"}[period]
+graphid = {
+    "Live (2 hours)": "0",
+    "Last 48 hours": "1",
+    "Last 7 days": "-7",
+    "Last 30 days": "2",
+    "Last 365 days": "3"
+}[period]
 
 SENSORS = {
     "Firstlight":          "12435",
@@ -36,14 +42,14 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
-# ====================== WORKING PEAK EXTRACTION (NO graphstyling) ======================
+# ====================== THE ONLY METHOD THAT WORKS ON YOUR PRTG ======================
 def get_peaks(sensor_id):
     url = f"{BASE}/chart.png"
     params = {
         "id": sensor_id,
         "graphid": graphid,
-        "width": 800,
-        "height": 400,
+        "width": 1000,
+        "height": 500,
         "username": USER,
         "passhash": PH
     }
@@ -52,7 +58,6 @@ def get_peaks(sensor_id):
         img = Image.open(BytesIO(r.content))
         info = img.info
 
-        # These keys are there when width/height > 1
         in_bits  = int(float(info.get("max1", "0").replace(",", "")))
         out_bits = int(float(info.get("max2", "0").replace(",", "")))
 
@@ -76,29 +81,33 @@ def show_sensor(name, sid):
     except:
         st.write("Graph not loaded")
 
+    st.markdown("---")
     return in_mbps, out_mbps
 
 # ====================== MAIN ======================
-st.title("PRTG Peak Bandwidth — WORKS NOW")
-st.caption(f"Period: {period}")
+st.title("PRTG Peak Bandwidth — FINALLY WORKS")
+st.caption(f"Period: **{period}**")
 
 total_in = total_out = 0
 
-for name, sid in SENSORS.items():
-    i, o = show_sensor(name, sid)
-    total_in  += i
-    total_out += o
+for i in range(0, len(SENSORS), 2):
+    cols = st.columns(2)
+    for col, (name, sid) in zip(cols, list(SENSORS.items())[i:i+2]):
+        with col:
+            i_val, o_val = show_sensor(name, sid)
+            total_in  += i_val
+            total_out += o_val
 
 st.success(f"**TOTAL PEAK IN:  {total_in:,} Mbps**")
 st.success(f"**TOTAL PEAK OUT: {total_out:,} Mbps**")
 
-fig, ax = plt.subplots(figsize=(8,5))
-ax.bar(["Total In", "Total Out"], [total_in, total_out], color=["#00ff88", "#ff3366"], width=0.6)
-ax.set_ylabel("Mbps")
-ax.set_title("Combined Peak", fontweight="bold", color="white")
+fig, ax = plt.subplots(figsize=(10,6))
+ax.bar(["Total Peak In", "Total Peak Out"], [total_in, total_out], color=["#00ff88", "#ff3366"], width=0.6)
+ax.set_ylabel("Mbps", color="white")
+ax.set_title("Combined Peak Bandwidth", color="white", fontsize=16, fontweight="bold")
 ax.set_facecolor("#1e1e1e")
 fig.patch.set_facecolor("#0e1117")
 ax.tick_params(colors="white")
 for i, v in enumerate([total_in, total_out]):
-    ax.text(i, v*1.02, f"{v:,}", ha="center", fontweight="bold", color="white")
+    ax.text(i, v*1.02, f"{v:,}", ha="center", fontweight="bold", color="white", fontsize=14)
 st.pyplot(fig)
