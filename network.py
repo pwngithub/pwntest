@@ -14,15 +14,17 @@ try:
     user = st.secrets["prtg_username"]
     ph   = st.secrets["prtg_passhash"]
 except:
-    st.error("Add prtg_username and prtg_passhash to secrets.toml")
+    st.error("Please add prtg_username and prtg_passhash to secrets.toml")
     st.stop()
 
 base = "https://prtg.pioneerbroadband.net"
 
 # ==================== PERIOD ====================
-period = st.selectbox("Period", 
+period = st.selectbox(
+    "Select Period",
     ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
-    index=1)
+    index=1
+)
 
 graphid_map = {
     "Live (2 hours)": "0",
@@ -35,22 +37,23 @@ graphid = graphid_map[period]
 
 # ==================== SENSORS ====================
 SENSORS = {
-    "Firstlight":         "12435",
-    "NNINIX":             "12506",
-    "Hurricane Electric": "12363",
-    "Cogent":             "12340",
+    "Firstlight":          "12435",
+    "NNINIX":              "12506",
+    "Hurricane Electric":  "12363",
+    "Cogent":              "12340",
 }
 
-# ==================== THE ONLY METHOD THAT ALWAYS WORKS ====================
+# ==================== GET REAL PEAK VALUES FROM PNG METADATA ====================
 def get_real_peaks(sensor_id: str):
-    """
-    PRTG puts the true peak values for the selected period in the PNG metadata
-    max1 = Peak In (Speed) in bits/s
-    max2 = Peak Out (Speed) in bits/s
-    """
-    url = f"{base}/chart.png?id={sensor_id}&graphid={graphid}&width=100&height=100"
-    params = {"username": user, "passhash: ph}
-    
+    url = f"{base}/chart.png"
+    params = {
+        "id": sensor_id,
+        "graphid": graphid,
+        "width": 100,
+        "height": 100,
+        "username": user,
+        "passhash": ph
+    }
     try:
         r = requests.get(url, params=params, verify=False, timeout=15)
         r.raise_for_status()
@@ -64,7 +67,8 @@ def get_real_peaks(sensor_id: str):
         out_mbps = round(out_bits / 1_000_000, 1)
 
         return in_mbps, out_mbps
-    except:
+    except Exception as e:
+        st.error(f"Failed to get peaks for {sensor_id}: {e}")
         return 0.0, 0.0
 
 # ==================== DISPLAY ONE SENSOR ====================
@@ -77,42 +81,53 @@ def show_sensor(name, sid):
     c2.metric("Peak Out", f"{out_peak:,.0f} Mbps")
 
     # Full-size graph
-    gurl = f"{base}/chart.png?id={sid}&graphid={graphid}&width=1800&height=800&bgcolor=1e1e1e&fontcolor=ffffff"
+    gurl = f"{base}/chart.png"
+    gparams = {
+        "id": sid,
+        "graphid": graphid,
+        "width": 1800,
+        "height": 800,
+        "bgcolor": "1e1e1e",
+        "fontcolor": "ffffff",
+        "username": user,
+        "passhash": ph
+    }
     try:
-        img = Image.open(BytesIO(requests.get(gurl, params={"username":user, "passhash":ph}, verify=False).content))
-        st.image(img, use_container_width=True)
+        img_data = requests.get(gurl, params=gparams, verify=False, timeout=20).content
+        st.image(img_data, use_container_width=True)
     except:
-        st.caption("Graph unavailable")
+        st.warning("Graph could not be loaded")
 
     st.markdown("---")
     return in_peak, out_peak
 
 # ==================== MAIN ====================
 st.title("PRTG Real Peak Bandwidth Dashboard")
-st.caption(f"Period → {period}")
+st.caption(f"Period: **{period}**")
 
 total_in = total_out = 0.0
 
 for i in range(0, len(SENSORS), 2):
     cols = st.columns(2)
-    for col, (name, sid) in zip(cols, list(SENSORS.items())[i:i+2]):
+    pair = list(SENSORS.items())[i:i+2]
+    for col, (name, sid) in zip(cols, pair):
         with col:
             i_p, o_p = show_sensor(name, sid)
             total_in  += i_p
             total_out += o_p
 
-# ==================== TOTAL SUMMARY ====================
+# ==================== SUMMARY ====================
 st.markdown("## Combined Across All Circuits")
 a, b = st.columns(2)
 a.metric("Total Peak In",  f"{total_in:,.0f} Mbps")
 b.metric("Total Peak Out", f"{total_out:,.0f} Mbps")
 
 # Bar chart
-fig, ax = plt.subplots(figsize=(8,5))
+fig, ax = plt.subplots(figsize=(8, 5))
 ax.bar(["Peak In", "Peak Out"], [total_in, total_out],
        color=["#00ff88", "#ff3366"], width=0.6)
 ax.set_ylabel("Mbps")
 ax.set_title("Total Peak Bandwidth", fontsize=16, fontweight="bold")
 for i, v in enumerate([total_in, total_out]):
-    ax.text(i, v*1.02, f"{v:,.0f}", ha="center", fontweight="bold")
+    ax.text(i, v * 1.02, f"{v:,.0f}", ha="center", fontweight="bold", fontsize=12)
 st.pyplot(fig)
