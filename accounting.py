@@ -86,7 +86,13 @@ try:
     month_tabs = [n for n in sheet_names if n.startswith("25.")]
     if not month_tabs:
         month_tabs = sheet_names
-    selected_tab = st.sidebar.selectbox("📅 Select Month", month_tabs, index=len(month_tabs) - 1)
+    # 👇 Added unique key so it doesn't conflict with other selectboxes
+    selected_tab = st.sidebar.selectbox(
+        "📅 Select Month",
+        month_tabs,
+        index=len(month_tabs) - 1,
+        key="accounting_month_selectbox",
+    )
 except Exception as e:
     st.error(f"❌ Could not fetch sheet tabs: {e}")
     st.stop()
@@ -240,7 +246,12 @@ r2.markdown(kpi_box("ROI Year To Date", f"{roi_ytd}", is_percent=True), unsafe_a
 # SIDEBAR OPTIONS + DOWNLOAD
 # -------------------------------
 st.sidebar.markdown("---")
-show_df = st.sidebar.checkbox("📋 Show Profit & Loss Sheet Preview", False)
+# 👇 Added a unique key here too, in case other reports use the same label
+show_df = st.sidebar.checkbox(
+    "📋 Show Profit & Loss Sheet Preview",
+    False,
+    key="accounting_show_pl_preview",
+)
 if show_df:
     st.subheader(f"📋 Profit & Loss Sheet Preview – {selected_tab}")
     st.dataframe(df, use_container_width=True)
