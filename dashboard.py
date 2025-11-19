@@ -8,25 +8,27 @@ from io import BytesIO
 
 st.set_page_config(page_title="Talley Customer Dashboard", layout="wide")
 
-# ——————————————— PROFESSIONAL STYLING ———————————————
+# ——————————————— CLEAN PROFESSIONAL DESIGN ———————————————
 st.markdown("""
 <style>
     .big-title {font-size: 42px !important; font-weight: bold; color: #1E3A8A; text-align: center;}
-    .net-mrr {font-size: 64px !important; font-weight: bold; text-align: center; margin: 20px 0;}
+    .net-mrr {font-size: 64px !important; font-weight: bold; text-align: center; margin: 30px 0;}
     .positive {color: #16A34A !important;}
     .negative {color: #DC2626 !important;}
     .card {
         padding: 20px;
         border-radius: 12px;
-        background: #F8FAFC;
+        background: #1E293B;
+        color: white;
         border-left: 6px solid;
         height: 170px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }
     .win  {border-left-color: #16A34A;}
     .flag {border-left-color: #DC2626;}
-    .stApp {background-color: #0E1117;}
-    .css-1d391kg {padding-top: 2rem;}
+    .stApp {background-color: #0F172A;}
+    h4 {margin: 0 0 10px 0; color: #CBD5E1;}
+    small {color: #94A3B8; font-size: 0.9em;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -91,17 +93,17 @@ def get_data():
 
 
 def run_dashboard():
-    # ——————————————— HEADER WITH LOGO ———————————————
+    # ——————————————— HEADER ———————————————
     col_logo, col_title = st.columns([1, 8])
     with col_logo:
-        st.image("https://via.placeholder.com/140x90/1E3A8A/FFFFFF?text=TALLEY", width=140)  # ← Replace with your real logo URL
+        st.image("https://via.placeholder.com/140x90/1E3A8A/FFFFFF?text=TALLEY", width=140)  # ← Your logo here
     with col_title:
         st.markdown('<p class="big-title">Customer Dashboard</p>', unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center; color:#94A3B8; margin-top:-10px;'>True Churn • Growth • Insights • Real-time from JotForm</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center; color:#94A3B8; margin-top:-15px;'>True Churn • Growth • Real-time Insights</p>", unsafe_allow_html=True)
 
     df = get_data()
     if df.empty:
-        st.error("No data loaded. Check your JotForm connection.")
+        st.error("No data loaded from JotForm.")
         st.stop()
 
     min_date = df["Submission Date"].min().date()
@@ -117,7 +119,7 @@ def run_dashboard():
             max_value=max_date
         )
     with col2:
-        if st.button("Refresh Data"):
+        if st.button("Refresh Now"):
             st.cache_data.clear()
             st.rerun()
 
@@ -155,80 +157,74 @@ def run_dashboard():
 
     st.divider()
 
-    # ——————————————— QUICK INSIGHTS — FIXED & BEAUTIFUL ———————————————
+    # ——————————————— DYNAMIC QUICK INSIGHTS (NO WHITE BOXES!) ———————————————
     st.markdown("### Quick Insights This Period")
-    c1, c2, c3, c4 = st.columns(4)
+
+    cards = []
 
     # 1. Most Common Churn Reason
     if not churn_in.empty and "Reason" in churn_in.columns and churn_in["Reason"].str.strip().ne("").any():
         top_reason = churn_in["Reason"].value_counts().idxmax()
         top_count = churn_in["Reason"].value_counts().max()
         top_mrc = churn_in[churn_in["Reason"] == top_reason]["MRC"].sum()
-        with c1:
-            st.markdown(f"""
+        cards.append(f"""
             <div class="card flag">
                 <h4>Most Common Churn Reason</h4>
                 <b>{top_reason}</b><br>
                 {top_count} customers · ${top_mrc:,.0f} lost
             </div>
-            """, unsafe_allow_html=True)
-    else:
-        with c1:
-            st.markdown('<div class="card win"><h4>No Churn</h4>Perfect retention this period!</div>', unsafe_allow_html=True)
+        """)
 
     # 2. Largest Single Loss
     if not churn_in.empty:
         biggest = churn_in.loc[churn_in["MRC"].idxmax()]
-        name = str(biggest.get("Customer Name", "Unknown"))[:30]
-        reason = str(biggest.get("Reason", "Not specified"))
-        with c2:
-            st.markdown(f"""
+        name = str(biggest.get("Customer Name", "Unknown"))[:35]
+        reason = str(biggest.get("Reason", "—"))
+        cards.append(f"""
             <div class="card flag">
                 <h4>Largest Single Loss</h4>
                 <b>{name}</b><br>
                 ${biggest["MRC"]:,.0f} MRC<br>
                 <small>{reason}</small>
             </div>
-            """, unsafe_allow_html=True)
-    else:
-        with c2:
-            st.markdown('<div class="card win"><h4>No Losses</h4>All customers retained</div>', unsafe_allow_html=True)
+        """)
 
     # 3. Biggest New Win
     if not new_in.empty:
         best = new_in.loc[new_in["MRC"].idxmax()]
-        name = str(best.get("Customer Name", "New Customer"))[:30]
-        loc = str(best.get("Location", "")) if pd.notna(best.get("Location")) else "—"
-        with c3:
-            st.markdown(f"""
+        name = str(best.get("Customer Name", "New Customer"))[:35]
+        loc = str(best.get("Location", "—"))
+        cards.append(f"""
             <div class="card win">
                 <h4>Biggest New Win</h4>
                 <b>{name}</b><br>
                 +${best["MRC"]:,.0f} MRC<br>
                 <small>{loc}</small>
             </div>
-            """, unsafe_allow_html=True)
-    else:
-        with c3:
-            st.markdown('<div class="card"><h4>No New Wins Yet</h4>Keep selling!</div>', unsafe_allow_html=True)
+        """)
 
     # 4. Fastest Growing Location
     if not new_in.empty and "Location" in new_in.columns and new_in["Location"].str.strip().ne("").any():
         top_loc = new_in["Location"].value_counts().idxmax()
         count = new_in["Location"].value_counts().max()
         mrc = new_in[new_in["Location"] == top_loc]["MRC"].sum()
-        with c4:
-            st.markdown(f"""
+        cards.append(f"""
             <div class="card win">
                 <h4>Fastest Growing Location</h4>
                 <b>{top_loc}</b><br>
                 +{count} customers<br>
                 +${mrc:,.0f} MRC
             </div>
-            """, unsafe_allow_html=True)
+        """)
+
+    # Show cards only if they exist — never white boxes
+    if cards:
+        cols = st.columns(len(cards))
+        for col, card in zip(cols, cards):
+            with col:
+                st.markdown(card, unsafe_allow_html=True)
     else:
-        with c4:
-            st.markdown('<div class="card win"><h4>Growing Everywhere</h4>New wins across the board</div>', unsafe_allow_html=True)
+        st.success("All quiet this period — no churn, no new wins… yet!")
 
     st.divider()
 
@@ -237,7 +233,7 @@ def run_dashboard():
 
     with col_left:
         st.markdown("### True Churn Metrics")
-        st.caption("Losses from existing customer base")
+        st.caption("Losses from existing base")
         ch1, ch2 = st.columns(2)
         ch1.metric("Churned Customers", f"{churn_count:,}", delta=f"-{churn_count}")
         ch2.metric("Lost MRC", f"${churn_mrc:,.0f}", delta_color="inverse")
@@ -267,37 +263,32 @@ def run_dashboard():
                         .sort_values("Count", ascending=False))
             st.dataframe(reason_df.style.format({"MRC_Lost": "${:,.0f}"}), use_container_width=True)
             fig = px.bar(reason_df, x="Count", y="Reason", orientation="h",
-                         color="MRC_Lost", color_continuous_scale="Reds",
-                         title="Churn Reasons (Count + $ Impact)")
+                         color="MRC_Lost", color_continuous_scale="Reds")
             st.plotly_chart(fig, use_container_width=True)
 
     with col_b:
         if not new_in.empty:
             st.subheader("New Customer Acquisition")
-            pie = px.pie(new_in["Category"].value_counts().reset_index(),
-                         names="Category", values="count", title="By Category")
+            pie = px.pie(new_in["Category"].value_counts().reset_index(), names="Category", values="count", title="By Category")
             st.plotly_chart(pie, use_container_width=True)
-            bar = px.bar(new_in["Location"].value_counts().head(10).reset_index(),
-                         x="Location", y="count", title="Top 10 Locations")
+            bar = px.bar(new_in["Location"].value_counts().head(10).reset_index(), x="Location", y="count", title="Top 10 Locations")
             st.plotly_chart(bar, use_container_width=True)
             st.success(f"Added {new_count:,} new customers — +${new_mrc:,.0f} MRC")
 
-    # ——————————————— EXPORT TO EXCEL ———————————————
+    # ——————————————— EXCEL EXPORT ———————————————
     st.divider()
-    summary_df = pd.DataFrame([{
+    summary = pd.DataFrame([{
         "Period": f"{start_date} to {end_date}",
         "Net MRR Movement": net_mrr_movement,
         "New Customers": new_count,
-        "Churned Customers": churn_count,
+        "Churned": churn_count,
         "New MRC": new_mrc,
-        "Lost MRC": churn_mrc,
-        "Beginning Customers": beginning_customers,
-        "Beginning MRC": beginning_mrc
+        "Lost MRC": churn_mrc
     }])
 
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        summary_df.to_excel(writer, sheet_name="Summary", index=False)
+        summary.to_excel(writer, sheet_name="Summary", index=False)
         if not churn_in.empty:
             reason_df.to_excel(writer, sheet_name="Churn_by_Reason", index=False)
 
