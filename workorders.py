@@ -330,65 +330,141 @@ def run_workorders_dashboard():
     overall_jobs_per_mile = overall_jobs / overall_miles if overall_miles > 0 else 0
     overall_miles_per_job = overall_miles / overall_jobs if overall_jobs > 0 else 0
 
-    # =========================================================
-    # DISPLAY KPIs
-    # =========================================================
+    # =================================================
+# KPIs
+# =================================================
+st.markdown("### 📌 Work Orders KPIs")
+df_kpi = df_filtered.dropna(subset=['Duration'])
 
-    st.markdown("### 📌 Work Orders KPIs")
+# ---------------- ORIGINAL KPIs ----------------
+if not df_kpi.empty:
+    total_jobs = df_kpi["WO#"].nunique()
+    tech_count = df_kpi["Technician"].nunique()
+    avg_jobs = total_jobs / tech_count if tech_count else 0
 
     k1, k2, k3 = st.columns(3)
-    k1.metric("🔧 Total Jobs", df_filtered["WO#"].nunique())
-    k2.metric("👨‍🔧 Technicians", df_filtered["Technician"].nunique())
-    k3.metric("🛣 Total Miles Driven", f"{overall_miles:.1f} miles")
+    k1.metric("🔧 Total Jobs", total_jobs)
+    k2.metric("👨‍🔧 Tech Count", tech_count)
+    k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs:.1f}")
+else:
+    st.warning("No duration data found.")
 
-    # ---------- Travel Time KPIs ----------
-    if not df_travel.empty:
-        avg_travel = df_travel["Travel_Minutes"].mean()
-        fastest = df_travel["Travel_Minutes"].min()
-        slowest = df_travel["Travel_Minutes"].max()
 
-        t1, t2, t3 = st.columns(3)
-        t1.metric("⏱ Avg Travel Time", f"{avg_travel:.1f} mins")
-        t2.metric("⚡ Fastest Travel", f"{fastest:.1f} mins")
-        t3.metric("🐢 Longest Travel", f"{slowest:.1f} mins")
+# =================================================
+# NEW — TRAVEL TIME KPIs (inserted here)
+# =================================================
+# df_travel is created earlier in the script
 
-    # ---------- Jobs Per Mile KPIs ----------
-    jm1, jm2 = st.columns(2)
-    jm1.metric("🚗 Overall Jobs Per Mile", f"{overall_jobs_per_mile:.3f}")
-    jm2.metric("🛣 Overall Miles Per Job", f"{overall_miles_per_job:.2f}")
+if not df_travel.empty:
+    avg_travel = df_travel["Travel_Minutes"].mean()
+    fastest = df_travel["Travel_Minutes"].min()
+    slowest = df_travel["Travel_Minutes"].max()
 
-    # =========================================================
-    # CHART: Avg Travel Time Per Technician
-    # =========================================================
+    t1, t2, t3 = st.columns(3)
+    t1.metric("⏱ Avg Travel Time", f"{avg_travel:.1f} mins")
+    t2.metric("⚡ Fastest Travel", f"{fastest:.1f} mins")
+    t3.metric("🐢 Longest Travel", f"{slowest:.1f} mins")
 
-    if not df_travel.empty:
-        df_tt = df_travel.groupby("Technician")["Travel_Minutes"].mean().reset_index()
 
-        fig_tt = px.bar(
-            df_tt,
-            x="Technician",
-            y="Travel_Minutes",
-            title="Average Travel Time Per Technician",
-            template="plotly_dark",
-            color="Travel_Minutes",
-        )
-        fig_tt.update_layout(yaxis_title="Avg Travel (mins)")
-        st.plotly_chart(fig_tt, use_container_width=True)
+# =================================================
+# NEW — JOBS PER MILE KPIs (inserted here)
+# =================================================
+# df_jobs_per_mile & overall metrics created earlier
 
-    # =========================================================
-    # CHART: Jobs Per Mile Per Technician
-    # =========================================================
+jm1, jm2 = st.columns(2)
+jm1.metric("🚗 Overall Jobs Per Mile", f"{overall_jobs_per_mile:.3f}")
+jm2.metric("🛣 Overall Miles Per Job", f"{overall_miles_per_job:.2f}")
 
-    fig_jpm = px.bar(
-        df_jobs_per_mile,
-        x="Technician",
-        y="Jobs_Per_Mile",
-        title="Jobs Per Mile by Technician",
-        template="plotly_dark",
-        color="Jobs_Per_Mile"
+
+# =================================================
+# ORIGINAL: OVERALL AVG DURATION
+# =================================================
+st.markdown("### 📊 Overall Average Duration by Work Type")
+
+df_avg = df_filtered.dropna(subset=['Duration'])
+
+if not df_avg.empty:
+    df_avg["Duration_Mins"] = pd.to_numeric(
+        df_avg["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0],
+        errors="coerce"
     )
-    fig_jpm.update_layout(yaxis_title="Jobs Per Mile")
-    st.plotly_chart(fig_jpm, use_container_width=True)
+
+    tech_group = df_avg.groupby(['Work Type', 'Technician'])['Duration_Mins'].mean().reset_index()
+    final_avg = tech_group.groupby('Work Type')['Duration_Mins'].mean().reset_index()
+
+    fig = px.bar(
+        final_avg, x="Work Type", y="Duration_Mins",
+        title="Overall Average Job Time by Work Type",
+        template="plotly_dark"
+    )
+    fig.update_traces(marker_color='#8BC53F')
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# =================================================
+# ORIGINAL: TECHNICIAN JOB + DURATION CHARTS
+# =================================================
+st.markdown("### 📊 Work Orders Charts by Technician")
+
+if not df_avg.empty:
+    grouped = (
+        df_avg.groupby(["Technician", "Work Type"])
+        .agg(Total_Jobs=("WO#", "nunique"),
+             Avg_Duration=("Duration_Mins", "mean"))
+        .reset_index()
+    )
+
+    fig1 = px.bar(
+        grouped,
+        x="Work Type", y="Total_Jobs", color="Technician",
+        title="Jobs by Work Type & Technician",
+        template="plotly_dark"
+    )
+    st.plotly_chart(fig1, use_container_width=True)
+
+    fig2 = px.bar(
+        grouped,
+        x="Work Type", y="Avg_Duration", color="Technician",
+        title="Avg Duration by Work Type & Technician (mins)",
+        template="plotly_dark"
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+
+# =================================================
+# NEW: TRAVEL TIME CHART (inserted here)
+# =================================================
+if not df_travel.empty:
+    df_tt = df_travel.groupby("Technician")["Travel_Minutes"].mean().reset_index()
+
+    fig_tt = px.bar(
+        df_tt,
+        x="Technician",
+        y="Travel_Minutes",
+        title="Average Travel Time Per Technician",
+        template="plotly_dark",
+        color="Travel_Minutes",
+    )
+    fig_tt.update_layout(yaxis_title="Avg Travel (mins)")
+    st.plotly_chart(fig_tt, use_container_width=True)
+
+
+# =================================================
+# NEW: JOBS-PER-MILE CHART (inserted here)
+# =================================================
+fig_jpm = px.bar(
+    df_jobs_per_mile,
+    x="Technician",
+    y="Jobs_Per_Mile",
+    title="Jobs Per Mile by Technician",
+    template="plotly_dark",
+    color="Jobs_Per_Mile"
+)
+fig_jpm.update_layout(yaxis_title="Jobs Per Mile")
+st.plotly_chart(fig_jpm, use_container_width=True)
+
+st.markdown("---")
+
 
     # =========================================================
     # INSTALLATION REWORK SECTION (UNCHANGED)
