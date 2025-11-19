@@ -106,27 +106,22 @@ for i in range(0, len(SENSORS), 2):
             else:
                 st.caption("Graph unavailable")
 
-# ====================== BEAUTIFUL COMBINED CHART ======================
 st.markdown("## Combined Peak Bandwidth Across All Circuits")
 
 col1, col2 = st.columns([3, 1])
 with col1:
     fig, ax = plt.subplots(figsize=(12, 7))
-
     bars = ax.bar(
         ["Peak In", "Peak Out"],
         [total_in, total_out],
         color=["#00ff9d", "#ff3366"],
         width=0.5,
         edgecolor="white",
-        linewidth=2.5,
-        capstyle="round"
+        linewidth=2.5
     )
-
     ax.set_ylim(0, max(total_in, total_out) * 1.15)
     ax.set_ylabel("Mbps", fontsize=16, fontweight="bold", color="white")
     ax.set_title(f"Total Combined Peak – {period}", fontsize=24, fontweight="bold", color="white", pad=30)
-
     ax.set_facecolor("#0e1117")
     fig.patch.set_facecolor("#0e1117")
     ax.spines[["top", "right", "left"]].set_visible(False)
@@ -145,15 +140,8 @@ with col1:
             fontweight="bold",
             color="white"
         )
-
     st.pyplot(fig, use_container_width=True)
 
 with col2:
-    st.metric("**Total In**",  f"{total_in:,.0f} Mbps", delta=None)
-    st.metric("**Total Out**", f"{total_out:,.0f} Mbps", delta=None)
-    st.caption(f"Updated: {st.session_state.get('last_update', 'Now')}")
-
-# Optional: update timestamp
-if "last_update" not in st.session_state:
-    from datetime import datetime
-    st.session_state.last_update = datetime.now().strftime("%H:%M:%S")
+    st.metric("**Total In**",  f"{total_in:,.0f} Mbps")
+    st.metric("**Total Out**", f"{total_out:,.0f} Mbps")
