@@ -114,14 +114,17 @@ def show_dashboard():
 
     # --- Sidebar Filters ---
     st.sidebar.header("Controls")
-    if st.sidebar.button("🔄 Refresh Data"):
+    if st.sidebar.button("🔄 Refresh Data", key="refresh_projects"):
         load_data.clear()
         st.session_state["rerun_triggered"] = True
         st.experimental_rerun()
 
     all_types = sorted(kpi["Type"].unique())
     selected = st.sidebar.multiselect(
-        "Filter Project Type", options=all_types, default=all_types
+        "Filter Project Type", 
+        options=all_types, 
+        default=all_types,
+        key="project_type_filter"
     )
     kpi = kpi[kpi["Type"].isin(selected)]
 
@@ -166,14 +169,17 @@ def show_dashboard():
         if not kpi.empty:
             kpi = kpi.sort_values(by="Completion %", ascending=False)
             top = kpi.iloc[0]["Type"]
-            for _, r in kpi.iterrows():
+            for idx, r in kpi.iterrows():
                 st.markdown("---")
                 st.markdown(
                     f"🏆 **{r['Type']}** (Top Performer)"
                     if r["Type"] == top
                     else f"**{r['Type']}**"
                 )
-                st.progress(int(r["Completion %"]), text=f"{r['Completion %']:.2f}%")
+                st.progress(
+                    int(r["Completion %"]), 
+                    text=f"{r['Completion %']:.2f}%",
+                )
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Completion %", f"{r['Completion %']:.2f}%")
                 c2.metric("As Built", f"{r['As Built']:,.2f}")
@@ -181,21 +187,27 @@ def show_dashboard():
         else:
             st.info("No data available.")
 
-    # --- Async Raw Data Viewer ---
+    # --- Raw Data Table ---
     with tab3:
         st.subheader("Raw Data Table (Loaded on Demand)")
+
         if "show_raw" not in st.session_state:
             st.session_state["show_raw"] = False
 
+        # Load button
         if not st.session_state["show_raw"]:
-            if st.button("📂 Load Raw Data"):
+            if st.button("📂 Load Raw Data", key="load_raw_projects"):
                 st.session_state["show_raw"] = True
                 st.session_state["rerun_triggered"] = True
                 st.experimental_rerun()
+
         else:
+            # Show table
             cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
             st.dataframe(df[cols].fillna(""), use_container_width=True)
-            if st.button("❌ Hide Table"):
+
+            # Hide button
+            if st.button("❌ Hide Table", key="hide_raw_projects"):
                 st.session_state["show_raw"] = False
                 st.session_state["rerun_triggered"] = True
                 st.experimental_rerun()
