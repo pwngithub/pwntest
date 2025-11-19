@@ -9,17 +9,13 @@ import base64
 from datetime import datetime
 
 # =================================================
-# GITHUB HELPERS (Stable)
+# GITHUB HELPERS
 # =================================================
 
 def get_github_config_workorders():
     try:
         gh = st.secrets["github"]
-        token = gh["token"]
-        repo = gh["repo"]
-        branch = gh.get("branch", "main")
-        folder = "workorders/"
-        return token, repo, branch, folder
+        return gh["token"], gh["repo"], gh.get("branch", "main"), "workorders/"
     except:
         st.error("❌ GitHub secrets missing under [github].")
         return None, None, None, None
@@ -33,12 +29,9 @@ def list_github_workorders():
     url = f"https://api.github.com/repos/{repo}/contents/{folder}"
     headers = {"Authorization": f"token {token}"}
     r = requests.get(url, headers=headers)
-
     if r.status_code != 200:
         return []
-
-    return [f["name"] for f in r.json()
-            if f["type"] == "file" and f["name"].endswith(".csv")]
+    return [f["name"] for f in r.json() if f["type"] == "file" and f["name"].endswith(".csv")]
 
 
 def download_github_workorder_file(filename):
@@ -46,23 +39,20 @@ def download_github_workorder_file(filename):
     if not token:
         return None
 
-    api_url = f"https://api.github.com/repos/{repo}/contents/{folder}{filename}"
+    url = f"https://api.github.com/repos/{repo}/contents/{folder}{filename}"
     headers = {"Authorization": f"token {token}"}
-    r = requests.get(api_url, headers=headers)
-
+    r = requests.get(url, headers=headers)
     if r.status_code != 200:
         return None
 
-    data = r.json()
-
-    if data.get("download_url"):
-        file_bytes = requests.get(data["download_url"]).content
+    j = r.json()
+    if j.get("download_url"):
+        file_bytes = requests.get(j["download_url"]).content
     else:
-        file_bytes = base64.b64decode(data["content"])
+        file_bytes = base64.b64decode(j["content"])
 
     os.makedirs("saved_uploads", exist_ok=True)
-    local = os.path.join("saved_uploads", filename)
-
+    local = f"saved_uploads/{filename}"
     with open(local, "wb") as f:
         f.write(file_bytes)
 
@@ -74,14 +64,13 @@ def upload_workorders_file_to_github(filename, file_bytes):
     if not token:
         return
 
-    remote = f"{folder}{filename}"
-    url = f"https://api.github.com/repos/{repo}/contents/{remote}"
+    url = f"https://api.github.com/repos/{repo}/contents/{folder}{filename}"
     headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
 
     sha = None
-    existing = requests.get(url, headers=headers)
-    if existing.status_code == 200:
-        sha = existing.json().get("sha")
+    exist = requests.get(url, headers=headers)
+    if exist.status_code == 200:
+        sha = exist.json().get("sha")
 
     payload = {
         "message": f"Update {filename}",
@@ -93,7 +82,7 @@ def upload_workorders_file_to_github(filename, file_bytes):
 
     r = requests.put(url, headers=headers, json=payload)
     if r.status_code not in (200, 201):
-        st.error(f"❌ GitHub upload failed: {r.status_code} {r.text}")
+        st.error(f"❌ GitHub upload error: {r.status_code} {r.text}")
     else:
         st.sidebar.success(f"📤 Uploaded to GitHub → {filename}")
 
@@ -149,27 +138,27 @@ def run_workorders_dashboard():
         name = st.sidebar.text_input("Filename", key="wo_filename")
 
         if up and name:
-            fname = name + ".csv"
+            fn = name + ".csv"
             b = up.getvalue()
+            local = f"saved_uploads/{fn}"
 
-            local = f"saved_uploads/{fname}"
             with open(local, "wb") as f:
                 f.write(b)
 
-            upload_workorders_file_to_github(fname, b)
+            upload_workorders_file_to_github(fn, b)
             df = pd.read_csv(local)
 
     else:
         files = list_github_workorders()
         if not files:
-            st.error("❌ No Work Orders files in GitHub/workorders/")
+            st.error("❌ No Work Orders files found in GitHub/workorders/")
             st.stop()
 
         sel = st.sidebar.selectbox("Select File", files, key="wo_select")
         df = pd.read_csv(download_github_workorder_file(sel))
 
     if df is None:
-        st.info("Upload or load a file to continue.")
+        st.info("Upload or load a file to begin.")
         st.stop()
 
     # =================================================
@@ -179,13 +168,9 @@ def run_workorders_dashboard():
     if "Techinician" in df.columns:
         df.rename(columns={"Techinician": "Technician"}, inplace=True)
 
-    # Find date col
+    # Detect a usable timestamp column
     date_candidates = ["Date When", "Current Date", "Work Date", "Completed", "Date"]
-    date_col = None
-    for c in df.columns:
-        if c.strip().lower() in [x.lower() for x in date_candidates]:
-            date_col = c
-            break
+    date_col = next((c for c in df.columns if c.strip().lower() in [x.lower() for x in date_candidates]), None)
 
     if not date_col:
         st.error("❌ No usable timestamp column found.")
@@ -206,90 +191,83 @@ def run_workorders_dashboard():
                                          min_value=min_day, max_value=max_day)
 
     df_f = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
-
     if df_f.empty:
-        st.warning("No Work Orders found.")
+        st.warning("No Work Orders match filters.")
         st.stop()
 
     if "Technician" in df_f.columns:
         all_techs = sorted(df_f["Technician"].dropna().unique())
-        selected = st.multiselect("👨‍🔧 Technician(s)", all_techs, default=all_techs)
-        df_f = df_f[df_f["Technician"].isin(selected)]
+        selected_techs = st.multiselect("👨‍🔧 Technician(s)", all_techs, default=all_techs)
+        df_f = df_f[df_f["Technician"].isin(selected_techs)]
 
     if df_f.empty:
-        st.warning("No Work Orders remain after filters.")
+        st.warning("No Work Orders remain after filtering.")
         st.stop()
 
-    # =================================================
+    # =========================================================
     # TRAVEL TIME (FIRST Enroute → FIRST Arrived)
-    # =================================================
+    # =========================================================
 
     def compute_travel(df):
         out = []
-        grouped = df.sort_values(date_col).groupby(["WO#", "Technician"])
+        g = df.sort_values(date_col).groupby(["WO#", "Technician"])
 
-        for (wo, tech), g in grouped:
-            enroute = g[g["Tech Status"] == "Enroute"][date_col]
-            arrived = g[g["Tech Status"] == "Arrived"][date_col]
+        for (wo, tech), grp in g:
+            enroute = grp[grp["Tech Status"] == "Enroute"][date_col]
+            arrived = grp[grp["Tech Status"] == "Arrived"][date_col]
 
             if len(enroute) > 0 and len(arrived) > 0:
                 start = enroute.min()
                 end = arrived.min()
                 mins = (end - start).total_seconds() / 60
+
                 if mins > 0:
                     out.append({"WO#": wo, "Technician": tech, "Travel_Minutes": mins})
+
         return pd.DataFrame(out)
 
     df_travel = compute_travel(df_f)
 
-    # =================================================
-    # CORRECTED MILEAGE CALCULATION
-    # OPTION A — **FIRST Arrived Distance per WO**
-    # =================================================
+    # =========================================================
+    # CORRECTED MILEAGE — FIRST “Arrived” DISTANCE PER WO
+    # =========================================================
 
     def parse_miles(x):
         if pd.isna(x): return None
-        x = str(x).lower()
+        s = str(x).lower()
         for w in ["miles", "mile", "mi"]:
-            x = x.replace(w, "")
+            s = s.replace(w, "")
         try:
-            return float(x.strip())
+            return float(s.strip())
         except:
             return None
 
     mileage_rows = []
-
     grouped = df_f.groupby(["WO#", "Technician"])
-    for (wo, tech), g in grouped:
-        arrived_rows = g[g["Tech Status"] == "Arrived"]
+
+    for (wo, tech), grp in grouped:
+        arrived_rows = grp[grp["Tech Status"] == "Arrived"]
         if arrived_rows.empty:
             continue
 
-        # First Arrived row
-        first_arrived = arrived_rows.sort_values(date_col).iloc[0]
+        first = arrived_rows.sort_values(date_col).iloc[0]
+        miles_val = parse_miles(first.get("Distance", None))
 
-        miles_val = parse_miles(first_arrived.get("Distance", None))
-
-        if miles_val is not None and miles_val > 0:
+        if miles_val and miles_val > 0:
             mileage_rows.append({"WO#": wo, "Technician": tech, "Miles": miles_val})
 
     df_miles = pd.DataFrame(mileage_rows)
 
-    # Sum mileage per tech
     tech_miles = df_miles.groupby("Technician")["Miles"].sum().reset_index()
-
-    # Count jobs per tech
     tech_jobs = df_f.groupby("Technician")["WO#"].nunique().reset_index(name="Total_Jobs")
 
-    df_jobs_miles = tech_jobs.merge(tech_miles, on="Technician", how="left")
-    df_jobs_miles["Jobs_Per_Mile"] = df_jobs_miles["Total_Jobs"] / df_jobs_miles["Miles"]
-    df_jobs_miles["Miles_Per_Job"] = df_jobs_miles["Miles"] / df_jobs_miles["Total_Jobs"]
+    # Merge
+    df_avg_miles = tech_jobs.merge(tech_miles, on="Technician", how="left")
+    df_avg_miles["Avg_Miles_Per_Job"] = df_avg_miles["Miles"] / df_avg_miles["Total_Jobs"]
 
-    overall_jobs = df_f["WO#"].nunique()
-    overall_miles = df_miles["Miles"].sum()
-
-    overall_jpm = overall_jobs / overall_miles if overall_miles else 0
-    overall_mpj = overall_miles / overall_jobs if overall_jobs else 0
+    total_miles = df_miles["Miles"].sum()
+    total_jobs = df_f["WO#"].nunique()
+    overall_avg_mpj = total_miles / total_jobs if total_jobs > 0 else 0
 
     # =================================================
     # ORIGINAL KPIs
@@ -298,72 +276,56 @@ def run_workorders_dashboard():
     st.markdown("### 📌 Work Orders KPIs")
 
     df_kpi = df_f.dropna(subset=["Duration"])
-    total_jobs = df_kpi["WO#"].nunique()
-    tech_count = df_kpi["Technician"].nunique()
-    avg_jobs = total_jobs / tech_count if tech_count else 0
+    k_total_jobs = df_kpi["WO#"].nunique()
+    k_techs = df_kpi["Technician"].nunique()
+    k_avg_jobs = k_total_jobs / k_techs if k_techs else 0
 
-    k1, k2, k3 = st.columns(3)
-    k1.metric("🔧 Total Jobs", total_jobs)
-    k2.metric("👨‍🔧 Tech Count", tech_count)
-    k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs:.1f}")
-
-    # =================================================
-    # NEW TRAVEL TIME KPIs
-    # =================================================
-
-    if not df_travel.empty:
-        avg_tt = df_travel["Travel_Minutes"].mean()
-        fast = df_travel["Travel_Minutes"].min()
-        slow = df_travel["Travel_Minutes"].max()
-
-        t1, t2, t3 = st.columns(3)
-        t1.metric("⏱ Avg Travel Time", f"{avg_tt:.1f} mins")
-        t2.metric("⚡ Fastest Travel", f"{fast:.1f} mins")
-        t3.metric("🐢 Longest Travel", f"{slow:.1f} mins")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🔧 Total Jobs", k_total_jobs)
+    c2.metric("👨‍🔧 Tech Count", k_techs)
+    c3.metric("📈 Avg Jobs per Tech", f"{k_avg_jobs:.1f}")
 
     # =================================================
-    # NEW JOBS PER MILE KPIs
+    # NEW MILEAGE KPIs
     # =================================================
 
-    j1, j2 = st.columns(2)
-    j1.metric("🚗 Overall Jobs Per Mile", f"{overall_jpm:.3f}")
-    j2.metric("🛣 Miles Per Job (Overall)", f"{overall_mpj:.2f}")
+    m1, m2 = st.columns(2)
+    m1.metric("🛣 Total Miles Traveled", f"{total_miles:.1f}")
+    m2.metric("🚗 Avg Miles per Job (Overall)", f"{overall_avg_mpj:.2f}")
 
     st.markdown("---")
 
     # =================================================
-    # ORIGINAL AVERAGE DURATION CHARTS
+    # ORIGINAL: AVG DURATION BY WORK TYPE
     # =================================================
 
     st.markdown("### 📊 Overall Average Duration by Work Type")
 
     df_avg = df_f.dropna(subset=["Duration"])
     df_avg["Duration_Mins"] = pd.to_numeric(
-        df_avg["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0],
-        errors="coerce"
+        df_avg["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce"
     )
 
     gw = df_avg.groupby(["Work Type", "Technician"])["Duration_Mins"].mean().reset_index()
     w_avg = gw.groupby("Work Type")["Duration_Mins"].mean().reset_index()
 
-    fig = px.bar(
+    fig_dur = px.bar(
         w_avg,
         x="Work Type",
         y="Duration_Mins",
         title="Average Duration by Work Type",
-        template="plotly_dark",
-        color="Duration_Mins"
+        template="plotly_dark"
     )
-    fig.update_traces(marker_color="#8BC53F")
-    st.plotly_chart(fig, use_container_width=True)
+    fig_dur.update_traces(marker_color="#8BC53F")
+    st.plotly_chart(fig_dur, use_container_width=True)
 
     # =================================================
-    # ORIGINAL TECHNICIAN CHARTS
+    # ORIGINAL: TECHNICIAN CHARTS
     # =================================================
 
     st.markdown("### 📊 Work Orders Charts by Technician")
 
-    grouped_charts = (
+    grouped2 = (
         df_avg.groupby(["Technician", "Work Type"])
         .agg(
             Total_Jobs=("WO#", "nunique"),
@@ -372,60 +334,42 @@ def run_workorders_dashboard():
         .reset_index()
     )
 
-    fig1 = px.bar(
-        grouped_charts,
+    fig_jobs = px.bar(
+        grouped2,
         x="Work Type",
         y="Total_Jobs",
         color="Technician",
         title="Jobs by Work Type & Technician",
         template="plotly_dark"
     )
-    st.plotly_chart(fig1, use_container_width=True)
+    st.plotly_chart(fig_jobs, use_container_width=True)
 
-    fig2 = px.bar(
-        grouped_charts,
+    fig_avg_dur = px.bar(
+        grouped2,
         x="Work Type",
         y="Avg_Duration",
         color="Technician",
         title="Avg Duration by Work Type & Technician (mins)",
         template="plotly_dark"
     )
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig_avg_dur, use_container_width=True)
 
     # =================================================
-    # NEW TRAVEL TIME CHART
+    # NEW: AVERAGE MILES PER TECHNICIAN CHART
     # =================================================
 
-    if not df_travel.empty:
-        st.markdown("### 📊 Average Travel Time per Technician")
+    st.markdown("### 📊 Average Miles Traveled per Technician")
 
-        tt = df_travel.groupby("Technician")["Travel_Minutes"].mean().reset_index()
-
-        fig_tt = px.bar(
-            tt,
-            x="Technician",
-            y="Travel_Minutes",
-            title="Avg Travel Time per Technician",
-            template="plotly_dark",
-            color="Travel_Minutes"
-        )
-        st.plotly_chart(fig_tt, use_container_width=True)
-
-    # =================================================
-    # NEW JOBS PER MILE CHART
-    # =================================================
-
-    st.markdown("### 📊 Jobs Per Mile by Technician")
-
-    fig_jpm = px.bar(
-        df_jobs_miles,
+    fig_miles = px.bar(
+        df_avg_miles,
         x="Technician",
-        y="Jobs_Per_Mile",
-        title="Jobs Per Mile per Technician",
+        y="Avg_Miles_Per_Job",
+        title="Average Miles per Job (Miles Traveled per Technician)",
         template="plotly_dark",
-        color="Jobs_Per_Mile"
+        labels={"Avg_Miles_Per_Job": "Avg Miles per Job"},
+        color="Avg_Miles_Per_Job"
     )
-    st.plotly_chart(fig_jpm, use_container_width=True)
+    st.plotly_chart(fig_miles, use_container_width=True)
 
     st.markdown("---")
 
@@ -452,7 +396,6 @@ def run_workorders_dashboard():
                 f.write(b)
 
             upload_workorders_file_to_github(fn, b)
-
             df_rework = pd.read_csv(local_r, header=None)
 
     else:
@@ -539,6 +482,6 @@ def run_workorders_dashboard():
             st.error(f"❌ Error parsing rework file: {e}")
 
 
-# RUN APP
+# RUN
 if __name__ == "__main__":
     run_workorders_dashboard()
