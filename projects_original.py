@@ -1,203 +1,206 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from datetime import datetime
 
-# --- Page Configuration ---
-# Set the page title and a descriptive icon for the browser tab.
-st.set_page_config(
-    page_title="Project Dashboard",
-    page_icon="🚀",
-    layout="wide" # Use the full page width for a better view of the data.
+# -----------------------------------------
+# PAGE CONFIGURATION
+# -----------------------------------------
+st.set_page_config(page_title="Project Dashboard", page_icon="🚀", layout="wide")
+
+# -----------------------------------------
+# STYLE FIXES (SMOOTH + NO FLICKER)
+# -----------------------------------------
+st.markdown(
+    """
+    <style>
+    .stApp {
+        transition: none !important;
+        scroll-behavior: smooth !important;
+    }
+    div[data-testid="stAppViewContainer"] {
+        overflow: hidden !important;
+    }
+    div[data-testid="stSidebar"] {
+        transition: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-# --- Logo and App Title ---
-# Replace the URL below with the actual URL of your PBB logo
-logo_url_main = "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w" 
-st.image(logo_url_main)
+# -----------------------------------------
+# ONE-TIME HEADER
+# -----------------------------------------
+if "header_loaded" not in st.session_state or st.session_state.get("rerun_triggered", False):
+    st.image(
+        "https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/"
+        "369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w",
+        use_container_width=True,
+    )
+    st.title("🚀 Project Performance Dashboard")
+    st.session_state["header_loaded"] = True
+    st.session_state["rerun_triggered"] = False
 
-st.title("🚀 Project Performance Dashboard")
-
-# --- Data Loading Function ---
-@st.cache_data(ttl=300) # The ttl argument tells Streamlit to expire the cache after 300 seconds (5 minutes)
+# -----------------------------------------
+# DATA FUNCTIONS
+# -----------------------------------------
+@st.cache_data(ttl=300)
 def load_data(sheet_url):
-    """
-    Takes a Google Sheet URL, converts it to a CSV export URL,
-    and returns the data as a raw Pandas DataFrame without headers.
-    """
+    """Load Google Sheet CSV data."""
+    csv_url = sheet_url.replace("/edit?usp=sharing", "/export?format=csv")
     try:
-        csv_url = sheet_url.replace("/edit?usp=sharing", "/export?format=csv")
-        # Load the data without assuming a header row to find metadata
-        df = pd.read_csv(csv_url, header=None)
-        return df
+        return pd.read_csv(csv_url, header=None)
     except Exception as e:
-        st.error(f"Failed to load data. Please ensure the Google Sheet is public. Error: {e}")
+        st.error(f"Failed to load data: {e}")
         return None
 
-# The public URL of your Google Sheet.
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/109p39EGYEikgbZT4kSW71_sXJNMM-4Tjjd5q-l9Tx_0/edit?usp=sharing"
-
-# --- Data Processing Function ---
 def process_data(df):
-    """Cleans and processes the dataframe for KPI calculations."""
-    df_processed = df.copy()
-    # Clean column names
-    df_processed.columns = df_processed.columns.str.strip()
-    required_cols = ['Type', 'Design', 'As Built']
-    if not all(col in df_processed.columns for col in required_cols):
-        missing = [col for col in required_cols if col not in df_processed.columns]
-        st.warning(f"Missing required columns for KPI calculation: {', '.join(missing)}")
+    df = df.copy()
+    df.columns = df.columns.str.strip()
+    req = ["Type", "Design", "As Built"]
+    if not all(c in df.columns for c in req):
         return None
 
-    df_processed.dropna(subset=['Type'], inplace=True)
-    df_processed['Type'] = df_processed['Type'].astype(str).str.replace(':', '', regex=False).str.strip().str.title()
-    
-    # FIX: Filter out any rows that are likely metadata, like "Last Edited"
-    df_processed = df_processed[~df_processed['Type'].str.contains("Last Edited", case=False, na=False)]
+    df = df.dropna(subset=["Type"])
+    df["Type"] = (
+        df["Type"].astype(str).str.replace(":", "", regex=False).str.strip().str.title()
+    )
+    df = df[~df["Type"].str.contains("Last Edited", case=False, na=False)]
 
-    for col in ['Design', 'As Built']:
-        df_processed[col] = df_processed[col].astype(str).str.replace(',', '', regex=False)
-        df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce').fillna(0)
-    
-    kpi_summary = df_processed.groupby('Type').agg({
-        'Design': 'sum',
-        'As Built': 'sum'
-    }).reset_index()
+    for c in ["Design", "As Built"]:
+        df[c] = pd.to_numeric(df[c].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
 
-    kpi_summary['Completion %'] = 0
-    mask = kpi_summary['Design'] > 0
-    kpi_summary.loc[mask, 'Completion %'] = (kpi_summary.loc[mask, 'As Built'] / kpi_summary.loc[mask, 'Design']) * 100
-    kpi_summary['Completion %'] = kpi_summary['Completion %'].clip(0, 100)
-    kpi_summary['Left to be Built'] = kpi_summary['Design'] - kpi_summary['As Built']
-    
-    return kpi_summary
+    out = df.groupby("Type").agg({"Design": "sum", "As Built": "sum"}).reset_index()
+    out["Completion %"] = (out["As Built"] / out["Design"].replace(0, pd.NA)) * 100
+    out["Completion %"] = out["Completion %"].clip(0, 100).fillna(0)
+    out["Left to be Built"] = out["Design"] - out["As Built"]
+    return out
 
-# --- Main App Logic ---
-raw_dataframe = load_data(GOOGLE_SHEET_URL)
+# -----------------------------------------
+# MAIN DASHBOARD
+# -----------------------------------------
+def show_dashboard():
+    GOOGLE_SHEET_URL = (
+        "https://docs.google.com/spreadsheets/d/109p39EGYEikgbZT4kSW71_sXJNMM-4Tjjd5q-l9Tx_0/edit?usp=sharing"
+    )
 
-if raw_dataframe is not None:
-    # --- Extract metadata and prepare the main dataframe ---
+    raw = load_data(GOOGLE_SHEET_URL)
+    if raw is None:
+        st.warning("Could not load data.")
+        return
+
+    # Timestamp display
     try:
-        # Get the "last updated" time from cell A7 (index 6, 0)
-        last_updated_string = raw_dataframe.iloc[6, 0]
-        st.markdown(f"**Sheet Last Updated:** {last_updated_string}")
-    except (IndexError, KeyError):
-        st.warning("Could not find the 'Last Updated' time in cell A7.")
-        # Fallback text if cell A7 is not found
-        st.markdown("An interactive dashboard to monitor project progress from a live Google Sheet.")
-        
+        st.caption(f"Last Updated: {raw.iloc[6,0]}")
+    except Exception:
+        st.caption("No update timestamp found.")
+
+    # Header extraction
     try:
-        # Find the header row by looking for the 'Type' column header in the first column
-        header_row_index = raw_dataframe[raw_dataframe[0] == 'Type'].index[0]
-        
-        # Create a new dataframe for the main data using the found header row
-        dataframe = raw_dataframe.copy()
-        
-        header_series = dataframe.iloc[header_row_index].fillna('Unnamed Column')
-        dataframe.columns = header_series
-        
-        dataframe = dataframe.iloc[header_row_index + 1:].reset_index(drop=True)
-        
-        dataframe = dataframe.loc[:, ~dataframe.columns.duplicated()]
-        
-    except (IndexError, KeyError):
-        st.error("Could not find the header row in the Google Sheet. Please ensure a column is named 'Type'.")
-        dataframe = None # Set dataframe to None so the rest of the app doesn't run
-        
-    if dataframe is not None:
-        kpi_data = process_data(dataframe)
-        
-        if kpi_data is not None:
-            # --- Sidebar ---
-            st.sidebar.header("Controls & Filters")
-            
-            if st.sidebar.button("🔄 Refresh Data"):
-                load_data.clear()
-                st.rerun()
-                
-            st.sidebar.header("Filter Options")
-            all_types = sorted(kpi_data['Type'].unique())
-            selected_types = st.sidebar.multiselect(
-                "Select Project Type(s):",
-                options=all_types,
-                default=all_types
+        header_idx = raw[raw[0] == "Type"].index[0]
+        header = raw.iloc[header_idx].fillna("Unnamed")
+        df = raw.copy()
+        df.columns = header
+        df = df.iloc[header_idx + 1:].reset_index(drop=True)
+        df = df.loc[:, ~df.columns.duplicated()]
+    except Exception:
+        st.error("Header row not found.")
+        return
+
+    kpi = process_data(df)
+    if kpi is None or kpi.empty:
+        st.warning("No valid data found.")
+        return
+
+    # --- Sidebar Filters ---
+    st.sidebar.header("Controls")
+    if st.sidebar.button("🔄 Refresh Data"):
+        load_data.clear()
+        st.session_state["rerun_triggered"] = True
+        st.experimental_rerun()
+
+    all_types = sorted(kpi["Type"].unique())
+    selected = st.sidebar.multiselect(
+        "Filter Project Type", options=all_types, default=all_types
+    )
+    kpi = kpi[kpi["Type"].isin(selected)]
+
+    # --- Overall KPIs ---
+    st.header("📊 Overall Project Health")
+    total_d, total_b = kpi["Design"].sum(), kpi["As Built"].sum()
+    total_l = kpi["Left to be Built"].sum()
+    overall = (total_b / total_d * 100) if total_d else 0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Design", f"{total_d:,.0f}")
+    c2.metric("Total As Built", f"{total_b:,.0f}")
+    c3.metric("Left to be Built", f"{total_l:,.0f}")
+    c4.metric("Overall Completion", f"{overall:.2f}%")
+    st.divider()
+
+    # --- Tabs ---
+    tab1, tab2, tab3 = st.tabs(
+        ["📊 KPI Overview", "📄 Detailed Breakdown", "🔍 Raw Data Table"]
+    )
+
+    # --- KPI Overview ---
+    with tab1:
+        st.subheader("Completion Percentage by Type")
+        if not kpi.empty:
+            chart = (
+                alt.Chart(kpi)
+                .mark_bar(color="#4A90E2")
+                .encode(
+                    x=alt.X("Completion %:Q", scale=alt.Scale(domain=[0, 100])),
+                    y=alt.Y("Type:N", sort="-x"),
+                    tooltip=["Type", "Completion %", "As Built", "Design"],
+                )
             )
-            
-            filtered_kpi_data = kpi_data[kpi_data['Type'].isin(selected_types)]
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.info("No data to display.")
 
-            # --- High-Level KPIs ---
-            st.header("📊 Overall Project Health")
-            total_design = filtered_kpi_data['Design'].sum()
-            total_as_built = filtered_kpi_data['As Built'].sum()
-            total_left = filtered_kpi_data['Left to be Built'].sum()
-            overall_completion = (total_as_built / total_design * 100) if total_design > 0 else 0
-            
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Design", f"{total_design:,.0f}")
-            col2.metric("Total As Built", f"{total_as_built:,.0f}")
-            col3.metric("Left to be Built", f"{total_left:,.0f}")
-            col4.metric("Overall Completion", f"{overall_completion:.2f}%")
-            
-            st.divider()
+    # --- Detailed Breakdown ---
+    with tab2:
+        st.subheader("Detailed Breakdown by Project Type")
+        if not kpi.empty:
+            kpi = kpi.sort_values(by="Completion %", ascending=False)
+            top = kpi.iloc[0]["Type"]
+            for _, r in kpi.iterrows():
+                st.markdown("---")
+                st.markdown(
+                    f"🏆 **{r['Type']}** (Top Performer)"
+                    if r["Type"] == top
+                    else f"**{r['Type']}**"
+                )
+                st.progress(int(r["Completion %"]), text=f"{r['Completion %']:.2f}%")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Completion %", f"{r['Completion %']:.2f}%")
+                c2.metric("As Built", f"{r['As Built']:,.2f}")
+                c3.metric("Design Target", f"{r['Design']:,.2f}")
+        else:
+            st.info("No data available.")
 
-            # --- Tabbed Navigation for Detailed Views ---
-            tab1, tab2 = st.tabs(["📊 KPI Overview", "📄 Detailed Breakdown"])
+    # --- Async Raw Data Viewer ---
+    with tab3:
+        st.subheader("Raw Data Table (Loaded on Demand)")
+        if "show_raw" not in st.session_state:
+            st.session_state["show_raw"] = False
 
-            with tab1:
-                st.header("Completion Percentage by Type")
-                if not filtered_kpi_data.empty:
-                    # --- Completion Percentage Bar Chart ---
-                    chart = alt.Chart(filtered_kpi_data).mark_bar(color='#4A90E2').encode(
-                        x=alt.X('Completion %:Q', title='Completion Percentage', scale=alt.Scale(domain=[0, 100])),
-                        y=alt.Y('Type:N', sort='-x', title='Project Type'),
-                        tooltip=['Type', 'Completion %', 'As Built', 'Design']
-                    ).properties(
-                        title='Completion Percentage by Type'
-                    )
-                    
-                    text = chart.mark_text(
-                        align='left',
-                        baseline='middle',
-                        dx=3  # Nudges text to right so it doesn't overlap bar
-                    ).encode(
-                        text=alt.Text('Completion %:Q', format='.2f')
-                    )
+        if not st.session_state["show_raw"]:
+            if st.button("📂 Load Raw Data"):
+                st.session_state["show_raw"] = True
+                st.session_state["rerun_triggered"] = True
+                st.experimental_rerun()
+        else:
+            cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
+            st.dataframe(df[cols].fillna(""), use_container_width=True)
+            if st.button("❌ Hide Table"):
+                st.session_state["show_raw"] = False
+                st.session_state["rerun_triggered"] = True
+                st.experimental_rerun()
 
-                    st.altair_chart(chart + text, use_container_width=True)
-                else:
-                    st.info("No data to display for the selected project types.")
-
-            with tab2:
-                st.header("Detailed Breakdown by Project Type")
-                if not filtered_kpi_data.empty:
-                    # Sort the data to match the chart order before displaying the cards
-                    sorted_kpi_data = filtered_kpi_data.sort_values(by='Completion %', ascending=False)
-                    
-                    # Identify the top performer
-                    top_performer_type = sorted_kpi_data.iloc[0]['Type']
-
-                    for index, row in sorted_kpi_data.iterrows():
-                        with st.container(border=True):
-                            # Add a badge for the top performer
-                            if row['Type'] == top_performer_type:
-                                st.subheader(f'🏆 Top Performer: {row["Type"]}')
-                            else:
-                                st.subheader(f'{row["Type"]}')
-
-                            st.progress(int(row['Completion %']))
-                            
-                            kpi_c1, kpi_c2, kpi_c3 = st.columns(3)
-                            kpi_c1.metric("Completion %", f"{row['Completion %']:.2f}%")
-                            kpi_c2.metric("As Built", f"{row['As Built']:,.2f}")
-                            kpi_c3.metric("Design Target", f"{row['Design']:,.2f}")
-                else:
-                    st.info("No data to display for the selected project types.")
-
-        # --- Raw Data Table ---
-        with st.expander("🔍 View Raw Data Table"):
-            if dataframe is not None:
-                columns_to_show = [col for col in dataframe.columns if col is not None and not str(col).startswith('Unnamed')]
-                display_df = dataframe[columns_to_show]
-                st.dataframe(display_df.fillna(''))
-else:
-    st.warning("Could not display data. Please check the sheet's sharing settings and the URL.")
+# -----------------------------------------
+# RUN APP
+# -----------------------------------------
+show_dashboard()
