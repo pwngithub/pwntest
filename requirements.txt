@@ -11,6 +11,8 @@ matplotlib>=3.8.0
 pydrive2
 numpy>=1.26.4
 openpyxl
+pdfplumber==0.11.0
+reportlab>=3.6
 #plotly.express
 #os
 #sqlite3
