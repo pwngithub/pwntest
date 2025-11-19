@@ -8,22 +8,26 @@ from io import BytesIO
 
 st.set_page_config(page_title="Talley Customer Dashboard", layout="wide")
 
-# ——————————————— STYLING ———————————————
+# ——————————————— PROFESSIONAL DARK THEME ———————————————
 st.markdown("""
 <style>
-    .big-title {font-size: 42px !important; font-weight: bold; color: #1E3A8A; text-align: center;}
-    .net-mrr {font-size: 64px !important; font-weight: bold; text-align: center; margin: 30px 0;}
+    .big-title {font-size: 44px !important; font-weight: bold; color: #1E3A8A; text-align: center;}
+    .net-mrr {font-size: 68px !important; font-weight: bold; text-align: center; margin: 30px 0;}
     .positive {color: #16A34A !important;}
     .negative {color: #DC2626 !important;}
-    .card {padding: 20px; border-radius: 12px; background: #1E293B; color: white; border-left: 6px solid; height: 170px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);}
+    .card {
+        padding: 20px; border-radius: 12px; background: #1E293B; color: white;
+        border-left: 6px solid; height: 170px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
     .win {border-left-color: #16A34A;}
     .flag {border-left-color: #DC2626;}
     h4 {margin: 0 0 10px 0; color: #CBD5E1;}
-    small {color: #94A3B8;}
+    small {color: #94A3B8; font-size: 0.9em;}
+    .stApp {background-color: #0F172A;}
 </style>
 """, unsafe_allow_html=True)
 
-# [DATA LOADER — unchanged, same as before]
+# ——————————————— DATA LOADER ———————————————
 def load_from_jotform():
     api_key = "22179825a79dba61013e4fc3b9d30fa4"
     form_id = "240073839937062"
@@ -62,10 +66,12 @@ def load_from_jotform():
 def get_data():
     df = load_from_jotform()
     if df.empty: return df
-    rename_map = {"customerName": "Customer Name", "date": "Date", "employee": "Employee",
-                  "location": "Location", "status": "Status", "category": "Category",
-                  "reason": "Reason", "mrc": "MRC", "reasonOther": "Reason Other",
-                  "disconnectReason": "Disconnect Reason Detail"}
+    rename_map = {
+        "customerName": "Customer Name", "date": "Date", "employee": "Employee",
+        "location": "Location", "status": "Status", "category": "Category",
+        "reason": "Reason", "mrc": "MRC", "reasonOther": "Reason Other",
+        "disconnectReason": "Disconnect Reason Detail"
+    }
     df.rename(columns=rename_map, inplace=True)
     df["Submission Date"] = pd.to_datetime(df["Submission Date"], errors="coerce")
     df = df.dropna(subset=["Submission Date"]).copy()
@@ -75,9 +81,10 @@ def get_data():
     return df
 
 def run_dashboard():
+    # Header
     col_logo, col_title = st.columns([1, 8])
     with col_logo:
-        st.image("https://via.placeholder.com/140x90/1E3A8A/FFFFFF?text=TALLEY", width=140)
+        st.image("https://via.placeholder.com/140x90/1E3A8A/FFFFFF?text=TALLEY", width=140)  # ← Replace with real logo
     with col_title:
         st.markdown('<p class="big-title">Customer Dashboard</p>', unsafe_allow_html=True)
         st.markdown("<p style='text-align:center; color:#94A3B8; margin-top:-15px;'>True Churn • Growth • Real-time Insights</p>", unsafe_allow_html=True)
@@ -94,11 +101,13 @@ def run_dashboard():
     with col1:
         start_date, end_date = st.date_input("Analysis Period", value=(default_start, max_date), min_value=min_date, max_value=max_date)
     with col2:
-        if st.button("Refresh Now"): st.cache_data.clear(); st.rerun()
+        if st.button("Refresh Now"):
+            st.cache_data.clear(); st.rerun()
 
     period_start = pd.Timestamp(start_date)
     period_df = df[(df["Submission Date"].dt.date >= start_date) & (df["Submission Date"].dt.date <= end_date)].copy()
 
+    # Core Calculations
     new_before = df[(df["Status"] == "NEW") & (df["Submission Date"] <= period_start)]
     disc_before = df[(df["Status"] == "DISCONNECT") & (df["Submission Date"] <= period_start)]
     active_start = set(new_before["Customer Name"]) - set(disc_before["Customer Name"])
@@ -114,7 +123,7 @@ def run_dashboard():
     churn_mrc = churn_in["MRC"].sum()
     net_mrr_movement = new_mrc - churn_mrc
 
-    # Big Net MRR at top
+    # Big Net MRR at Top
     st.markdown(f"""
     <div class="net-mrr {'positive' if net_mrr_movement >= 0 else 'negative'}">
         {'+$' if net_mrr_movement >= 0 else '-$'}{abs(net_mrr_movement):,.0f}
@@ -124,8 +133,7 @@ def run_dashboard():
 
     st.divider()
 
-    # [Quick Insights — same dynamic version as before]
-
+    # ——————————————— DYNAMIC QUICK INSIGHTS (NO WHITE BOXES) ———————————————
     st.markdown("### Quick Insights This Period")
     cards = []
 
@@ -162,28 +170,45 @@ def run_dashboard():
 
     st.divider()
 
-    # ——————————— TRUE CHURN & TRUE GROWTH WITH NET MRC ———————————
+    # ——————————————— TRUE CHURN & GROWTH — 100% CORRECT COLORS ———————————————
     col_left, col_right = st.columns(2)
 
     with col_left:
         st.markdown("### True Churn Metrics")
-        st.caption("Losses from existing base")
+        st.caption("Loss from existing base only")
+
         ch1, ch2 = st.columns(2)
+
         ch1.metric("Churned Customers", f"{churn_count:,}", delta=f"-{churn_count}")
-        ch2.metric("Lost MRC", f"${churn_mrc:,.0f}", delta_color="inverse")
-        ch1.metric("Customer Churn Rate", f"{(churn_count/beginning_customers*100):.2f}%" if beginning_customers else "0%", delta_color="inverse")
-        ch2.metric("Revenue Churn Rate", f"{(churn_mrc/beginning_mrc*100):.2f}%" if beginning_mrc > 0 else "0%", delta_color="inverse")
+
+        cust_churn_rate = (churn_count / beginning_customers * 100) if beginning_customers > 0 else 0
+        ch1.metric(
+            "Customer Churn Rate",
+            f"{cust_churn_rate:+.2f}%",
+            delta=f"{cust_churn_rate:+.2f}%",
+            delta_color="inverse" if cust_churn_rate > 0 else "normal"   # RED if loss, GREEN if gain
+        )
+
+        ch2.metric("Lost MRC", f"${churn_mrc:,.0f}", delta=f"-${churn_mrc:,.0f}", delta_color="inverse")
+
+        rev_churn_rate = (churn_mrc / beginning_mrc * 100) if beginning_mrc > 0 else 0
+        ch2.metric(
+            "Revenue Churn Rate",
+            f"{rev_churn_rate:+.2f}%",
+            delta=f"{rev_churn_rate:+.2f}%",
+            delta_color="inverse" if rev_churn_rate > 0 else "normal"   # RED if loss, GREEN if expansion
+        )
 
     with col_right:
         st.markdown("### True Growth Metrics")
-        st.caption("New customers & net recurring revenue impact")
+        st.caption("New wins + net recurring revenue impact")
 
         g1, g2, g3 = st.columns(3)
 
         g1.metric("New Customers", f"{new_count:,}", delta=f"+{new_count}")
-        g2.metric("New MRC Added", f"${new_mrc:,.0f}")
+        g2.metric("New MRC Added", f"${new_mrc:,.0f}", delta=f"+${new_mrc:,.0f}")
 
-        # NET MRC — THE MONEY THAT MATTERS
+        # NET MRC — RED when negative, GREEN when positive
         g3.metric(
             "Net MRC",
             f"{'+' if net_mrr_movement >= 0 else '-'}${abs(net_mrr_movement):,.0f}",
@@ -191,18 +216,17 @@ def run_dashboard():
             delta_color="normal" if net_mrr_movement >= 0 else "inverse"
         )
 
-        # Net Growth Rate
+        net_cust_growth = ((new_count - churn_count) / beginning_customers * 100) if beginning_customers > 0 else 0
         st.markdown("<br>", unsafe_allow_html=True)
         rate_col = st.columns(3)[1]
         with rate_col:
-            growth_rate = ((new_count - churn_count) / beginning_customers * 100) if beginning_customers else 0
-            st.metric("Net Customer Growth Rate", f"{growth_rate:+.2f}%")
+            st.metric("Net Customer Growth Rate", f"{net_cust_growth:+.2f}%")
 
     st.divider()
 
-    # [Rest of dashboard — Churn by Reason, New Customers, Export — unchanged]
-
+    # ——————————————— CHURN BY REASON + NEW CUSTOMERS ———————————————
     col_a, col_b = st.columns(2)
+
     with col_a:
         if not churn_in.empty:
             st.subheader("Churn by Reason")
@@ -216,16 +240,30 @@ def run_dashboard():
             st.subheader("New Customer Acquisition")
             pie = px.pie(new_in["Category"].value_counts().reset_index(), names="Category", values="count", title="By Category")
             st.plotly_chart(pie, use_container_width=True)
-            bar = px.bar(new_in["Location"].value_counts().head(10).reset_index(), x="Location", y="count", title="Top Locations")
+            bar = px.bar(new_in["Location"].value_counts().head(10).reset_index(), x="Location", y="count", title="Top 10 Locations")
             st.plotly_chart(bar, use_container_width=True)
             st.success(f"Added {new_count:,} new customers — +${new_mrc:,.0f} MRC")
 
+    # ——————————————— EXPORT ———————————————
     st.divider()
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        pd.DataFrame([{"Period": f"{start_date} to {end_date}", "Net MRC": net_mrr_movement, "New MRC": new_mrc, "Lost MRC": churn_mrc}]).to_excel(writer, sheet_name="Summary", index=False)
-        if not churn_in.empty: reason_df.to_excel(writer, sheet_name="Churn_by_Reason", index=False)
-    st.download_button("Download Full Report (Excel)", data=buffer.getvalue(), file_name=f"Talley_Report_{start_date}_to_{end_date}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        pd.DataFrame([{
+            "Period": f"{start_date} to {end_date}",
+            "Net MRC": net_mrr_movement,
+            "New MRC": new_mrc,
+            "Lost MRC": churn_mrc,
+            "New Customers": new_count,
+            "Churned Customers": churn_count
+        }]).to_excel(writer, sheet_name="Summary", index=False)
+        if not churn_in.empty:
+            reason_df.to_excel(writer, sheet_name="Churn_by_Reason", index=False)
+    st.download_button(
+        "Download Full Report (Excel)",
+        data=buffer.getvalue(),
+        file_name=f"Talley_Report_{start_date}_to_{end_date}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
     st.caption("Auto-refreshes every 5 minutes • Real-time from JotForm")
 
