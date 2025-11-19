@@ -2,6 +2,7 @@ import streamlit as st
 import branding
 from prep import run_preps_dashboard
 from utils import fetch_jotform_data
+import sys  # <-- NEW: used for conditional reloads
 
 # -------------------------------
 # Sidebar: Report Selector
@@ -19,7 +20,7 @@ report = st.sidebar.selectbox(
         "Accounting",
         "Projects",
         "Network",
-        "Fiber",          # <-- NEW FTTH / fiber report
+        "Fiber",          # FTTH / fiber report
         "Preps"           # Added back
     ],
     index=0
@@ -67,10 +68,12 @@ try:
         importlib.reload(network_module)
 
     elif report == "Fiber":
-        # FTTH / fiber PDF dashboard (fiber.py)
+        # Avoid double-running fiber.py in a single pass
         import importlib
-        import fiber as fiber_module
-        importlib.reload(fiber_module)
+        if "fiber" in sys.modules:
+            importlib.reload(sys.modules["fiber"])
+        else:
+            import fiber  # first time import executes fiber.py once
 
     elif report == "Preps":
         try:
