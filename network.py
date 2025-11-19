@@ -13,7 +13,6 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-# Force a permanent, stable key for the entire lifetime of the session
 if "period_key" not in st.session_state:
     st.session_state.period_key = f"period_{uuid.uuid4()}"
 
@@ -57,7 +56,7 @@ def get_real_peaks(sensor_id):
             raw = ch.get("maximum_raw", "0")
             if not raw or float(raw) == 0:
                 continue
-            mbps = float(raw) / 1e7
+            mbps = float(raw) / 10_000_000
             if "Traffic In" in name or "Down" in name:
                 in_peak = max(in_peak, round(mbps, 2))
             elif "Traffic Out" in name or "Up" in name:
@@ -98,32 +97,63 @@ for i in range(0, len(SENSORS), 2):
             in_peak, out_peak = get_real_peaks(sid)
             total_in  += in_peak
             total_out += out_peak
-
             st.subheader(name)
             st.metric("Peak In",  f"{in_peak:,.2f} Mbps")
             st.metric("Peak Out", f"{out_peak:,.2f} Mbps")
-
             img = get_graph_image(sid, graphid)
             if img:
                 st.image(img, use_container_width=True)
             else:
                 st.caption("Graph unavailable")
 
-st.markdown("## Combined Peak Across All Circuits")
-c1, c2 = st.columns(2)
-c1.metric("Total Peak In",  f"{total_in:,.2f} Mbps")
-c2.metric("Total Peak Out", f"{total_out:,.2f} Mbps")
+# ====================== BEAUTIFUL COMBINED CHART ======================
+st.markdown("## Combined Peak Bandwidth Across All Circuits")
 
-fig, ax = plt.subplots(figsize=(10, 6))
-ax.bar(["Total Peak In", "Total Peak Out"], [total_in, total_out],
-       color=["#00ff88", "#ff3366"], width=0.6, edgecolor="white", linewidth=2)
-ax.set_ylabel("Mbps", color="white", fontsize=14)
-ax.set_title(f"Combined Peak Bandwidth – {period}", color="white", fontsize=20, fontweight="bold")
-ax.set_facecolor("#1e1e1e")
-fig.patch.set_facecolor("#0e1117")
-ax.tick_params(colors="white")
-for bar in ax.patches:
-    ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + max(total_in, total_out)*0.01,
-            f"{bar.get_height():,.2f}", ha="center", va="bottom",
-            color="white", fontsize=18, fontweight="bold")
-st.pyplot(fig)
+col1, col2 = st.columns([3, 1])
+with col1:
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    bars = ax.bar(
+        ["Peak In", "Peak Out"],
+        [total_in, total_out],
+        color=["#00ff9d", "#ff3366"],
+        width=0.5,
+        edgecolor="white",
+        linewidth=2.5,
+        capstyle="round"
+    )
+
+    ax.set_ylim(0, max(total_in, total_out) * 1.15)
+    ax.set_ylabel("Mbps", fontsize=16, fontweight="bold", color="white")
+    ax.set_title(f"Total Combined Peak – {period}", fontsize=24, fontweight="bold", color="white", pad=30)
+
+    ax.set_facecolor("#0e1117")
+    fig.patch.set_facecolor("#0e1117")
+    ax.spines[["top", "right", "left"]].set_visible(False)
+    ax.tick_params(colors="white", labelsize=14, length=0)
+    ax.grid(axis="y", alpha=0.2, color="white", linestyle="--")
+
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            height + max(total_in, total_out) * 0.02,
+            f"{height:,.0f}",
+            ha="center",
+            va="bottom",
+            fontsize=28,
+            fontweight="bold",
+            color="white"
+        )
+
+    st.pyplot(fig, use_container_width=True)
+
+with col2:
+    st.metric("**Total In**",  f"{total_in:,.0f} Mbps", delta=None)
+    st.metric("**Total Out**", f"{total_out:,.0f} Mbps", delta=None)
+    st.caption(f"Updated: {st.session_state.get('last_update', 'Now')}")
+
+# Optional: update timestamp
+if "last_update" not in st.session_state:
+    from datetime import datetime
+    st.session_state.last_update = datetime.now().strftime("%H:%M:%S")
