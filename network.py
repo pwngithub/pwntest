@@ -10,11 +10,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 st.set_page_config(page_title="PRTG Bandwidth", layout="wide", page_icon="Signal")
 
 USER = st.secrets["prtg_username"]
-PH = st.secrets["prtg_passhash"]
+PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-if 'period_key' not in st.session_state:
-    st.session_state.period_key = str(uuid.uuid4())
+# Force a permanent, stable key for the entire lifetime of the session
+if "period_key" not in st.session_state:
+    st.session_state.period_key = f"period_{uuid.uuid4()}"
 
 period = st.selectbox(
     "Time Period",
@@ -32,10 +33,10 @@ graphid = {
 }[period]
 
 SENSORS = {
-    "Firstlight": "12435",
-    "NNINIX": "12506",
+    "Firstlight":          "12435",
+    "NNINIX":              "12506",
     "Hurricane Electric": "12363",
-    "Cogent": "12340",
+    "Cogent":              "12340",
 }
 
 @st.cache_data(ttl=300)
@@ -56,7 +57,7 @@ def get_real_peaks(sensor_id):
             raw = ch.get("maximum_raw", "0")
             if not raw or float(raw) == 0:
                 continue
-            mbps = float(raw) / 10_000_000
+            mbps = float(raw) / 1e7
             if "Traffic In" in name or "Down" in name:
                 in_peak = max(in_peak, round(mbps, 2))
             elif "Traffic Out" in name or "Up" in name:
@@ -79,8 +80,8 @@ def get_graph_image(sensor_id, graphid):
         "passhash": PH
     }
     try:
-        response = requests.get(url, params=params, verify=False, timeout=15)
-        return Image.open(BytesIO(response.content))
+        resp = requests.get(url, params=params, verify=False, timeout=15)
+        return Image.open(BytesIO(resp.content))
     except:
         return None
 
@@ -95,11 +96,13 @@ for i in range(0, len(SENSORS), 2):
     for col, (name, sid) in zip(cols, pair):
         with col:
             in_peak, out_peak = get_real_peaks(sid)
-            total_in += in_peak
+            total_in  += in_peak
             total_out += out_peak
+
             st.subheader(name)
-            st.metric("Peak In", f"{in_peak:,.2f} Mbps")
+            st.metric("Peak In",  f"{in_peak:,.2f} Mbps")
             st.metric("Peak Out", f"{out_peak:,.2f} Mbps")
+
             img = get_graph_image(sid, graphid)
             if img:
                 st.image(img, use_container_width=True)
@@ -108,7 +111,7 @@ for i in range(0, len(SENSORS), 2):
 
 st.markdown("## Combined Peak Across All Circuits")
 c1, c2 = st.columns(2)
-c1.metric("Total Peak In", f"{total_in:,.2f} Mbps")
+c1.metric("Total Peak In",  f"{total_in:,.2f} Mbps")
 c2.metric("Total Peak Out", f"{total_out:,.2f} Mbps")
 
 fig, ax = plt.subplots(figsize=(10, 6))
@@ -121,5 +124,6 @@ fig.patch.set_facecolor("#0e1117")
 ax.tick_params(colors="white")
 for bar in ax.patches:
     ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + max(total_in, total_out)*0.01,
-            f"{bar.get_height():,.2f}", ha="center", color="white", fontsize=18, fontweight="bold")
+            f"{bar.get_height():,.2f}", ha="center", va="bottom",
+            color="white", fontsize=18, fontweight="bold")
 st.pyplot(fig)
