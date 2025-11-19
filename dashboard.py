@@ -14,6 +14,7 @@ def load_from_jotform():
     api_key = "22179825a79dba61013e4fc3b9d30fa4"
     form_id = "240073839937062"
     url = f"https://api.jotform.com/form/{form_id}/submissions"
+
     submissions = []
     offset = 0
     limit = 1000
@@ -29,6 +30,7 @@ def load_from_jotform():
             r = requests.get(url, params=params, timeout=30)
             r.raise_for_status()
             data = r.json()
+
             if not data.get("content"):
                 break
 
@@ -37,11 +39,13 @@ def load_from_jotform():
                     "Submission Date": item["created_at"],
                     "Submission ID": item["id"]
                 }
+
                 answers = item.get("answers", {})
                 for ans in answers.values():
                     name = ans.get("name") or ans.get("text") or "unknown"
                     answer = ans.get("answer")
 
+                    # Handle checkboxes, multi-select, etc. safely
                     if isinstance(answer, dict):
                         parts = []
                         for v in answer.values():
@@ -73,12 +77,13 @@ def load_from_jotform():
 # ===============================================
 # CACHED & CLEANED DATA
 # ===============================================
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300)  # 5-minute cache
 def get_data():
     df = load_from_jotform()
     if df.empty:
         return df
 
+    # Rename columns
     rename_map = {
         "customerName": "Customer Name",
         "date": "Date",
@@ -93,6 +98,7 @@ def get_data():
     }
     df.rename(columns=rename_map, inplace=True)
 
+    # Clean core columns
     df["Submission Date"] = pd.to_datetime(df["Submission Date"], errors="coerce")
     df = df.dropna(subset=["Submission Date"]).copy()
     df["Status"] = df["Status"].astype(str).str.upper().str.strip()
@@ -116,8 +122,10 @@ def run_dashboard():
         st.error("No data loaded. Please check your JotForm API key and form ID.")
         st.stop()
 
+    # Date range selector
     min_date = df["Submission Date"].min().date()
     max_date = df["Submission Date"].max().date()
+
     default_start = max_date - timedelta(days=29)
     if default_start < min_date:
         default_start = min_date
@@ -136,19 +144,23 @@ def run_dashboard():
             st.rerun()
 
     period_start = pd.Timestamp(start_date)
+
+    # Filter data for selected period
     period_df = df[
         (df["Submission Date"].dt.date >= start_date) &
         (df["Submission Date"].dt.date <= end_date)
     ].copy()
 
     # ==================== TRUE CHURN CALCULATION ====================
+    # Active customers at start of period
     new_before = df[(df["Status"] == "NEW") & (df["Submission Date"] <= period_start)]
     disc_before = df[(df["Status"] == "DISCONNECT") & (df["Submission Date"] <= period_start)]
-    active_customers_start = set(new_before["Customer Name"]) - set(disc_before["Customer Name"])
 
+    active_customers_start = set(new_before["Customer Name"]) - set(disc_before["Customer Name"])
     beginning_customers = len(active_customers_start)
     beginning_mrc = new_before[new_before["Customer Name"].isin(active_customers_start)]["MRC"].sum()
 
+    # During the period
     new_in_period = period_df[period_df["Status"] == "NEW"]
     churn_in_period = period_df[period_df["Status"] == "DISCONNECT"]
 
@@ -158,63 +170,13 @@ def run_dashboard():
     churn_mrc = churn_in_period["MRC"].sum()
 
     ending_customers = beginning_customers + new_count - churn_count
+
     churn_rate = (churn_count / beginning_customers * 100) if beginning_customers else 0
     growth_rate = ((ending_customers - beginning_customers) / beginning_customers * 100) if beginning_customers else 0
     rev_churn_rate = (churn_mrc / beginning_mrc * 100) if beginning_mrc > 0 else 0
 
-    # ==================== NEW: DISCONNECTS BY REASON KPIs ====================
-    st.markdown("### Disconnect Summary – Selected Period")
-
-    if not churn_in_period.empty:
-        reason_summary = (
-            churn_in_period.groupby("Reason")
-            .agg(
-                Customers=("Customer Name", "nunique"),
-                MRC_Lost=("MRC", "sum")
-            )
-            .reset_index()
-            .sort_values("Customers", ascending=False)
-        )
-
-        total_churned = reason_summary["Customers"].sum()
-        total_mrc_lost = reason_summary["MRC_Lost"].sum()
-        top_reason = reason_summary.iloc[0]["Reason"]
-        top_reason_count = reason_summary.iloc[0]["Customers"]
-        top_reason_mrc = reason_summary.iloc[0]["MRC_Lost"]
-
-        # Big KPI row
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Total Customers Lost", f"{total_churned:,}")
-        k2.metric("Total MRC Lost", f"${total_mrc_lost:,.0f}")
-        k3.metric("Most Common Reason", top_reason)
-        k4.metric("Lost to Top Reason", f"{top_reason_count:,}", delta=f"${top_reason_mrc:,.0f} MRC")
-
-        # Detailed breakdown
-        st.dataframe(
-            reason_summary.style.format({"MRC_Lost": "${:,.0f}"}),
-            use_container_width=True
-        )
-
-        fig = px.bar(
-            reason_summary,
-            x="Customers",
-            y="Reason",
-            orientation="h",
-            color="MRC_Lost",
-            color_continuous_scale="Reds",
-            title="All Disconnects by Reason (Count + MRC Impact)",
-            labels={"Customers": "Customers Lost", "MRC_Lost": "MRC Lost ($)"}
-        )
-        fig.update_layout(height=max(400, len(reason_summary) * 45))
-        st.plotly_chart(fig, use_container_width=True)
-
-    else:
-        st.info("No disconnects in the selected period.")
-
-    st.divider()
-
-    # ==================== TRUE CHURN METRICS ====================
-    st.markdown("### True Churn Metrics (vs Beginning Base)")
+    # ==================== DISPLAY KPIs ====================
+    st.markdown("### True Churn Metrics")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Beginning Customers", f"{beginning_customers:,}")
@@ -230,31 +192,53 @@ def run_dashboard():
 
     with st.expander("How is True Churn calculated?"):
         st.caption(f"""
-        • Beginning = Active customers on/before **{start_date}** (no prior disconnect)
-        • Churned = Customers who submitted a DISCONNECT in the selected period
-        • Rates are calculated against the true starting base
+        • Beginning = Customers active on/before **{start_date}** with no prior disconnect  
+        • Churned = Customers who submitted a DISCONNECT in the selected period  
+        • Rates calculated against true starting base
         """)
 
-    # ==================== NEW CUSTOMERS SECTION ====================
+    st.divider()
+
+    # ==================== CHURN BY REASON ====================
+    if not churn_in_period.empty:
+        st.subheader("Churn by Reason")
+        reason_df = (
+            churn_in_period.groupby("Reason")
+            .agg(Count=("Customer Name", "nunique"), MRC_Lost=("MRC", "sum"))
+            .reset_index()
+            .sort_values("Count", ascending=False)
+        )
+        st.dataframe(reason_df, use_container_width=True)
+
+        fig_reason = px.bar(
+            reason_df, x="Count", y="Reason", orientation="h",
+            color="MRC_Lost", title="Churn Reasons (count + $ impact)",
+            color_continuous_scale="Reds"
+        )
+        st.plotly_chart(fig_reason, use_container_width=True)
+
+    # ==================== NEW CUSTOMERS ====================
     if not new_in_period.empty:
-        st.divider()
         st.subheader("New Customer Acquisition")
         col_a, col_b = st.columns(2)
+
         with col_a:
             cat_pie = new_in_period["Category"].value_counts().reset_index()
             fig_pie = px.pie(cat_pie, names="Category", values="count", title="By Category")
             st.plotly_chart(fig_pie, use_container_width=True)
+
         with col_b:
             loc_bar = new_in_period["Location"].value_counts().head(15).reset_index()
             fig_bar = px.bar(loc_bar, x="Location", y="count", title="Top 15 Locations")
             st.plotly_chart(fig_bar, use_container_width=True)
+
         st.success(f"Added {new_count:,} new customers — +${new_mrc:,.0f} MRC")
 
     st.caption("Auto-refreshes every 5 minutes • Source: JotForm")
 
 
 # ===============================================
-# RUN
+# REQUIRED FOR TALLY / STREAMLIT CLOUD
 # ===============================================
 if __name__ == "__main__":
     run_dashboard()
