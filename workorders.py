@@ -12,7 +12,9 @@ import base64
 # =================================================
 
 def get_github_config_workorders():
-    """Load GitHub secrets and force folder to workorders/."""
+    """
+    Load GitHub secrets and force the folder to workorders/.
+    """
     try:
         gh_cfg = st.secrets["github"]
         token = gh_cfg["token"]
@@ -43,7 +45,11 @@ def list_github_workorders():
 
 
 def download_github_workorder_file(filename):
-    """Download a file from GitHub/workorders/ and save to local cache."""
+    """
+    Download a file from GitHub/workorders/.
+    Uses download_url for large files or base64 fallback.
+    Saves the file to saved_uploads/ and returns the local path.
+    """
     token, repo, branch, remote_prefix = get_github_config_workorders()
     if not token or not repo:
         return None
@@ -55,7 +61,15 @@ def download_github_workorder_file(filename):
     if resp.status_code != 200:
         return None
 
-    file_bytes = base64.b64decode(resp.json()["content"])
+    j = resp.json()
+
+    # --- Use raw download if available (large or normal files)
+    if j.get("download_url"):
+        raw = requests.get(j["download_url"])
+        file_bytes = raw.content
+    else:
+        # Fallback: decode base64 content
+        file_bytes = base64.b64decode(j["content"])
 
     # Save to local cache
     local_folder = "saved_uploads"
@@ -69,7 +83,9 @@ def download_github_workorder_file(filename):
 
 
 def upload_workorders_file_to_github(filename: str, file_bytes: bytes):
-    """Upload or update a CSV file into GitHub/workorders/."""
+    """
+    Upload or update a CSV file into GitHub/workorders/.
+    """
     token, repo, branch, remote_prefix = get_github_config_workorders()
     if not token or not repo:
         return
@@ -81,7 +97,7 @@ def upload_workorders_file_to_github(filename: str, file_bytes: bytes):
         "Accept": "application/vnd.github+json"
     }
 
-    # Get SHA if file exists
+    # Check if file exists to get SHA
     sha = None
     get_resp = requests.get(api_url, headers=headers)
     if get_resp.status_code == 200:
@@ -98,6 +114,7 @@ def upload_workorders_file_to_github(filename: str, file_bytes: bytes):
         payload["sha"] = sha
 
     put_resp = requests.put(api_url, headers=headers, json=payload)
+
     if put_resp.status_code in (200, 201):
         st.sidebar.success(f"Pushed to GitHub: {repo}/{remote_path}")
     else:
@@ -181,19 +198,15 @@ def run_workorders_dashboard():
             file_bytes = uploaded_file.getvalue()
             filename = custom_filename + ".csv"
 
-            # Save to local cache
+            # Save local cache
             local_path = os.path.join(saved_folder, filename)
             with open(local_path, "wb") as f:
                 f.write(file_bytes)
 
-            st.sidebar.success(f"Saved locally: {filename}")
-
             # Upload to GitHub
-            try:
-                upload_workorders_file_to_github(filename, file_bytes)
-            except Exception as e:
-                st.sidebar.error(f"GitHub upload failed: {e}")
+            upload_workorders_file_to_github(filename, file_bytes)
 
+            # Load into DataFrame
             df = pd.read_csv(local_path)
 
         elif uploaded_file:
@@ -260,7 +273,7 @@ def run_workorders_dashboard():
         st.warning("No data available for selected date range.")
         st.stop()
 
-    # Filter by tech + work type
+    # Filter by Tech + Work Type
     if "Technician" in df_filtered.columns and "Work Type" in df_filtered.columns:
         techs = sorted(df_filtered["Technician"].unique())
         wtypes = sorted(df_filtered["Work Type"].unique())
@@ -322,28 +335,24 @@ def run_workorders_dashboard():
 
         tech_group = df_avg.groupby(['Work Type', 'Technician'])['Duration_Mins'].mean().reset_index()
         final_avg = tech_group.groupby('Work Type')['Duration_Mins'].mean().reset_index()
-        final_avg.rename(columns={'Duration_Mins': 'Avg Duration (mins)'}, inplace=True)
 
         fig = px.bar(
-            final_avg, x="Work Type", y="Avg Duration (mins)",
+            final_avg, x="Work Type", y="Duration_Mins",
             title="Overall Average Job Time by Work Type",
-            template="plotly_dark"
+            template="template_dark"
         )
-        fig.update_traces(marker_color="#8BC53F")
         st.plotly_chart(fig, use_container_width=True)
 
     # =================================================
-    # CHARTS
+    # TECH CHARTS
     # =================================================
     st.markdown("### 📊 Work Orders Charts by Technician")
 
     if not df_avg.empty:
         grouped = (
             df_avg.groupby(["Technician", "Work Type"])
-            .agg(
-                Total_Jobs=("WO#", "nunique"),
-                Avg_Duration=("Duration_Mins", "mean")
-            )
+            .agg(Total_Jobs=("WO#", "nunique"),
+                 Avg_Duration=("Duration_Mins", "mean"))
             .reset_index()
         )
 
@@ -366,7 +375,7 @@ def run_workorders_dashboard():
     st.markdown("---")
 
     # =================================================
-    # INSTALLATION REWORK ANALYSIS
+    # INSTALLATION REWORK SECTION
     # =================================================
     st.markdown("<h2 style='color:#8BC53F;'>🔁 Installation Rework Analysis</h2>", unsafe_allow_html=True)
 
@@ -400,15 +409,12 @@ def run_workorders_dashboard():
                 f.write(bytes_re)
 
             # Upload to GitHub/workorders/
-            try:
-                upload_workorders_file_to_github(filename, bytes_re)
-            except Exception as e:
-                st.sidebar.error(f"Rework file upload error: {e}")
+            upload_workorders_file_to_github(filename, bytes_re)
 
             df_rework = pd.read_csv(local_path, header=None)
 
     # -------------------------
-    # LOAD EXISTING (GITHUB ONLY)
+    # LOAD EXISTING REWORK FILE
     # -------------------------
     else:
         github_files = list_github_workorders()
