@@ -11,7 +11,7 @@ st.set_page_config(page_title="Talley Customer Dashboard", layout="wide")
 # ===============================================
 # SAFE JOTFORM DATA LOADER
 # ===============================================
-def load_from_jotform():
+def swamp_from_jotform():
     api_key = "22179825a79dba61013e4fc3b9d30fa4"
     form_id = "240073839937062"
     url = f"https://api.jotform.com/form/{form_id}/submissions"
@@ -25,9 +25,7 @@ def load_from_jotform():
             r = requests.get(url, params=params, timeout=30)
             r.raise_for_status()
             data = r.json()
-            if not data.get("
-
-content"):
+            if not data.get("content"):
                 break
 
             for item in data["content"]:
@@ -64,7 +62,7 @@ content"):
 
 @st.cache_data(ttl=300)
 def get_data():
-    df = load_from_jotform()
+    df = swamp_from_jotform()
     if df.empty:
         return df
 
@@ -93,12 +91,12 @@ def run_dashboard():
         df = get_data()
 
     if df.empty:
-        st.error("No data loaded.")
+        st.error("No data loaded. Please check your JotForm API key and form ID.")
         st.stop()
 
     min_date = df["Submission Date"].min().date()
     max_date = df["Submission Date"].max().date()
-    default_start = max_date - timedelta(days=365)  # 1 year for good cohort view
+    default_start = max_date - timedelta(days=89)
     if default_start < min_date:
         default_start = min_date
 
@@ -118,10 +116,11 @@ def run_dashboard():
     period_start = pd.Timestamp(start_date)
     period_df = df[(df["Submission Date"].dt.date >= start_date) & (df["Submission Date"].dt.date <= end_date)].copy()
 
-    # True Churn Calculation (unchanged)
+    # ==================== TRUE CHURN CALCULATION ====================
     new_before = df[(df["Status"] == "NEW") & (df["Submission Date"] <= period_start)]
     disc_before = df[(df["Status"] == "DISCONNECT") & (df["Submission Date"] <= period_start)]
     active_customers_start = set(new_before["Customer Name"]) - set(disc_before["Customer Name"])
+
     beginning_customers = len(active_customers_start)
     beginning_mrc = new_before[new_before["Customer Name"].isin(active_customers_start)]["MRC"].sum()
 
@@ -133,56 +132,61 @@ def run_dashboard():
     new_mrc = new_in_period["MRC"].sum()
     churn_mrc = churn_in_period["MRC"].sum()
 
-    # KPIs
-    st.markdown("### True Churn Metrics")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Beginning Customers", f"{beginning_customers:,}")
-    c2.metric("New Customers", f"{new_count:,}", delta=f"+{new_count}")
-    c3.metric("Churned Customers", f"{churn_count:,}", delta=f"-{churn_count}")
-    c4.metric("Ending Customers", f"{beginning_customers + new_count - churn_count:,}")
+    ending_customers = beginning_customers + new_count - churn_count
 
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Customer Churn Rate", f"{(churn_count/beginning_customers*100):.2f}%" if beginning_customers else "0%", delta_color="inverse")
-    c6.metric("Net Growth Rate", f"{((beginning_customers + new_count - churn_count - beginning_customers)/beginning_customers*100):+.2f}%" if beginning_customers else "0%")
-    c7.metric("Lost MRC", f"${churn_mrc:,.0f}", delta_color="inverse")
-    c8.metric("Revenue Churn Rate", f"{(churn_mrc/beginning_mrc*100):.2f}%" if beginning_mrc > 0 else "0%", delta_color="inverse")
+    # ==================== TRUE CHURN METRICS (ONLY CHURN) ====================
+    st.markdown("### True Churn Metrics")
+    st.markdown("*Customers and revenue lost from existing base*")
+
+    ch1, ch2, ch3, ch4 = st.columns(4)
+    ch1.metric("Churned Customers", f"{churn_count:,}", delta=f"-{churn_count}")
+    ch2.metric("Customer Churn Rate", f"{(churn_count/beginning_customers*100):.2f}%" if beginning_customers else "0%", delta_color="inverse")
+    ch3.metric("Lost MRC", f"${churn_mrc:,.0f}", delta_color="inverse")
+    ch4.metric("Revenue Churn Rate", f"{(churn_mrc/beginning_mrc*100):.2f}%" if beginning_mrc > 0 else "0%", delta_color="inverse")
+
+    # ==================== TRUE GROWTH METRICS (ONLY GROWTH) ====================
+    st.divider()
+    st.markdown("### True Growth Metrics")
+    st.markdown("*New customers and net expansion*")
+
+    gr1, gr2, gr3, gr4 = st.columns(4)
+    gr1.metric("New Customers", f"{new_count:,}", delta=f"+{new_count}")
+    gr2.metric("New MRC Added", f"${new_mrc:,.0f}")
+    gr3.metric("Net Customer Change", f"{new_count - churn_count:+,}", delta=f"{new_count - churn_count:+,}")
+    gr4.metric("Net Growth Rate", f"{((ending_customers / beginning_customers - 1)*100):+.2f}%" if beginning_customers else "N/A")
+
+    # Optional: Show ending vs beginning
+    with st.expander("Summary vs Starting Base"):
+        st.write(f"**Starting Active Customers:** {beginning_customers:,}")
+        st.write(f"**Ending Active Customers:** {ending_customers:,}")
+        st.write(f"**Net Change:** {ending_customers - beginning_customers:+,}")
 
     st.divider()
 
-    # ==================== COHORT ANALYSIS ====================
+    # ==================== COHORT ANALYSIS (KEPT) ====================
     st.subheader("Cohort Analysis – Customer Retention by Signup Month")
 
-    # Get all new customers and their first signup month
     new_customers = df[df["Status"] == "NEW"].copy()
     new_customers["Cohort Month"] = new_customers["Submission Date"].dt.to_period("M")
     first_signup = new_customers.groupby("Customer Name")["Submission Date"].min().reset_index()
     first_signup["Cohort Month"] = first_signup["Submission Date"].dt.to_period("M")
     cohort_data = first_signup[["Customer Name", "Cohort Month"]]
 
-    # Get all disconnects
     disconnects = df[df["Status"] == "DISCONNECT"][["Customer Name", "Submission Date"]].copy()
     disconnects["Disconnect Month"] = disconnects["Submission Date"].dt.to_period("M")
 
-    # Merge to get cohort + disconnect month
     cohort_full = cohort_data.merge(disconnects, on="Customer Name", how="left")
-    cohort_full["Months Active"] = ((cohort_full["Disconnect Month"] - cohort_full["Cohort Month"]).apply(lambda x: x.n if pd.notnull(x) else 24) ).astype(int)
-
-    # Cap at 12 months for clarity
+    cohort_full["Months Active"] = ((cohort_full["Disconnect Month"] - cohort_full["Cohort Month"]).apply(lambda x: x.n if pd.notnull(x) else 24)).astype(int)
     cohort_full["Months Active"] = cohort_full["Months Active"].clip(upper=12)
 
-    # Count active customers per cohort per month
     cohort_table = cohort_full.groupby(["Cohort Month", "Months Active"]).size().unstack(fill_value=0)
     cohort_table = cohort_table.reindex(columns=range(0, 13), fill_value=0)
-
-    # Initial cohort size
     cohort_sizes = cohort_table.iloc[:, 0]
     retention = cohort_table.divide(cohort_sizes, axis=0) * 100
 
-    # Format for display
     retention_display = retention.round(1).astype(str) + "%"
     retention_display[0] = cohort_sizes.astype(str)
 
-    # Heatmap
     fig = go.Figure(data=go.Heatmap(
         z=retention.values,
         x=list(retention.columns),
@@ -193,22 +197,17 @@ def run_dashboard():
         textfont={"size": 12},
         hoverongaps=False
     ))
-
     fig.update_layout(
         title="Cohort Retention Heatmap (Month 0 = Signup Month)",
         xaxis_title="Months Since Signup",
         yaxis_title="Cohort (Signup Month)",
         height=600
     )
-
     st.plotly_chart(fig, use_container_width=True)
-
-    with st.expander("View Cohort Retention Table"):
-        st.dataframe(retention_display.style.background_gradient(cmap="RdYlGn"), use_container_width=True)
 
     st.divider()
 
-    # ==================== TOTAL CHURN BY REASON ====================
+    # ==================== CHURN BY REASON ====================
     if not churn_in_period.empty:
         st.subheader("Churn by Reason")
         reason_df = (
@@ -217,11 +216,11 @@ def run_dashboard():
             .reset_index()
             .sort_values("Count", ascending=False)
         )
-        st.dataframe(reason_df, use_container_width=True)
+        st.dataframe(reason_df.style.format({"MRC_Lost": "${:,.0f}"}), use_container_width=True)
 
         fig_reason = px.bar(
             reason_df, x="Count", y="Reason", orientation="h",
-            color="MRC_Lost", title="Churn Reasons (count + $ impact)",
+            color="MRC_Lost", title="Churn Reasons (Count + $ Impact)",
             color_continuous_scale="Reds"
         )
         st.plotly_chart(fig_reason, use_container_width=True)
