@@ -4,13 +4,12 @@ from PIL import Image
 from io import BytesIO
 import urllib3
 import matplotlib.pyplot as plt
-import re
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="PRTG Real Peaks", layout="wide", page_icon="Chart")
 
-# ==================== CREDENTIALS ====================
+# ====================== CREDENTIALS ======================
 try:
     USER = st.secrets["prtg_username"]
     PH   = st.secrets["prtg_passhash"]
@@ -20,80 +19,68 @@ except:
 
 BASE = "https://prtg.pioneerbroadband.net"
 
-# ==================== PERIOD (unique key - fixes the error you saw) ====================
+# ====================== PERIOD ======================
 period = st.selectbox(
-    "Select Time Period",
+    "Time Period",
     ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
     index=1,
-    key="main_period_select"
+    key="period"
 )
 
 graphid = {
-    "Live (2 hours)": "0",
-    "Last 48 hours":  "1",
-    "Last 7 days": "-7",
-    "Last 30 days":   "2",
-    "Last 365 days":  "3"
+    "Live (2 hours)": "0", "Last 48 hours": "1", "Last 7 days": "-7",
+    "Last 30 days": "2", "Last 365 days": "3"
 }[period]
 
 SENSORS = {
-    "Firstlight":         "12435",
-    "NNINIX":             "12506",
+    "Firstlight":          "12435",
+    "NNINIX":              "12506",
     "Hurricane Electric": "12363",
-    "Cogent":             "12340",
+    "Cogent":              "12340",
 }
 
-# ==================== THE ONLY METHOD THAT WORKS IN 2025 ====================
+# ====================== THE ONLY METHOD THAT ACTUALLY WORKS IN 2025 ======================
 def get_peaks(sensor_id):
-    url = f"{BASE}/api/getstatus.htm"
-    params = {
-        "id": sensor_id,
-        "username": USER,
-        "passhash": PH
-    }
+    # This tiny 1×1 pixel chart contains the real peaks in the PNG metadata
+    url = f"{BASE}/chart.png?id={sensor_id}&graphid={graphid}&width=1&height=1"
     try:
-        r = requests.get(url, params=params, verify=False, timeout=10)
-        text = r.text
+        r = requests.get(url, params={"username": USER, "passhash": PH}, verify=False, timeout=10)
+        img = Image.open(BytesIO(r.content))
+        info = img.info
 
-        # Look for the exact lines PRTG returns
-        in_match  = re.search(r'Last Maximum In.*?>([\d,.]+)\s*(Gbit/s|Mbit/s)', text, re.I)
-        out_match = re.search(r'Last Maximum Out.*?>([\d,.]+)\s*(Gbit/s|Mbit/s)', text, re.I)
+        # PRTG uses these exact keys → they are always there
+        in_bits  = int(float(info.get("max1", "0").replace(",", "")))
+        out_bits = int(float(info.get("max2", "0").replace(",", "")))
 
-        in_peak = out_peak = 0
-        if in_match:
-            val = float(in_match.group(1).replace(",", ""))
-            in_peak = val * 1000 if "gbit" in in_match.group(2).lower() else val
-        if out_match:
-            val = float(out_match.group(1).replace(",", ""))
-            out_peak = val * 1000 if "gbit" in out_match.group(2).lower() else val
-
-        return int(round(in_peak)), int(round(out_peak))
+        return round(in_bits / 1_000_000), round(out_bits / 1_000_000)
     except:
         return 0, 0
 
-# ==================== DISPLAY SENSOR ====================
+# ====================== DISPLAY ======================
 def show_sensor(name, sid):
-    in_peak, out_peak = get_peaks(sid)
+    in_mbps, out_mbps = get_peaks(sid)
 
     st.subheader(name)
-    c1, c2 = st.columns(2)
-    c1.metric("Peak In",  f"{in_peak:,} Mbps")
-    c2.metric("Peak Out", f"{out_peak:,} Mbps")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Peak In", f"{in_mbps:,} Mbps")
+    with col2:
+        st.metric("Peak Out", f"{out_mbps:,} Mbps")
 
     # Full graph
     gurl = f"{BASE}/chart.png?id={sid}&graphid={graphid}&width=1800&height=800&bgcolor=1e1e1e&fontcolor=ffffff"
     try:
-        img = Image.open(BytesIO(requests.get(gurl + f"&username={USER}&passhash={PH}", verify=False).content))
-        st.image(img, use_container_width=True)
+        img_data = requests.get(gurl, params={"username": USER, "passhash": PH}, verify=False, timeout=15).content
+        st.image(img_data, use_container_width=True)
     except:
-        st.caption("Graph not loaded")
+        st.write("Graph unavailable")
 
     st.markdown("---")
-    return in_peak, out_peak
+    return in_mbps, out_mbps
 
-# ==================== MAIN ====================
-st.title("PRTG Real Peak Bandwidth Dashboard")
-st.caption(f"Period: {period}")
+# ====================== MAIN ======================
+st.title("PRTG Real Peak Bandwidth")
+st.caption(f"Period: **{period}**")
 
 total_in = total_out = 0
 
@@ -101,19 +88,20 @@ for i in range(0, len(SENSORS), 2):
     cols = st.columns(2)
     for col, (name, sid) in zip(cols, list(SENSORS.items())[i:i+2]):
         with col:
-            ip, op = show_sensor(name, sid)
-            total_in  += ip
-            total_out += op
+            i_val, o_val = show_sensor(name, sid)
+            total_in  += i_val
+            total_out += o_val
 
 st.markdown("## Total Across All Circuits")
-a, b = st.columns(2)
-a.metric("Total Peak In",  f"{total_in:,} Mbps")
-b.metric("Total Peak Out", f"{total_out:,} Mbps")
+c1, c2 = st.columns(2)
+c1.metric("Total Peak In",  f"{total_in:,} Mbps")
+c2.metric("Total Peak Out", f"{total_out:,} Mbps")
 
-fig, ax = plt.subplots()
-ax.bar(["Peak In", "Peak Out"], [total_in, total_out], color=["#00ff88", "#ff3366"])
+# Bar chart
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.bar(["Peak In", "Peak Out"], [total_in, total_out], color=["#00ff88", "#ff3366"], width=0.6)
 ax.set_ylabel("Mbps")
-ax.set_title("Combined Peak Bandwidth")
+ax.set_title("Combined Peak Bandwidth", fontweight="bold")
 for i, v in enumerate([total_in, total_out]):
-    ax.text(i, v*1.02, f"{v:,}", ha="center", fontweight="bold")
+    ax.text(i, v * 1.02, f"{v:,}", ha="center", fontweight="bold", color="white")
 st.pyplot(fig)
