@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import timedelta
 
 st.set_page_config(page_title="Talley Customer Dashboard", layout="wide")
@@ -67,9 +66,15 @@ def get_data():
         return df
 
     rename_map = {
-        "customerName": "Customer Name", "date": "Date", "employee": "Employee",
-        "location": "Location", "status": "Status", "category": "Category",
-        "reason": "Reason", "mrc": "MRC", "reasonOther": "Reason Other",
+        "customerName": "Customer Name",
+        "date": "Date",
+        "employee": "Employee",
+        "location": "Location",
+        "status": "Status",
+        "category": "Category",
+        "reason": "Reason",
+        "mrc": "MRC",
+        "reasonOther": "Reason Other",
         "disconnectReason": "Disconnect Reason Detail",
     }
     df.rename(columns=rename_map, inplace=True)
@@ -85,18 +90,18 @@ def get_data():
 
 def run_dashboard():
     st.title("Talley Customer Dashboard")
-    st.markdown("### True Churn + Growth + Revenue Retention")
+    st.markdown("### True Churn + Growth Analytics")
 
     with st.spinner("Loading latest data from JotForm..."):
         df = get_data()
 
     if df.empty:
-        st.error("No data loaded.")
+        st.error("No data loaded. Please check your JotForm API key and form ID.")
         st.stop()
 
     min_date = df["Submission Date"].min().date()
     max_date = df["Submission Date"].max().date()
-    default_start = max_date - timedelta(days=365)
+    default_start = max_date - timedelta(days=89)
     if default_start < min_date:
         default_start = min_date
 
@@ -154,71 +159,6 @@ def run_dashboard():
     gr2.metric("New MRC Added", f"${new_mrc:,.0f}")
     gr3.metric("Net Customer Change", f"{new_count - churn_count:+,}", delta=f"{new_count - churn_count:+,}")
     gr4.metric("Net Growth Rate", f"{((ending_customers / beginning_customers - 1)*100):+.2f}%" if beginning_customers else "N/A")
-
-    st.divider()
-
-    # ==================== REVENUE COHORT ANALYSIS ====================
-    st.subheader("Revenue Cohort Analysis – MRC Retention by Signup Month")
-
-    # Get first NEW record + MRC for each customer
-    new_records = df[df["Status"] == "NEW"].sort_values("Submission Date")
-    first_new = new_records.drop_duplicates("Customer Name", keep="first")[["Customer Name", "Submission Date", "MRC"]]
-    first_new["Cohort Month"] = first_new["Submission Date"].dt.to_period("M")
-
-    # Get all DISCONNECT dates
-    disconnects = df[df["Status"] == "DISCONNECT"][["Customer Name", "Submission Date"]]
-    disconnects = disconnects.sort_values("Submission Date").drop_duplicates("Customer Name", keep="last")
-
-    # Combine to get active period
-    cohort_mrc = first_new.merge(disconnects, on="Customer Name", how="left", suffixes=("_start", "_end"))
-    cohort_mrc["End Month"] = cohort_mrc["Submission Date_end"].dt.to_period("M").fillna(pd.Period(year=2100, month=1, freq="M"))
-
-    # Expand each customer into monthly rows
-    rows = []
-    for _, row in cohort_mrc.iterrows():
-        start = row["Cohort Month"]
-        end = row["End Month"]
-        mrc = row["MRC"]
-        months = pd.period_range(start, end, freq="M")
-        for i, month in enumerate(months):
-            rows.append({"Cohort Month": start, "Month Number": i, "Month": month, "MRC": mrc})
-
-    monthly_mrc = pd.DataFrame(rows)
-
-    # Aggregate MRC per cohort per month number
-    cohort_revenue = monthly_mrc.groupby(["Cohort Month", "Month Number"])["MRC"].sum().unstack(fill_value=0)
-    cohort_revenue = cohort_revenue.reindex(columns=range(13), fill_value=0)
-
-    # Calculate retention % vs Month 0
-    initial_mrc = cohort_revenue[0]
-    revenue_retention = cohort_revenue.divide(initial_mrc, axis=0) * 100
-
-    # Heatmap
-    fig = go.Figure(data=go.Heatmap(
-        z=revenue_retention.values,
-        x=list(revenue_retention.columns),
-        y=[str(c) for c in revenue_retention.index],
-        colorscale="RdYlGn",
-        zmid=100,
-        text=[[f"{val:.1f}%" if val > 0 else "" for val in row] for row in revenue_retention.values],
-        texttemplate="%{text}",
-        textfont={"size": 11},
-        hoverongaps=False
-    ))
-
-    fig.update_layout(
-        title="Revenue Cohort Heatmap – % of Original MRC Retained",
-        xaxis_title="Months Since Signup",
-        yaxis_title="Cohort (Signup Month)",
-        height=650
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    with st.expander("View Revenue Cohort Table"):
-        display_table = revenue_retention.round(1).astype(str) + "%"
-        display_table.insert(0, "Initial MRC", initial_mrc.map("${:,.0f}".format))
-        st.dataframe(display_table, use_container_width=True)
 
     st.divider()
 
