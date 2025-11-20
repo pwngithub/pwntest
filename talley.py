@@ -7,7 +7,7 @@ def run_talley():
     import plotly.express as px
 
     def load_from_jotform():
-        api_key = "22179825a79dba61013e4fc3b9d30fa4"
+        api_key = "2525"
         form_id = "240073839937062"
         url = f"https://api.jotform.com/form/{form_id}/submissions?apiKey={api_key}&limit=1000"
         response = requests.get(url)
