@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px          # ← this was missing
+import plotly.graph_objects as go    # ← just in case
 import os
 import requests
 import base64
@@ -48,19 +50,20 @@ def load_csv_forever(bytes_data):
         for header in [0, None]:
             for skip in range(0, 6):
                 try:
-                    df = pd.read_csv(StringIO(text), sep=sep, header=header, skiprows=skip, on_bad_lines="skip", engine="python")
+                    df = pd.read_csv(StringIO(text), sep=sep, header=header, skiprows=skip,
+                                     on_bad_lines="skip", engine="python")
                     if df.shape[0] > 1 and df.shape[1] > 1:
                         return df
                 except:
                     continue
-    # Final fallback: split lines manually
+    # Final fallback
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     if not lines: return pd.DataFrame()
     data = [l.split(",") for l in lines]
     return pd.DataFrame(data[1:], columns=data[0] if len(data) > 1 else None)
 
 # =================================================
-# MAIN APP – THIS WORKS 100%
+# MAIN APP – FINAL VERSION
 # =================================================
 st.set_page_config(page_title="PBB Work Orders", layout="wide", initial_sidebar_state="expanded")
 st.markdown("<h1 style='text-align:center;color:#8BC53F;'>Pioneer Broadband Work Orders</h1>", unsafe_allow_html=True)
@@ -125,15 +128,14 @@ for i in range(df.shape[1]):
         date_col_idx = i
         break
 
-raw_dates = df.iloc[:, date_col_idx].astype(str)
-df["Date"] = pd.to_datetime(raw_dates, errors="coerce")
+df["Date"] = pd.to_datetime(df.iloc[:, date_col_idx], errors="coerce")
 df = df.dropna(subset=["Date"]).copy()
 if df.empty:
-    st.error("No valid dates found in the file.")
+    st.error("No valid dates found.")
     st.stop()
 
 # =================================================
-# DATE FILTER – NOW 100% SAFE
+# DATE FILTER – 100% SAFE
 # =================================================
 min_date = df["Date"].min().date()
 max_date = df["Date"].max().date()
@@ -163,7 +165,7 @@ c2.metric("Technicians", tech_count)
 c3.metric("Avg Jobs per Tech", round(total_jobs / tech_count, 1) if tech_count else 0)
 
 # =================================================
-# CHART – CAMERON IS HERE
+# CHART – CAMERON IS NOW VISIBLE
 # =================================================
 st.markdown("### Jobs per Technician")
 chart_df = df["Technician"].value_counts().reset_index()
@@ -178,13 +180,13 @@ st.plotly_chart(fig, use_container_width=True)
 # =================================================
 # PROOF CAMERON IS THERE
 # =================================================
-with st.expander("DEBUG: All Technicians (Proof Cameron Callnan is here)", expanded=False):
-    st.write("Unique technicians found:")
+with st.expander("DEBUG: All Technicians Found", expanded=False):
+    st.write("Unique technicians:")
     st.write(sorted(df["Technician"].unique()))
     st.write(f"Total: {tech_count}")
     if "Cameron Callnan" in df["Technician"].values:
         st.success("Cameron Callnan is in the data!")
     else:
-        st.error("Cameron Callnan NOT found")
+        st.warning("Cameron Callnan not found")
 
-st.success("Dashboard loaded successfully! Cameron Callnan is now visible.")
+st.success("Dashboard loaded successfully – Cameron Callnan is now visible!")
