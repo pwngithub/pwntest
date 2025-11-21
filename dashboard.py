@@ -1,4 +1,4 @@
-# dashboard.py — FINAL & COMPLETE (Deploy Now!)
+# dashboard.py — FINAL & PERFECT (Deploy Now!)
 import streamlit as st
 import pandas as pd
 import requests
@@ -124,7 +124,7 @@ def run_dashboard():
 
     st.divider()
 
-    # Quick Insights — FULLY WORKING
+    # Quick Insights
     st.markdown("### Quick Insights This Period")
     cards = []
     if not churn_in.empty and "Reason" in churn_in.columns and churn_in["Reason"].str.strip().ne("").any():
@@ -157,7 +157,7 @@ def run_dashboard():
 
     st.divider()
 
-    # True Churn & Growth KPIs
+    # True Churn & Growth
     st.markdown("### True Churn Metrics")
     st.caption("Loss from existing base only")
     c1, c2 = st.columns(2)
@@ -198,7 +198,7 @@ def run_dashboard():
 
     st.divider()
 
-    # CHURN ANALYSIS + NEW CUSTOMER ACQUISITION (BACK!)
+    # CHURN BY REASON + NEW CUSTOMER ACQUISITION (side by side)
     col_a, col_b = st.columns(2)
 
     with col_a:
@@ -206,61 +206,73 @@ def run_dashboard():
         if not churn_in.empty:
             reason_df = churn_in.groupby("Reason").agg(Count=("Customer Name","nunique"), MRC_Lost=("MRC","sum")).reset_index().sort_values("Count", ascending=False)
             st.dataframe(reason_df.style.format({"MRC_Lost": "${:,.0f}"}), use_container_width=True)
-            fig_bar = px.bar(reason_df, x="Count", y="Reason", orientation="h", color="MRC_Lost", color_continuous_scale="Reds")
-            st.plotly_chart(fig_bar, use_container_width=True)
+            fig = px.bar(reason_df, x="Count", y="Reason", orientation="h", color="MRC_Lost", color_continuous_scale="Reds")
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No churn this period")
-
-        # Churn by Competition Pie Chart
-        st.subheader("Churn by Competition")
-        if not churn_in.empty:
-            competitors = {"Fidium": "New Provider Fidium", "Spectrum": "New Provider Spectrum",
-                           "Starlink": "New Provider Starlink", "CCI": "New Provider CCI",
-                           "GWI": "New Provider GWI", "Other": "New Provider Other"}
-            comp_data = []
-            for label, keyword in competitors.items():
-                mask = churn_in["Reason"].str.contains(keyword, case=False, na=False)
-                count = mask.sum()
-                mrc = churn_in[mask]["MRC"].sum()
-                if count > 0:
-                    comp_data.append({"Competitor": label, "Customers Lost": count, "MRC Lost": mrc})
-
-            if comp_data:
-                comp_df = pd.DataFrame(comp_data)
-                fig_pie = px.pie(comp_df, names="Competitor", values="Customers Lost",
-                                 color_discrete_sequence=px.colors.sequential.Reds_r, hole=0.4)
-                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_pie, use_container_width=True)
-
-                total_comp_cust = comp_df["Customers Lost"].sum()
-                total_comp_mrc = comp_df["MRC Lost"].sum()
-                st.markdown(f"""
-                <div style="text-align:center;padding:20px;background:#1E293B;border-radius:12px;border-left:8px solid #DC2626;margin-top:20px;">
-                    <p style="margin:0;color:#94A3B8;font-size:17px;font-weight:600;">Total Lost to Competitors</p>
-                    <p style="margin:8px 0 0 0;color:white;font-size:44px;font-weight:bold;">{total_comp_cust:,}</p>
-                    <p style="margin:0;color:#DC2626;font-size:26px;font-weight:bold;">-${total_comp_mrc:,.0f} MRC</p>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.success("No customers lost to competitors this period!")
 
     with col_b:
         st.subheader("New Customer Acquisition")
         if not new_in.empty:
-            # Pie chart by Category
-            pie = px.pie(new_in["Category"].value_counts().reset_index(), names="Category", values="count",
-                         color_discrete_sequence=px.colors.sequential.Greens)
+            pie = px.pie(new_in["Category"].value_counts().reset_index(), names="Category", values="count", color_discrete_sequence=px.colors.sequential.Greens)
             st.plotly_chart(pie, use_container_width=True)
-
-            # Bar chart by Location (top 10)
-            bar = px.bar(new_in["Location"].value_counts().head(10).reset_index(),
-                         x="Location", y="count", color="count", color_continuous_scale="Greens")
+            bar = px.bar(new_in["Location"].value_counts().head(10).reset_index(), x="Location", y="count", color="count", color_continuous_scale="Greens")
             st.plotly_chart(bar, use_container_width=True)
-
-            # Success message
             st.success(f"Added {new_count:,} new customers — +${new_mrc:,.0f} MRC")
         else:
             st.info("No new customers this period")
+
+    st.divider()
+
+    # NEW SECTION: CHURN BY COMPETITION — STANDS ALONE
+    st.markdown("### Churn by Competition")
+    st.caption("Customers lost to named competitors this period")
+
+    if not churn_in.empty:
+        competitors = {
+            "Fidium": "New Provider Fidium",
+            "Spectrum": "New Provider Spectrum",
+            "Starlink": "New Provider Starlink",
+            "CCI": "New Provider CCI",
+            "GWI": "New Provider GWI",
+            "Other Provider": "New Provider Other"
+        }
+        comp_data = []
+        for label, keyword in competitors.items():
+            mask = churn_in["Reason"].str.contains(keyword, case=False, na=False)
+            count = mask.sum()
+            mrc = churn_in[mask]["MRC"].sum()
+            if count > 0:
+                comp_data.append({"Competitor": label, "Customers Lost": count, "MRC Lost": mrc})
+
+        if comp_data:
+            comp_df = pd.DataFrame(comp_data)
+
+            # Pie chart + total box side-by-side
+            pie_col, total_col = st.columns([1.8, 1])
+
+            with pie_col:
+                fig_pie = px.pie(comp_df, names="Competitor", values="Customers Lost",
+                                 color_discrete_sequence=px.colors.sequential.Reds_r,
+                                 hole=0.45)
+                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                fig_pie.update_layout(showlegend=False, margin=dict(t=40, b=40, l=10, r=10))
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            with total_col:
+                total_cust = comp_df["Customers Lost"].sum()
+                total_mrc = comp_df["MRC Lost"].sum()
+                st.markdown(f"""
+                <div style="background:#1E293B; padding:30px; border-radius:16px; border-left:10px solid #DC2626; text-align:center; height:100%;">
+                    <p style="margin:0; color:#94A3B8; font-size:18px; font-weight:600;">Total Lost to Competitors</p>
+                    <p style="margin:20px 0 10px 0; color:white; font-size:58px; font-weight:bold;">{total_cust:,}</p>
+                    <p style="margin:0; color:#DC2626; font-size:32px; font-weight:bold;">-${total_mrc:,.0f} MRC</p>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.success("No customers lost to named competitors this period!")
+    else:
+        st.info("No churn data available")
 
     st.divider()
 
