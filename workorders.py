@@ -1,4 +1,4 @@
-# workorders.py — FINAL VERSION: EVERYTHING WORKS + CHARTS ARE BACK
+# workorders.py — FINAL + NEW "Overall Avg Time per Work Type" GRAPH ADDED
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -9,7 +9,7 @@ import base64
 from io import BytesIO
 
 # ================================================
-# GITHUB HELPERS
+# GITHUB HELPERS (unchanged)
 # ================================================
 def get_github_config():
     try:
@@ -42,7 +42,7 @@ def download_file_bytes(filename):
     return None
 
 # ================================================
-# MAIN APP — EVERYTHING 100% WORKING
+# MAIN APP — NOW WITH NEW GRAPH!
 # ================================================
 def run_workorders_dashboard():
     st.set_page_config(page_title="PBB Work Orders", layout="wide", initial_sidebar_state="expanded")
@@ -88,7 +88,7 @@ def run_workorders_dashboard():
     if "Techinician" in df.columns:
         df.rename(columns={"Techinician": "Technician"}, inplace=True)
     if "Technician" in df.columns:
-        df["Technician"] = df["Technician"].astype(str).str.strip().str.title()
+        df["Technician"] = df["Technician"].astype(str).str.strip().str.strip().str.title()
         df["Technician"] = df["Technician"].replace({"Cameron Callan": "Cameron Callnan", "Cam Callnan": "Cameron Callnan"}, regex=True)
 
     # Date
@@ -124,11 +124,12 @@ def run_workorders_dashboard():
     c2.metric("Active Technicians", tech_count)
     c3.metric("Avg Jobs per Tech", avg_jobs)
 
-    # AVERAGE VISUALS — FULLY RESTORED!
-    st.markdown("### Average Visuals")
+    # ================================================
+    # EXISTING AVERAGE VISUALS (per tech + work type)
+    # ================================================
+    st.markdown("### Technician Performance by Work Type")
 
     if "Duration" in df.columns and "Work Type" in df.columns:
-        # Extract minutes from Duration (e.g., "2h 30m" → 150)
         df["Mins"] = pd.to_numeric(df["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
 
         summary = df.groupby(["Technician", "Work Type"], as_index=False).agg(
@@ -137,22 +138,48 @@ def run_workorders_dashboard():
         ).round(1)
 
         col1, col2 = st.columns(2)
-
         with col1:
-            fig_jobs = px.bar(
-                summary, x="Work Type", y="Jobs", color="Technician",
-                title="Jobs by Work Type & Technician",
-                template="plotly_dark", height=500
-            )
-            st.plotly_chart(fig_jobs, use_container_width=True)
-
+            fig1 = px.bar(summary, x="Work Type", y="Jobs", color="Technician",
+                          title="Jobs Completed by Work Type", template="plotly_dark")
+            st.plotly_chart(fig1, use_container_width=True)
         with col2:
-            fig_dur = px.bar(
-                summary, x="Work Type", y="Avg_Duration", color="Technician",
-                title="Average Duration per Job (minutes)",
-                template="plotly_dark", height=500
-            )
-            st.plotly_chart(fig_dur, use_container_width=True)
+            fig2 = px.bar(summary, x="Work Type", y="Avg_Duration", color="Technician",
+                          title="Avg Duration per Job (minutes)", template="plotly_dark")
+            st.plotly_chart(fig2, use_container_width=True)
+
+    st.markdown("---")
+
+    # ================================================
+    # NEW GRAPH: OVERALL AVERAGE TIME PER WORK TYPE (ALL TECHS COMBINED)
+    # ================================================
+    st.markdown("### Overall Average Time per Work Type (All Technicians)")
+
+    if "Duration" in df.columns and "Work Type" in df.columns and not df["Mins"].isna().all():
+        overall_avg = df.groupby("Work Type", as_index=False)["Mins"].mean().round(1)
+        overall_avg = overall_avg.sort_values("Mins", ascending=True)  # Nicer horizontal view
+
+        fig_overall = go.Figure()
+        fig_overall.add_trace(go.Bar(
+            y=overall_avg["Work Type"],
+            x=overall_avg["Mins"],
+            orientation='h',
+            marker_color="#8BC53F",
+            text=overall_avg["Mins"].astype(str) + " min",
+            textposition='outside',
+            hovertemplate="<b>%{y}</b><br>Avg Time: %{x} minutes<extra></extra>"
+        ))
+
+        fig_overall.update_layout(
+            title="Average Time to Complete Each Work Type",
+            xaxis_title="Average Duration (minutes)",
+            yaxis_title="Work Type",
+            template="plotly_dark",
+            height=400 + len(overall_avg) * 30,
+            margin=dict(l=150)
+        )
+        st.plotly_chart(fig_overall, use_container_width=True)
+    else:
+        st.info("No duration data available for average time calculation.")
 
     st.markdown("---")
 
