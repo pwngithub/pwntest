@@ -1,4 +1,4 @@
-# dashboard.py — FINAL & FLAWLESS (deploy now)
+# dashboard.py — FINAL & BEAUTIFUL (deploy now)
 import streamlit as st
 import pandas as pd
 import requests
@@ -99,7 +99,6 @@ def run_dashboard():
     period_start = pd.Timestamp(start_date)
     period_df = df[(df["Submission Date"].dt.date >= start_date) & (df["Submission Date"].dt.date <= end_date)].copy()
 
-    # Core calculations
     new_before = df[(df["Status"] == "NEW") & (df["Submission Date"] <= period_start)]
     disc_before = df[(df["Status"] == "DISCONNECT") & (df["Submission Date"] <= period_start)]
     active_start = set(new_before["Customer Name"]) - set(disc_before["Customer Name"])
@@ -125,7 +124,7 @@ def run_dashboard():
 
     st.divider()
 
-    # ——————————————— DYNAMIC QUICK INSIGHTS ———————————————
+    # ——————————————— QUICK INSIGHTS ———————————————
     st.markdown("### Quick Insights This Period")
     cards = []
     if not churn_in.empty and "Reason" in churn_in.columns and churn_in["Reason"].str.strip().ne("").any():
@@ -158,22 +157,31 @@ def run_dashboard():
 
     st.divider()
 
-    # ——————————————— TRUE CHURN (100% RED) + TRUE GROWTH (normal colors) ———————————————
+    # ——————————————— CUSTOM METRIC FUNCTIONS ———————————————
+    def red_metric(label, value, delta):
+        st.markdown(f"""
+        <div style="background:#1E293B; padding:16px; border-radius:12px; border-left:6px solid #DC2626; margin-bottom:16px;">
+            <p style="margin:0; color:#94A3B8; font-size:14px;">{label}</p>
+            <p style="margin:8px 0 4px 0; color:white; font-size:32px; font-weight:bold;">{value}</p>
+            <p style="margin:0; color:#DC2626; font-size:20px; font-weight:bold;">{delta}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    def green_metric(label, value, delta):
+        st.markdown(f"""
+        <div style="background:#1E293B; padding:16px; border-radius:12px; border-left:6px solid #16A34A; margin-bottom:16px;">
+            <p style="margin:0; color:#94A3B8; font-size:14px;">{label}</p>
+            <p style="margin:8px 0 4px 0; color:white; font-size:32px; font-weight:bold;">{value}</p>
+            <p style="margin:0; color:#16A34A; font-size:20px; font-weight:bold;">{delta}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ——————————————— TRUE CHURN (RED) + TRUE GROWTH (GREEN) ———————————————
     col_left, col_right = st.columns(2)
 
-    # TRUE CHURN — 100% RED using custom HTML
     with col_left:
         st.markdown("### True Churn Metrics")
         st.caption("Loss from existing base only")
-
-        def red_metric(label, value, delta):
-            st.markdown(f"""
-            <div style="background:#1E293B; padding:16px; border-radius:12px; border-left:6px solid #DC2626; margin-bottom:16px;">
-                <p style="margin:0; color:#94A3B8; font-size:14px;">{label}</p>
-                <p style="margin:8px 0 4px 0; color:white; font-size:32px; font-weight:bold;">{value}</p>
-                <p style="margin:0; color:#DC2626; font-size:20px; font-weight:bold;">{delta}</p>
-            </div>
-            """, unsafe_allow_html=True)
 
         c1, c2 = st.columns(2)
         with c1:
@@ -185,26 +193,31 @@ def run_dashboard():
             rev_rate = min(churn_mrc / beginning_mrc * 100, 100) if beginning_mrc > 0 else 0
             red_metric("Revenue Churn Rate", f"-{rev_rate:.2f}%", f"↓ -{rev_rate:.2f}%")
 
-    # TRUE GROWTH — normal Streamlit metrics (green/red as needed)
     with col_right:
         st.markdown("### True Growth Metrics")
         st.caption("New wins + net recurring revenue impact")
-        g1, g2, g3 = st.columns(3)
-        g1.metric("New Customers", f"{new_count:,}", delta=f"+{new_count}")
-        g2.metric("New MRC Added", f"${new_mrc:,.0f}", delta=f"+${new_mrc:,.0f}")
-        g3.metric("Net MRC", 
-                  f"{'+' if net_mrr_movement >= 0 else '-'}${abs(net_mrr_movement):,.0f}",
-                  delta=f"{'+' if net_mrr_movement >= 0 else '-'}${abs(net_mrr_movement):,.0f}",
-                  delta_color="normal" if net_mrr_movement >= 0 else "inverse")
 
-        net_growth = ((new_count - churn_count) / beginning_customers * 100) if beginning_customers > 0 else 0
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.columns(3)[1]:
-            st.metric("Net Customer Growth Rate", f"{net_growth:+.2f}%")
+        g1, g2, g3 = st.columns(3)
+
+        with g1:
+            green_metric("New Customers", f"{new_count:,}", f"↑ +{new_count}")
+            net_growth = ((new_count - churn_count) / beginning_customers * 100) if beginning_customers > 0 else 0
+            color = "#16A34A" if net_growth >= 0 else "#DC2626"
+            arrow = "↑" if net_growth >= 0 else "↓"
+            green_metric("Net Customer Growth", f"{net_growth:+.2f}%", f"{arrow} {net_growth:+.2f}%")
+
+        with g2:
+            green_metric("New MRC Added", f"${new_mrc:,.0f}", f"↑ +${new_mrc:,.0f}")
+
+        with g3:
+            color = "#16A34A" if net_mrr_movement >= 0 else "#DC2626"
+            arrow = "↑" if net_mrr_movement >= 0 else "↓"
+            sign = "+" if net_mrr_movement >= 0 else "-"
+            green_metric("Net MRC", f"{sign}${abs(net_mrr_movement):,.0f}", f"{arrow} {sign}${abs(net_mrr_movement):,.0f}")
 
     st.divider()
 
-    # ——————————————— CHARTS & EXPORT (unchanged) ———————————————
+    # ——————————————— CHARTS & EXPORT ———————————————
     col_a, col_b = st.columns(2)
     with col_a:
         if not churn_in.empty:
