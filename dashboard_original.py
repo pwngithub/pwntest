@@ -1,4 +1,4 @@
-# dashboard.py — FINAL & BEAUTIFUL (deploy now)
+# dashboard.py — FINAL & FLAWLESS (Deploy This Now)
 import streamlit as st
 import pandas as pd
 import requests
@@ -8,7 +8,6 @@ from io import BytesIO
 
 st.set_page_config(page_title="Talley Customer Dashboard", layout="wide")
 
-# ——————————————— STYLING ———————————————
 st.markdown("""
 <style>
     .big-title {font-size: 44px !important; font-weight: bold; color: #1E3A8A; text-align: center;}
@@ -23,7 +22,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ——————————————— DATA LOADER (unchanged) ———————————————
+# [DATA LOADER — unchanged, same as before]
+
 def load_from_jotform():
     api_key = "22179825a79dba61013e4fc3b9d30fa4"
     form_id = "240073839937062"
@@ -114,7 +114,7 @@ def run_dashboard():
     churn_mrc = churn_in["MRC"].sum()
     net_mrr_movement = new_mrc - churn_mrc
 
-    # Big Net MRR
+    # Big Net MRR at top
     st.markdown(f"""
     <div class="net-mrr {'positive' if net_mrr_movement >= 0 else 'negative'}">
         {'+$' if net_mrr_movement >= 0 else '-$'}{abs(net_mrr_movement):,.0f}
@@ -124,7 +124,7 @@ def run_dashboard():
 
     st.divider()
 
-    # ——————————————— QUICK INSIGHTS ———————————————
+    # Quick Insights (unchanged)
     st.markdown("### Quick Insights This Period")
     cards = []
     if not churn_in.empty and "Reason" in churn_in.columns and churn_in["Reason"].str.strip().ne("").any():
@@ -147,7 +147,6 @@ def run_dashboard():
         count = new_in["Location"].value_counts().max()
         mrc = new_in[new_in["Location"] == top_loc]["MRC"].sum()
         cards.append(f"<div class='card win'><h4>Fastest Growing Location</h4><b>{top_loc}</b><br>+{count} customers<br>+${mrc:,.0f} MRC</div>")
-
     if cards:
         cols = st.columns(len(cards))
         for col, card in zip(cols, cards):
@@ -157,67 +156,96 @@ def run_dashboard():
 
     st.divider()
 
-    # ——————————————— CUSTOM METRIC FUNCTIONS ———————————————
+    # ——————————— TRUE CHURN (RED) ———————————
+    st.markdown("### True Churn Metrics")
+    st.caption("Loss from existing base only")
+
     def red_metric(label, value, delta):
         st.markdown(f"""
-        <div style="background:#1E293B; padding:16px; border-radius:12px; border-left:6px solid #DC2626; margin-bottom:16px;">
+        <div style="background:#1E293B; padding:16px; border-radius:12px; border-left:6px solid #DC2626; margin:8px;">
             <p style="margin:0; color:#94A3B8; font-size:14px;">{label}</p>
             <p style="margin:8px 0 4px 0; color:white; font-size:32px; font-weight:bold;">{value}</p>
             <p style="margin:0; color:#DC2626; font-size:20px; font-weight:bold;">{delta}</p>
         </div>
         """, unsafe_allow_html=True)
 
+    c1, c2 = st.columns(2)
+    with c1:
+        red_metric("Churned Customers", f"{churn_count:,}", f"Down -{churn_count}")
+        cust_rate = min(churn_count / beginning_customers * 100, 100) if beginning_customers > 0 else 0
+        red_metric("Customer Churn Rate", f"-{cust_rate:.2f}%", f"Down -{cust_rate:.2f}%")
+    with c2:
+        red_metric("Lost MRC", f"${churn_mrc:,.0f}", f"Down -${churn_mrc:,.0f}")
+        rev_rate = min(churn_mrc / beginning_mrc * 100, 100) if beginning_mrc > 0 else 0
+        red_metric("Revenue Churn Rate", f"-{rev_rate:.2f}%", f"Down -{rev_rate:.2f}%")
+
+    st.divider()
+
+    # ——————————— TRUE GROWTH (GREEN) ———————————
+    st.markdown("### True Growth Metrics")
+    st.caption("New wins only")
+
     def green_metric(label, value, delta):
         st.markdown(f"""
-        <div style="background:#1E293B; padding:16px; border-radius:12px; border-left:6px solid #16A34A; margin-bottom:16px;">
+        <div style="background:#1E293B; padding:16px; border-radius:12px; border-left:6px solid #16A34A; margin:8px;">
             <p style="margin:0; color:#94A3B8; font-size:14px;">{label}</p>
             <p style="margin:8px 0 4px 0; color:white; font-size:32px; font-weight:bold;">{value}</p>
             <p style="margin:0; color:#16A34A; font-size:20px; font-weight:bold;">{delta}</p>
         </div>
         """, unsafe_allow_html=True)
 
-    # ——————————————— TRUE CHURN (RED) + TRUE GROWTH (GREEN) ———————————————
-    col_left, col_right = st.columns(2)
-
-    with col_left:
-        st.markdown("### True Churn Metrics")
-        st.caption("Loss from existing base only")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            red_metric("Churned Customers", f"{churn_count:,}", f"↓ -{churn_count}")
-            cust_rate = min(churn_count / beginning_customers * 100, 100) if beginning_customers > 0 else 0
-            red_metric("Customer Churn Rate", f"-{cust_rate:.2f}%", f"↓ -{cust_rate:.2f}%")
-        with c2:
-            red_metric("Lost MRC", f"${churn_mrc:,.0f}", f"↓ -${churn_mrc:,.0f}")
-            rev_rate = min(churn_mrc / beginning_mrc * 100, 100) if beginning_mrc > 0 else 0
-            red_metric("Revenue Churn Rate", f"-{rev_rate:.2f}%", f"↓ -{rev_rate:.2f}%")
-
-    with col_right:
-        st.markdown("### True Growth Metrics")
-        st.caption("New wins + net recurring revenue impact")
-
-        g1, g2, g3 = st.columns(3)
-
-        with g1:
-            green_metric("New Customers", f"{new_count:,}", f"↑ +{new_count}")
-            net_growth = ((new_count - churn_count) / beginning_customers * 100) if beginning_customers > 0 else 0
-            color = "#16A34A" if net_growth >= 0 else "#DC2626"
-            arrow = "↑" if net_growth >= 0 else "↓"
-            green_metric("Net Customer Growth", f"{net_growth:+.2f}%", f"{arrow} {net_growth:+.2f}%")
-
-        with g2:
-            green_metric("New MRC Added", f"${new_mrc:,.0f}", f"↑ +${new_mrc:,.0f}")
-
-        with g3:
-            color = "#16A34A" if net_mrr_movement >= 0 else "#DC2626"
-            arrow = "↑" if net_mrr_movement >= 0 else "↓"
-            sign = "+" if net_mrr_movement >= 0 else "-"
-            green_metric("Net MRC", f"{sign}${abs(net_mrr_movement):,.0f}", f"{arrow} {sign}${abs(net_mrr_movement):,.0f}")
+    g1, g2 = st.columns(2)
+    with g1:
+        green_metric("New Customers", f"{new_count:,}", f"Up +{new_count}")
+    with g2:
+        green_metric("New MRC Added", f"${new_mrc:,.0f}", f"Up +${new_mrc:,.0f}")
 
     st.divider()
 
-    # ——————————————— CHARTS & EXPORT ———————————————
+    # ——————————— NET RESULTS — DEDICATED HIGH-IMPACT SECTION ———————————
+    st.markdown("### Net Results")
+    st.caption("True performance after churn & growth")
+
+    net_cust_growth = ((new_count - churn_count) / beginning_customers * 100) if beginning_customers > 0 else 0
+
+    col_net1, col_net2, col_net3 = st.columns([1, 2, 1])
+    with col_net2:
+        # Net MRC — big and bold
+        color = "#16A34A" if net_mrr_movement >= 0 else "#DC2626"
+        arrow = "Up" if net_mrr_movement >= 0 else "Down"
+        sign = "+" if net_mrr_movement >= 0 else "-"
+        st.markdown(f"""
+        <div style="background:#1E293B; padding:24px; border-radius:16px; text-align:center; border-left:8px solid {color}; box-shadow: 0 6px 20px rgba(0,0,0,0.4);">
+            <p style="margin:0; color:#94A3B8; font-size:18px;">Net MRC</p>
+            <p style="margin:12px 0 8px 0; color:white; font-size:52px; font-weight:bold;">
+                {sign}${abs(net_mrr_movement):,.0f}
+            </p>
+            <p style="margin:0; color:{color}; font-size:28px; font-weight:bold;">
+                {arrow} {sign}${abs(net_mrr_movement):,.0f}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Net Customer Growth
+        color2 = "#16A34A" if net_cust_growth >= 0 else "#DC2626"
+        arrow2 = "Up" if net_cust_growth >= 0 else "Down"
+        st.markdown(f"""
+        <div style="background:#1E293B; padding:20px; border-radius:12px; text-align:center; border-left:6px solid {color2};">
+            <p style="margin:0; color:#94A3B8; font-size:16px;">Net Customer Growth Rate</p>
+            <p style="margin:10px 0 6px 0; color:white; font-size:42px; font-weight:bold;">
+                {net_cust_growth:+.2f}%
+            </p>
+            <p style="margin:0; color:{color2}; font-size:22px; font-weight:bold;">
+                {arrow2} {net_cust_growth:+.2f}%
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.divider()
+
+    # Charts & Export (unchanged)
     col_a, col_b = st.columns(2)
     with col_a:
         if not churn_in.empty:
