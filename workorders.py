@@ -1,4 +1,4 @@
-# workorders.py — FINAL 100% WORKING VERSION (NO ERRORS)
+# workorders.py — FINAL VERSION WITH WORK TYPE FILTER + EVERYTHING ELSE
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -20,24 +20,20 @@ def get_github_config():
 
 def list_github_files():
     token, repo, _ = get_github_config()
-    if not token:
-        return []
+    if not token: return []
     url = f"https://api.github.com/repos/{repo}/contents/workorders"
     headers = {"Authorization": f"token {token}"}
     r = requests.get(url, headers=headers)
-    if r.status_code != 200:
-        return []
+    if r.status_code != 200: return []
     return [item["name"] for item in r.json() if item["name"].lower().endswith(".csv")]
 
 def download_file_bytes(filename):
     token, repo, _ = get_github_config()
-    if not token:
-        return None
+    if not token: return None
     url = f"https://api.github.com/repos/{repo}/contents/workorders/{filename}"
     headers = {"Authorization": f"token {token}"}
     r = requests.get(url, headers=headers)
-    if r.status_code != 200:
-        return None
+    if r.status_code != 200: return None
     data = r.json()
     if "content" in data and data["content"]:
         return base64.b64decode(data["content"])
@@ -46,7 +42,7 @@ def download_file_bytes(filename):
     return None
 
 # ================================================
-# MAIN DASHBOARD — REQUIRED FUNCTION NAME
+# MAIN DASHBOARD — REQUIRED NAME
 # ================================================
 def run_workorders_dashboard():
     st.set_page_config(page_title="PBB Work Orders", layout="wide", initial_sidebar_state="expanded")
@@ -61,10 +57,8 @@ def run_workorders_dashboard():
     )
 
     # Session state
-    if "df_main" not in st.session_state:
-        st.session_state.df_main = None
-    if "df_rework" not in st.session_state:
-        st.session_state.df_rework = None
+    if "df_main" not in st.session_state: st.session_state.df_main = None
+    if "df_rework" not in st.session_state: st.session_state.df_rework = None
 
     # ================================================
     # LOAD WORK ORDERS
@@ -75,29 +69,27 @@ def run_workorders_dashboard():
     if source == "Upload New":
         uploaded = st.sidebar.file_uploader("Upload Work Orders CSV", type="csv", key="wo_upload")
         if uploaded:
-            with st.spinner("Loading file..."):
+            with st.spinner("Loading..."):
                 st.session_state.df_main = pd.read_csv(uploaded)
                 st.success("Work Orders loaded!")
                 st.rerun()
     else:
         files = list_github_files()
         if not files:
-            st.sidebar.error("No CSV files found in GitHub/workorders/")
+            st.sidebar.error("No files in GitHub/workorders/")
         else:
             chosen = st.sidebar.selectbox("Select file", files, key="wo_select")
             if st.sidebar.button("Load Work Orders File"):
-                with st.spinner(f"Downloading {chosen}..."):
+                with st.spinner("Downloading..."):
                     raw = download_file_bytes(chosen)
                     if raw:
                         st.session_state.df_main = pd.read_csv(BytesIO(raw))
                         st.success(f"{chosen} loaded!")
                         st.rerun()
-                    else:
-                        st.error("Failed to download file")
 
     df = st.session_state.df_main
     if df is None:
-        st.info("Please upload or load a Work Orders file to continue.")
+        st.info("Please upload or load a Work Orders file.")
         st.stop()
 
     # Fix technician names (Cameron Callnan)
@@ -107,30 +99,49 @@ def run_workorders_dashboard():
         df["Technician"] = df["Technician"].astype(str).str.strip().str.title()
         df["Technician"] = df["Technician"].replace({
             "Cameron Callan": "Cameron Callnan",
-            "Cam Callnan": "Cameron Callnan",
-            "Cameron Callnan ": "Cameron Callnan"
+            "Cam Callnan": "Cameron Callnan"
         }, regex=True)
 
     # Date column
-    date_col = next((col for col in df.columns if "date" in str(col).lower()), None)
+    date_col = next((c for c in df.columns if "date" in str(c).lower()), None)
     if not date_col:
-        st.error("No date column found in the file.")
+        st.error("No date column found")
         st.stop()
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
     df = df.dropna(subset=[date_col]).copy()
     df["Day"] = df[date_col].dt.date
 
-    # Filters
-    start_date, end_date = st.date_input(
-        "Date Range",
-        [df["Day"].min(), df["Day"].max()],
-        min_value=df["Day"].min(),
-        max_value=df["Day"].max()
-    )
+    # ================================================
+    # FILTERS — INCLUDING WORK TYPE FILTER
+    # ================================================
+    st.markdown("### Filters")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date, end_date = st.date_input(
+            "Date Range",
+            [df["Day"].min(), df["Day"].max()],
+            min_value=df["Day"].min(),
+            max_value=df["Day"].max()
+        )
+    with col2:
+        pass  # placeholder
+
     df = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
 
+    # Technician filter
     techs = sorted(df["Technician"].dropna().unique())
     selected_techs = st.multiselect("Technicians", techs, default=techs)
+
+    # WORK TYPE FILTER — NOW RESTORED!
+    if "Work Type" in df.columns:
+        work_types = sorted(df["Work Type"].dropna().unique())
+        selected_types = st.multiselect("Work Types", work_types, default=work_types)
+        df = df[df["Work Type"].isin(selected_types)]
+    else:
+        st.warning("'Work Type' column not found — skipping Work Type filter")
+
+    # Apply technician filter
     df = df[df["Technician"].isin(selected_techs)]
 
     # ================================================
@@ -141,12 +152,14 @@ def run_workorders_dashboard():
     tech_count = df["Technician"].nunique()
     avg_jobs = round(total_jobs / tech_count, 1) if tech_count > 0 else 0
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Jobs", total_jobs)
-    col2.metric("Tech Count", tech_count)
-    col3.metric("Avg Jobs/Tech", avg_jobs)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Jobs", total_jobs)
+    c2.metric("Tech Count", tech_count)
+    c3.metric("Avg Jobs/Tech", avg_jobs)
 
-    # Charts
+    # ================================================
+    # CHARTS
+    # ================================================
     if "Duration" in df.columns and "Work Type" in df.columns:
         df["Mins"] = pd.to_numeric(df["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0], errors="coerce")
         grouped = df.groupby(["Technician", "Work Type"], as_index=False).agg(
@@ -163,38 +176,36 @@ def run_workorders_dashboard():
     st.markdown("---")
 
     # ================================================
-    # INSTALLATION REWORK ANALYSIS
+    # REWORK SECTION
     # ================================================
     st.markdown("<h2 style='color:#8BC53F;'>Installation Rework Analysis</h2>", unsafe_allow_html=True)
 
-    re_source = st.sidebar.radio("Rework File", ["Upload New", "Load from GitHub"], key="rework_source")
+    re_source = st.sidebar.radio("Rework File", ["Upload New", "Load from GitHub"], key="re_source")
 
     if re_source == "Upload New":
-        re_upload = st.sidebar.file_uploader("Upload Rework File", type=["csv", "txt"], key="re_upload")
-        if re_upload:
-            st.session_state.df_rework = pd.read_csv(re_upload, header=None)
-            st.success("Rework file loaded!")
+        re_up = st.sidebar.file_uploader("Upload Rework File", type=["csv","txt"], key="re_up")
+        if re_up:
+            st.session_state.df_rework = pd.read_csv(re_up, header=None)
+            st.success("Rework loaded!")
             st.rerun()
     else:
         files = list_github_files()
         if files:
-            re_file = st.sidebar.selectbox("Select Rework File", files, key="re_select")
+            re_file = st.sidebar.selectbox("Select Rework File", files, key="re_sel")
             if st.sidebar.button("Load Rework File"):
                 raw = download_file_bytes(re_file)
                 if raw:
                     st.session_state.df_rework = pd.read_csv(BytesIO(raw), header=None)
-                    st.success("Rework file loaded!")
+                    st.success("Rework loaded!")
                     st.rerun()
 
     if st.session_state.df_rework is not None:
         try:
             rows = []
             for _, row in st.session_state.df_rework.iterrows():
-                vals = row.tolist()
-                if len(vals) >= 4 and str(vals[0]).strip().lower() != "install":
-                    tech = str(vals[0]).strip().title()
-                    rows.append([tech, vals[1], vals[2], vals[3]])
-
+                v = row.tolist()
+                if len(v) >= 4 and str(v[0]).strip().lower() not in ["install", "technician"]:
+                    rows.append([str(v[0]).strip().title(), v[1], v[2], v[3]])
             if rows:
                 df_re = pd.DataFrame(rows, columns=["Technician", "Installs", "Rework", "Pct"])
                 df_re["Technician"] = df_re["Technician"].replace({"Cameron Callan": "Cameron Callnan", "Cam Callnan": "Cameron Callnan"})
@@ -211,20 +222,19 @@ def run_workorders_dashboard():
                 fig.add_trace(go.Scatter(x=df_re["Technician"], y=df_re["Pct"], mode="lines+markers", name="Rework %"), secondary_y=True)
                 fig.update_layout(title="Installations vs Rework %", template="plotly_dark")
                 st.plotly_chart(fig, use_container_width=True)
-
         except Exception as e:
-            st.error(f"Error processing rework file: {e}")
+            st.error(f"Rework error: {e}")
 
     # Debug
-    with st.expander("DEBUG - Technicians Found"):
-        st.write("Technicians in data:", sorted(df["Technician"].unique()))
-        st.write(f"Total unique: {tech_count}")
+    with st.expander("DEBUG - Technicians"):
+        st.write(sorted(df["Technician"].unique()))
+        st.write(f"Total: {tech_count}")
         if "Cameron Callnan" in df["Technician"].values:
             st.success("Cameron Callnan is visible!")
         else:
-            st.warning("Cameron Callnan not found")
+            st.warning("Cameron Callnan missing")
 
 # ================================================
-# REQUIRED — DO NOT REMOVE
+# REQUIRED LINE — DO NOT REMOVE
 # ================================================
 run_workorders_dashboard()
