@@ -1,4 +1,4 @@
-# dashboard.py — FINAL VERSION (Deploy Now!)
+# dashboard.py — FINAL + CHURN BY COMPETITION ADDED
 import streamlit as st
 import pandas as pd
 import requests
@@ -123,7 +123,7 @@ def run_dashboard():
 
     st.divider()
 
-    # QUICK INSIGHTS — BOXES BACK
+    # QUICK INSIGHTS
     st.markdown("### Quick Insights This Period")
     cards = []
     if not churn_in.empty and "Reason" in churn_in.columns and churn_in["Reason"].str.strip().ne("").any():
@@ -156,10 +156,9 @@ def run_dashboard():
 
     st.divider()
 
-    # TRUE CHURN — ONLY ABSOLUTE NUMBERS (NO % RATES)
+    # TRUE CHURN — ONLY ABSOLUTE NUMBERS
     st.markdown("### True Churn Metrics")
     st.caption("Loss from existing base only")
-
     def red_metric(label, value, delta):
         st.markdown(f"""
         <div style="background:#1E293B; padding:20px; border-radius:12px; border-left:6px solid #DC2626; margin:12px 0;">
@@ -177,10 +176,9 @@ def run_dashboard():
 
     st.divider()
 
-    # TRUE GROWTH — GREEN
+    # TRUE GROWTH
     st.markdown("### True Growth Metrics")
     st.caption("New wins only")
-
     def green_metric(label, value, delta):
         st.markdown(f"""
         <div style="background:#1E293B; padding:20px; border-radius:12px; border-left:6px solid #16A34A; margin:12px 0;">
@@ -198,13 +196,12 @@ def run_dashboard():
 
     st.divider()
 
-    # NET RESULTS — 3 BIG HERO METRICS
+    # NET RESULTS
     st.markdown("### Net Results")
     st.caption("True performance after churn & growth")
     net_cust_growth = ((new_count - churn_count) / beginning_customers * 100) if beginning_customers > 0 else 0
 
     col1, col2, col3 = st.columns(3)
-
     with col1:
         color = "#16A34A" if net_customer_movement >= 0 else "#DC2626"
         arrow = "Up" if net_customer_movement >= 0 else "Down"
@@ -242,13 +239,38 @@ def run_dashboard():
 
     st.divider()
 
-    # Charts & Export (unchanged)
+    # ——————————— CHURN BY REASON + NEW: CHURN BY COMPETITION ———————————
     col_a, col_b = st.columns(2)
+
     with col_a:
         if not churn_in.empty:
             st.subheader("Churn by Reason")
-            reason_df = churn_in.groupby("Reason").agg(Count=("Customer Name","nunique"), MRC_Lost=("MRC","sum")).reset_index().sort_values("Count", ascending=False)
+            reason_df = churn_in.groupby("Reason").agg(
+                Count=("Customer Name","nunique"),
+                MRC_Lost=("MRC","sum")
+            ).reset_index().sort_values("Count", ascending=False)
             st.dataframe(reason_df.style.format({"MRC_Lost": "${:,.0f}"}), use_container_width=True)
+
+            # NEW KPI: Churn by Competition
+            competition_keywords = ["New Provider Fidium", "New Provider Spectrum", "New Provider Other",
+                                   "New Provider Starlink", "New Provider CCI", "New Provider GWI"]
+            comp_mask = churn_in["Reason"].str.contains("|".join(competition_keywords), case=False, na=False)
+            comp_churn = churn_in[comp_mask]
+            comp_customers = comp_churn["Customer Name"].nunique()
+            comp_mrc = comp_churn["MRC"].sum()
+
+            st.markdown(f"""
+            <div style="background:#1E293B; padding:20px; border-radius:12px; border-left:8px solid #DC2626; margin-top:20px;">
+                <p style="margin:0; color:#94A3B8; font-size:16px; font-weight:600;">Churn by Competition</p>
+                <p style="margin:12px 0 8px 0; color:white; font-size:48px; font-weight:bold;">
+                    {comp_customers:,} customers
+                </p>
+                <p style="margin:0; color:#DC2626; font-size:28px; font-weight:bold;">
+                    Down -${comp_mrc:,.0f} MRC lost to competitors
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
             fig = px.bar(reason_df, x="Count", y="Reason", orientation="h", color="MRC_Lost", color_continuous_scale="Reds")
             st.plotly_chart(fig, use_container_width=True)
 
