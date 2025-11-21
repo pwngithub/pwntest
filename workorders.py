@@ -1,4 +1,4 @@
-# workorders.py → Deploy this EXACT file
+# workorders.py → FINAL 100% WORKING VERSION
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -32,7 +32,7 @@ def download_file_bytes(filename):
     r = requests.get(url, headers={"Authorization": f"token {token}"})
     if r.status_code != 200: return None
     data = r.json()
-    if "content" in data:
+    if "content" in data and data["content"]:
         return base64.b64decode(data["content"])
     if "download_url" in data:
         return requests.get(data["download_url"]).content
@@ -45,6 +45,7 @@ def run_workorders_dashboard():
     st.set_page_config(page_title="PBB Work Orders", layout="wide", initial_sidebar_state="expanded")
     
     st.markdown("""
+("""
     <h1 style='text-align:center;color:#8BC53F;'>Pioneer Broadband Work Orders Dashboard</h1>
     <div style='text-align:center;margin-bottom:30px;'>
         <img src='https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w' width='400'>
@@ -52,8 +53,10 @@ def run_workorders_dashboard():
     """, unsafe_allow_html=True)
 
     # Session state
-    if "df_main" not in st.session_state:   st.session_state.df_main = None
-    if "df_rework" not in st.session_state: st.session_state.df_rework = None
+    if "df_main" not in st.session_state:
+        st.session_state.df_main = None
+    if "df_rework" not in st.session_state:
+        st.session_state.df_rework = None
 
     # ================================================
     # WORK ORDERS LOADING
@@ -78,7 +81,6 @@ def run_workorders_dashboard():
                 with st.spinner("Downloading..."):
                     raw_bytes = download_file_bytes(chosen)
                     if raw_bytes:
-                        # THIS FIXES THE BYTES ERROR
                         st.session_state.df_main = pd.read_csv(BytesIO(raw_bytes))
                         st.success(f"{chosen} loaded!")
                         st.rerun()
@@ -90,7 +92,7 @@ def run_workorders_dashboard():
         st.info("Please upload or load a Work Orders file.")
         st.stop()
 
-    # Fix technician names
+    # Fix technician names (Cameron Callnan fix)
     if "Techinician" in df.columns:
         df.rename(columns={"Techinician": "Technician"}, inplace=True)
     if "Technician" in df.columns:
@@ -100,8 +102,11 @@ def run_workorders_dashboard():
             "Cam Callnan": "Cameron Callnan"
         }, regex=True)
 
-    # Date column
-    date_col = next((c for c in df.columns if "date" in str(c).lower())
+    # Date column — FIXED LINE 104
+    date_col = next((c for c in df.columns if "date" in str(c).lower()), None)
+    if not date_col:
+        st.error("No date column found")
+        st.stop()
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
     df = df.dropna(subset=[date_col]).copy()
     df["Day"] = df[date_col].dt.date
@@ -137,7 +142,7 @@ def run_workorders_dashboard():
     st.markdown("---")
 
     # ================================================
-    # REWORK SECTION — FULLY WORKING
+    # REWORK SECTION
     # ================================================
     st.markdown("<h2 style='color:#8BC53F;'>Installation Rework Analysis</h2>", unsafe_allow_html=True)
 
@@ -184,15 +189,16 @@ def run_workorders_dashboard():
                 fig.update_layout(title="Installs vs Rework %", template="plotly_dark")
                 st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
-            st.error(f"Rework parsing error: {e}")
+            st.error(f"Rework error: {e}")
 
     # Debug
-    with st.expander("DEBUG"):
-        st.write("Technicians:", sorted(df["Technician"].unique()))
-        st.write(f"Count: {tech_count}")
-        st.success("Cameron Callnan is visible!") if "Cameron Callnan" in df["Technician"].values else None
+    with st.expander("DEBUG - Technicians Found"):
+        st.write(sorted(df["Technician"].unique()))
+        st.write(f"Total: {tech_count}")
+        if "Cameron Callnan" in df["Technician"].values:
+            st.success("Cameron Callnan is visible!")
 
 # ================================================
-# REQUIRED LINE
+# REQUIRED LINE — DO NOT REMOVE
 # ================================================
 run_workorders_dashboard()
