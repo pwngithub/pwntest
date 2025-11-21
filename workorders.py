@@ -12,9 +12,6 @@ import base64
 # =================================================
 
 def get_github_config_workorders():
-    """
-    Load GitHub secrets and force the folder to workorders/.
-    """
     try:
         gh_cfg = st.secrets["github"]
         token = gh_cfg["token"]
@@ -28,7 +25,6 @@ def get_github_config_workorders():
 
 
 def list_github_workorders():
-    """Return a list of CSV files inside GitHub/workorders/."""
     token, repo, branch, remote_prefix = get_github_config_workorders()
     if not token or not repo:
         return []
@@ -45,11 +41,6 @@ def list_github_workorders():
 
 
 def download_github_workorder_file(filename):
-    """
-    Download a file from GitHub/workorders/.
-    Handles both base64 content and raw download_url for large files.
-    Saves the file to saved_uploads/ and returns the local path.
-    """
     token, repo, branch, remote_prefix = get_github_config_workorders()
     if not token or not repo:
         return None
@@ -63,15 +54,12 @@ def download_github_workorder_file(filename):
 
     j = resp.json()
 
-    # PRIORITY: download_url (handles large files and normal files reliably)
     if j.get("download_url"):
         raw = requests.get(j["download_url"])
         file_bytes = raw.content
     else:
-        # fallback: decode base64 content
         file_bytes = base64.b64decode(j["content"])
 
-    # Save to local cache
     local_folder = "saved_uploads"
     os.makedirs(local_folder, exist_ok=True)
     local_path = os.path.join(local_folder, filename)
@@ -83,9 +71,6 @@ def download_github_workorder_file(filename):
 
 
 def upload_workorders_file_to_github(filename: str, file_bytes: bytes):
-    """
-    Upload or update a CSV file into GitHub/workorders/.
-    """
     token, repo, branch, remote_prefix = get_github_config_workorders()
     if not token or not repo:
         return
@@ -97,7 +82,6 @@ def upload_workorders_file_to_github(filename: str, file_bytes: bytes):
         "Accept": "application/vnd.github+json"
     }
 
-    # Check if file exists to obtain SHA
     sha = None
     get_resp = requests.get(api_url, headers=headers)
     if get_resp.status_code == 200:
@@ -118,9 +102,7 @@ def upload_workorders_file_to_github(filename: str, file_bytes: bytes):
     if put_resp.status_code in (200, 201):
         st.sidebar.success(f"Pushed to GitHub: {repo}/{remote_path}")
     else:
-        st.sidebar.error(
-            f"GitHub upload failed ({put_resp.status_code}): {put_resp.text}"
-        )
+        st.sidebar.error(f"GitHub upload failed ({put_resp.status_code}): {put_resp.text}")
 
 
 # =================================================
@@ -160,11 +142,10 @@ def run_workorders_dashboard():
     # --- Logo + Title ---
     st.markdown("""
     <div class='logo-container'>
-        <img src='https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/
-        369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w' width='400'>
+        <img src='https://images.squarespace-cdn.com/content/v1/651eb4433b13e72c1034f375/369c5df0-5363-4827-b041-1add0367f447/PBB+long+logo.png?format=1500w' width='400'>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown("<h1 class='main-title'>🛠 Pioneer Broadband Work Orders Dashboard</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 class='main-title'>Pioneer Broadband Work Orders Dashboard</h1>", unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
 
     saved_folder = "saved_uploads"
@@ -173,7 +154,7 @@ def run_workorders_dashboard():
     # =================================================
     # WORK ORDERS MANAGEMENT
     # =================================================
-    st.sidebar.header("📁 Work Orders File")
+    st.sidebar.header("Work Orders File")
 
     mode = st.sidebar.radio(
         "Select Mode",
@@ -196,28 +177,23 @@ def run_workorders_dashboard():
 
         if uploaded_file and custom_filename:
             file_bytes = uploaded_file.getvalue()
-            filename = custom_filename + ".csv"
+            filename = custom_filename.strip() + ".csv"
 
-            # Save local cache
             local_path = os.path.join(saved_folder, filename)
             with open(local_path, "wb") as f:
                 f.write(file_bytes)
 
-            # Upload to GitHub
             upload_workorders_file_to_github(filename, file_bytes)
-
-            # Load DataFrame
             df = pd.read_csv(local_path)
 
         elif uploaded_file:
             st.sidebar.warning("Please enter a filename.")
 
     # -------------------------
-    # LOAD EXISTING WORK ORDERS FROM GITHUB
+    # LOAD EXISTING FROM GITHUB
     # -------------------------
     else:
         github_files = list_github_workorders()
-
         if not github_files:
             st.error("No work order files found in GitHub/workorders/.")
             st.stop()
@@ -233,7 +209,6 @@ def run_workorders_dashboard():
             if not local_path:
                 st.error("Failed to download file from GitHub.")
                 st.stop()
-
             df = pd.read_csv(local_path)
 
     if df is None:
@@ -241,13 +216,34 @@ def run_workorders_dashboard():
         st.stop()
 
     # =================================================
-    # DATA CLEANING + FILTERS
+    # TECHNICIAN NAME NORMALIZATION (FIXES MISSING TECHS LIKE CAMERON CALLNAN)
     # =================================================
+    if "Techinician" in df.columns:
+        df.rename(columns={"Techinician": "Technician"}, inplace=True)
 
-    date_cols = [
-        col for col in df.columns
-        if str(col).lower() in ["date when", "date", "work date", "completed", "completion date"]
-    ]
+    if "Technician" in df.columns:
+        df["Technician"] = (
+            df["Technician"]
+            .astype(str)
+            .str.strip()
+            .str.replace(r"\s+", " ", regex=True)
+            .str.title()
+            .str.replace(r"\.$", "", regex=True)
+            .str.replace(r"\s*\(.*\)$", "", regex=True)  # removes (C), (Temp), etc.
+        )
+
+        # Optional: Hardcode known variations
+        corrections = {
+            "Cameron Callan": "Cameron Callnan",
+            "Cam Callnan": "Cameron Callnan",
+            "Cameron Callnan ": "Cameron Callnan",
+        }
+        df["Technician"] = df["Technician"].replace(corrections)
+
+    # =================================================
+    # DATE COLUMN & FILTERING
+    # =================================================
+    date_cols = [col for col in df.columns if str(col).lower() in ["date when", "date", "work date", "completed", "completion date"]]
     if not date_cols:
         st.error("No date column found in CSV.")
         st.stop()
@@ -257,14 +253,11 @@ def run_workorders_dashboard():
     df = df.dropna(subset=[date_col])
     df["Day"] = df[date_col].dt.date
 
-    if "Techinician" in df.columns:
-        df.rename(columns={"Techinician": "Technician"}, inplace=True)
-
     min_day, max_day = df["Day"].min(), df["Day"].max()
 
     st.subheader("F I L T E R S")
     start_date, end_date = st.date_input(
-        "📅 Date Range", [min_day, max_day],
+        "Date Range", [min_day, max_day],
         min_value=min_day, max_value=max_day
     )
     df_filtered = df[(df["Day"] >= start_date) & (df["Day"] <= end_date)]
@@ -273,16 +266,16 @@ def run_workorders_dashboard():
         st.warning("No data available for selected date range.")
         st.stop()
 
-    # Filter by Tech + Work Type
+    # Tech + Work Type Filters
     if "Technician" in df_filtered.columns and "Work Type" in df_filtered.columns:
-        techs = sorted(df_filtered["Technician"].unique())
-        wtypes = sorted(df_filtered["Work Type"].unique())
+        techs = sorted(df_filtered["Technician"].dropna().unique())
+        wtypes = sorted(df_filtered["Work Type"].dropna().unique())
 
         col1, col2 = st.columns(2)
         with col1:
-            selected_techs = st.multiselect("👨‍🔧 Technician(s)", techs, default=techs)
+            selected_techs = st.multiselect("Technician(s)", techs, default=techs)
         with col2:
-            selected_wtypes = st.multiselect("📋 Work Type(s)", wtypes, default=wtypes)
+            selected_wtypes = st.multiselect("Work Type(s)", wtypes, default=wtypes)
 
         df_filtered = df_filtered[
             df_filtered["Technician"].isin(selected_techs)
@@ -293,9 +286,7 @@ def run_workorders_dashboard():
         st.warning("No data for selected filters.")
         st.stop()
 
-    # =================================================
-    # REQUIRED COLUMNS
-    # =================================================
+    # Required columns check
     required_cols = ['WO#', 'Duration', 'Technician', 'Work Type']
     missing = [c for c in required_cols if c not in df_filtered.columns]
     if missing:
@@ -305,8 +296,8 @@ def run_workorders_dashboard():
     # =================================================
     # KPIs
     # =================================================
-    st.markdown("### 📌 Work Orders KPIs")
-    df_kpi = df_filtered.dropna(subset=['Duration'])
+    st.markdown("### Work Orders KPIs")
+    df_kpi = df_filtered.dropna(subset=['Duration', 'WO#', 'Technician'])
 
     if not df_kpi.empty:
         total_jobs = df_kpi["WO#"].nunique()
@@ -314,40 +305,41 @@ def run_workorders_dashboard():
         avg_jobs = total_jobs / tech_count if tech_count else 0
 
         k1, k2, k3 = st.columns(3)
-        k1.metric("🔧 Total Jobs", total_jobs)
-        k2.metric("👨‍🔧 Tech Count", tech_count)
-        k3.metric("📈 Avg Jobs per Tech", f"{avg_jobs:.1f}")
+        k1.metric("Total Jobs", total_jobs)
+        k2.metric("Tech Count", tech_count)
+        k3.metric("Avg Jobs per Tech", f"{avg_jobs:.1f}")
     else:
         st.warning("No duration data found.")
 
     # =================================================
-    # OVERALL AVG DURATION
+    # AVERAGE DURATION BY WORK TYPE
     # =================================================
-    st.markdown("### 📊 Overall Average Duration by Work Type")
+    st.markdown("### Overall Average Duration by Work Type")
 
-    df_avg = df_filtered.dropna(subset=['Duration'])
+    df_avg = df_filtered.copy()
+    df_avg["Duration_Mins"] = pd.to_numeric(
+        df_avg["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0],
+        errors="coerce"
+    )
+    df_avg = df_avg.dropna(subset=["Duration_Mins"])
 
     if not df_avg.empty:
-        df_avg["Duration_Mins"] = pd.to_numeric(
-            df_avg["Duration"].astype(str).str.extract(r"(\d+\.?\d*)")[0],
-            errors="coerce"
-        )
-
         tech_group = df_avg.groupby(['Work Type', 'Technician'])['Duration_Mins'].mean().reset_index()
         final_avg = tech_group.groupby('Work Type')['Duration_Mins'].mean().reset_index()
 
         fig = px.bar(
-            final_avg, x="Work Type", y="Duration_Mins",
+            final_avg.sort_values("Duration_Mins", ascending=False),
+            x="Work Type", y="Duration_Mins",
             title="Overall Average Job Time by Work Type",
-            template="plotly_dark"
+            template="plotly_dark",
+            color_discrete_sequence=["#8BC53F"]
         )
-        fig.update_traces(marker_color='#8BC53F')
         st.plotly_chart(fig, use_container_width=True)
 
     # =================================================
-    # TECH CHARTS
+    # TECH-SPECIFIC CHARTS
     # =================================================
-    st.markdown("### 📊 Work Orders Charts by Technician")
+    st.markdown("### Work Orders Charts by Technician")
 
     if not df_avg.empty:
         grouped = (
@@ -358,16 +350,14 @@ def run_workorders_dashboard():
         )
 
         fig1 = px.bar(
-            grouped,
-            x="Work Type", y="Total_Jobs", color="Technician",
+            grouped, x="Work Type", y="Total_Jobs", color="Technician",
             title="Jobs by Work Type & Technician",
             template="plotly_dark"
         )
         st.plotly_chart(fig1, use_container_width=True)
 
         fig2 = px.bar(
-            grouped,
-            x="Work Type", y="Avg_Duration", color="Technician",
+            grouped, x="Work Type", y="Avg_Duration", color="Technician",
             title="Avg Duration by Work Type & Technician (mins)",
             template="plotly_dark"
         )
@@ -376,9 +366,9 @@ def run_workorders_dashboard():
     st.markdown("---")
 
     # =================================================
-    # INSTALLATION REWORK SECTION
+    # INSTALLATION REWORK ANALYSIS
     # =================================================
-    st.markdown("<h2 style='color:#8BC53F;'>🔁 Installation Rework Analysis</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color:#8BC53F;'>Installation Rework Analysis</h2>", unsafe_allow_html=True)
 
     re_mode = st.sidebar.radio(
         "Installation Rework File",
@@ -387,9 +377,6 @@ def run_workorders_dashboard():
     )
     df_rework = None
 
-    # -------------------------
-    # UPLOAD NEW REWORK FILE
-    # -------------------------
     if re_mode == "Upload New File":
         re_file = st.sidebar.file_uploader(
             "Upload Installation Assessment File", type=["csv", "txt"],
@@ -402,27 +389,16 @@ def run_workorders_dashboard():
 
         if re_file and re_filename:
             bytes_re = re_file.getvalue()
-            filename = re_filename + ".csv"
-
-            # Save local
+            filename = re_filename.strip() + ".csv"
             local_path = os.path.join(saved_folder, filename)
             with open(local_path, "wb") as f:
                 f.write(bytes_re)
-
-            # Upload to GitHub/workorders/
             upload_workorders_file_to_github(filename, bytes_re)
-
             df_rework = pd.read_csv(local_path, header=None)
 
-    # -------------------------
-    # LOAD EXISTING REWORK FILE
-    # -------------------------
     else:
         github_files = list_github_workorders()
-
-        if not github_files:
-            st.warning("No rework files found in GitHub/workorders/")
-        else:
+        if github_files:
             selected = st.sidebar.selectbox(
                 "Select Installation Rework File (GitHub)",
                 github_files,
@@ -430,10 +406,11 @@ def run_workorders_dashboard():
             )
             if selected:
                 local = download_github_workorder_file(selected)
-                df_rework = pd.read_csv(local, header=None)
+                if local:
+                    df_rework = pd.read_csv(local, header=None)
 
     # =================================================
-    # PARSE REWORK FILE
+    # PARSE + NORMALIZE REWORK DATA
     # =================================================
     if df_rework is not None and not df_rework.empty:
         try:
@@ -453,40 +430,44 @@ def run_workorders_dashboard():
                 columns=["Technician", "Total_Installations", "Rework", "Rework_Percentage"]
             )
 
-            # Cleanup
-            df_combined["Technician"] = df_combined["Technician"].astype(str).str.replace('"', '').str.strip()
+            # CLEAN & NORMALIZE TECHNICIAN NAMES (CRITICAL!)
+            df_combined["Technician"] = (
+                df_combined["Technician"]
+                .astype(str)
+                .str.strip()
+                .str.replace(r"\s+", " ", regex=True)
+                .str.title()
+                .str.replace(r"\.$", "", regex=True)
+                .str.replace(r"\s*\(.*\)$", "", regex=True)
+            )
+            df_combined["Technician"] = df_combined["Technician"].replace(corrections)
+
             df_combined["Total_Installations"] = pd.to_numeric(df_combined["Total_Installations"], errors="coerce")
             df_combined["Rework"] = pd.to_numeric(df_combined["Rework"], errors="coerce")
-            df_combined["Rework_Percentage"] = (
-                df_combined["Rework_Percentage"].astype(str)
-                .str.replace("%", "").str.replace('"', "").str.strip()
+            df_combined["Rework_Percentage"] = pd.to_numeric(
+                df_combined["Rework_Percentage"].astype(str).str.replace("%", "").str.replace('"', ""),
+                errors="coerce"
             )
-            df_combined["Rework_Percentage"] = pd.to_numeric(df_combined["Rework_Percentage"], errors="coerce")
             df_combined.dropna(subset=["Technician", "Total_Installations"], inplace=True)
-
             df_combined = df_combined.sort_values("Total_Installations", ascending=False)
 
             # KPIs
-            st.markdown("### 📌 Installation Rework KPIs")
+            st.markdown("### Installation Rework KPIs")
             total_inst = df_combined["Total_Installations"].sum()
             total_re = df_combined["Rework"].sum()
             avg_pct = df_combined["Rework_Percentage"].mean()
 
             c1, c2, c3 = st.columns(3)
-            c1.metric("🏗️ Total Installations", int(total_inst))
-            c2.metric("🔁 Total Reworks", int(total_re))
-            c3.metric("📈 Avg Rework %", f"{avg_pct:.1f}%")
+            c1.metric("Total Installations", int(total_inst))
+            c2.metric("Total Reworks", int(total_re))
+            c3.metric("Avg Rework %", f"{avg_pct:.1f}%")
 
-            # Table
+            # Styled Table
             def color_rework(val):
-                if pd.isna(val):
-                    return ""
-                elif val < 5:
-                    return "background-color:#3CB371;color:white;"
-                elif val < 10:
-                    return "background-color:#FFD700;color:black;"
-                else:
-                    return "background-color:#FF6347;color:white;"
+                if pd.isna(val): return ""
+                elif val < 5: return "background-color:#3CB371;color:white;"
+                elif val < 10: return "background-color:#FFD700;color:black;"
+                else: return "background-color:#FF6347;color:white;"
 
             styled = (
                 df_combined.style
@@ -497,56 +478,45 @@ def run_workorders_dashboard():
                     'Rework': '{:.0f}'
                 })
             )
-            st.dataframe(styled)
+            st.dataframe(styled, use_container_width=True)
 
-            # Chart
-            st.markdown("### 📊 Installations (Bars) vs Rework % (Line)")
+            # Combo Chart
+            st.markdown("### Installations (Bars) vs Rework % (Line)")
             fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
             fig_combo.add_trace(
-                go.Bar(
-                    x=df_combined["Technician"],
-                    y=df_combined["Total_Installations"],
-                    name="Total Installations",
-                    marker_color="#00BFFF"
-                ),
-                secondary_y=False
+                go.Bar(x=df_combined["Technician"], y=df_combined["Total_Installations"],
+                       name="Total Installations", marker_color="#00BFFF"), secondary_y=False
             )
             fig_combo.add_trace(
-                go.Scatter(
-                    x=df_combined["Technician"],
-                    y=df_combined["Rework_Percentage"],
-                    name="Rework %",
-                    mode="lines+markers",
-                    line=dict(color="#FF6347", width=3)
-                ),
-                secondary_y=True
+                go.Scatter(x=df_combined["Technician"], y=df_combined["Rework_Percentage"],
+                           name="Rework %", mode="lines+markers",
+                           line=dict(color="#FF6347", width=3)), secondary_y=True
             )
-            fig_combo.add_hline(
-                y=avg_pct, line_dash="dash", line_color="cyan",
-                annotation_text=f"Avg Rework % ({avg_pct:.1f}%)",
-                annotation_font_color="cyan",
-                secondary_y=True
-            )
-            fig_combo.update_layout(
-                title_text="Technician Total Installations vs Rework %",
-                template="plotly_dark",
-                xaxis_title="Technician",
-                bargap=0.25
-            )
+            fig_combo.add_hline(y=avg_pct, line_dash="dash", line_color="cyan",
+                                annotation_text=f"Avg {avg_pct:.1f}%", secondary_y=True)
+            fig_combo.update_layout(title_text="Technician Installations vs Rework %",
+                                    template="plotly_dark", bargap=0.25)
             st.plotly_chart(fig_combo, use_container_width=True)
 
-            # Download button
+            # Download
             csv_rework = df_combined.to_csv(index=False).encode("utf-8")
             st.download_button(
-                "⬇️ Download Installation Rework Summary CSV",
+                "Download Installation Rework Summary CSV",
                 data=csv_rework,
                 file_name="installation_rework_summary.csv",
-                mime="text/csv",
-                key="download_rework_summary"
+                mime="text/csv"
             )
 
         except Exception as e:
-            st.error(f"Error parsing installation rework file: {e}")
+            st.error(f"Error parsing rework file: {e}")
+
+    # =================================================
+    # DEBUG: See raw technician names (remove after confirming fix)
+    # =================================================
+    with st.expander("Debug: Raw Technician Names (for troubleshooting)", expanded=False):
+        st.write("Work Orders Technicians:", sorted(df["Technician"].dropna().unique()))
+        if 'df_combined' in locals():
+            st.write("Rework File Technicians:", sorted(df_combined["Technician"].unique()))
 
 
 # RUN APP
