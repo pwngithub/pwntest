@@ -1,4 +1,4 @@
-# dashboard.py — FINAL & PERFECT (Deploy Now!)
+# dashboard.py — FINAL VERSION (Deploy Now!)
 import streamlit as st
 import pandas as pd
 import requests
@@ -113,6 +113,7 @@ def run_dashboard():
     net_mrr_movement = new_mrc - churn_mrc
     net_customer_movement = new_count - churn_count
 
+    # Big Net MRR
     st.markdown(f"""
     <div class="net-mrr {'positive' if net_mrr_movement >= 0 else 'negative'}">
         {'+$' if net_mrr_movement >= 0 else '-$'}{abs(net_mrr_movement):,.0f}
@@ -122,28 +123,24 @@ def run_dashboard():
 
     st.divider()
 
-    # QUICK INSIGHTS — BOXES ARE BACK & BEAUTIFUL
+    # QUICK INSIGHTS — BOXES BACK
     st.markdown("### Quick Insights This Period")
     cards = []
-
     if not churn_in.empty and "Reason" in churn_in.columns and churn_in["Reason"].str.strip().ne("").any():
         top_reason = churn_in["Reason"].value_counts().idxmax()
         top_count = churn_in["Reason"].value_counts().max()
         top_mrc = churn_in[churn_in["Reason"] == top_reason]["MRC"].sum()
         cards.append(f'<div class="card flag"><h4>Most Common Churn Reason</h4><b>{top_reason}</b><br>{top_count} customers · ${top_mrc:,.0f} lost</div>')
-
     if not churn_in.empty:
         biggest = churn_in.loc[churn_in["MRC"].idxmax()]
         name = str(biggest.get("Customer Name", "Unknown"))[:35]
         reason = str(biggest.get("Reason", "—"))
         cards.append(f'<div class="card flag"><h4>Largest Single Loss</h4><b>{name}</b><br>${biggest["MRC"]:,.0f} MRC<br><small>{reason}</small></div>')
-
     if not new_in.empty:
         best = new_in.loc[new_in["MRC"].idxmax()]
         name = str(best.get("Customer Name", "New Customer"))[:35]
         loc = str(best.get("Location", "—"))
         cards.append(f'<div class="card win"><h4>Biggest New Win</h4><b>{name}</b><br>+${best["MRC"]:,.0f} MRC<br><small>{loc}</small></div>')
-
     if not new_in.empty and "Location" in new_in.columns and new_in["Location"].str.strip().ne("").any():
         top_loc = new_in["Location"].value_counts().idxmax()
         count = new_in["Location"].value_counts().max()
@@ -153,46 +150,43 @@ def run_dashboard():
     if cards:
         cols = st.columns(len(cards))
         for col, card in zip(cols, cards):
-            with col:
-                st.markdown(card, unsafe_allow_html=True)
+            with col: st.markdown(card, unsafe_allow_html=True)
     else:
         st.success("All quiet — no activity this period!")
 
     st.divider()
 
-    # TRUE CHURN — RED
+    # TRUE CHURN — ONLY ABSOLUTE NUMBERS (NO % RATES)
     st.markdown("### True Churn Metrics")
     st.caption("Loss from existing base only")
+
     def red_metric(label, value, delta):
         st.markdown(f"""
-        <div style="background:#1E293B; padding:16px; border-radius:12px; border-left:6px solid #DC2626; margin:8px;">
-            <p style="margin:0; color:#94A3B8; font-size:14px;">{label}</p>
-            <p style="margin:8px 0 4px 0; color:white; font-size:32px; font-weight:bold;">{value}</p>
-            <p style="margin:0; color:#DC2626; font-size:20px; font-weight:bold;">{delta}</p>
+        <div style="background:#1E293B; padding:20px; border-radius:12px; border-left:6px solid #DC2626; margin:12px 0;">
+            <p style="margin:0; color:#94A3B8; font-size:15px;">{label}</p>
+            <p style="margin:10px 0 6px 0; color:white; font-size:42px; font-weight:bold;">{value}</p>
+            <p style="margin:0; color:#DC2626; font-size:24px; font-weight:bold;">{delta}</p>
         </div>
         """, unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
     with c1:
         red_metric("Churned Customers", f"{churn_count:,}", f"Down -{churn_count}")
-        cust_rate = min(churn_count / beginning_customers * 100, 100) if beginning_customers > 0 else 0
-        red_metric("Customer Churn Rate", f"-{cust_rate:.2f}%", f"Down -{cust_rate:.2f}%")
     with c2:
         red_metric("Lost MRC", f"${churn_mrc:,.0f}", f"Down -${churn_mrc:,.0f}")
-        rev_rate = min(churn_mrc / beginning_mrc * 100, 100) if beginning_mrc > 0 else 0
-        red_metric("Revenue Churn Rate", f"-{rev_rate:.2f}%", f"Down -{rev_rate:.2f}%")
 
     st.divider()
 
     # TRUE GROWTH — GREEN
     st.markdown("### True Growth Metrics")
     st.caption("New wins only")
+
     def green_metric(label, value, delta):
         st.markdown(f"""
-        <div style="background:#1E293B; padding:16px; border-radius:12px; border-left:6px solid #16A34A; margin:8px;">
-            <p style="margin:0; color:#94A3B8; font-size:14px;">{label}</p>
-            <p style="margin:8px 0 4px 0; color:white; font-size:32px; font-weight:bold;">{value}</p>
-            <p style="margin:0; color:#16A34A; font-size:20px; font-weight:bold;">{delta}</p>
+        <div style="background:#1E293B; padding:20px; border-radius:12px; border-left:6px solid #16A34A; margin:12px 0;">
+            <p style="margin:0; color:#94A3B8; font-size:15px;">{label}</p>
+            <p style="margin:10px 0 6px 0; color:white; font-size:42px; font-weight:bold;">{value}</p>
+            <p style="margin:0; color:#16A34A; font-size:24px; font-weight:bold;">{delta}</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -248,7 +242,7 @@ def run_dashboard():
 
     st.divider()
 
-    # Charts & Export
+    # Charts & Export (unchanged)
     col_a, col_b = st.columns(2)
     with col_a:
         if not churn_in.empty:
