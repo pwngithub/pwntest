@@ -450,7 +450,7 @@ if not records:
 records.sort(key=lambda r: r["period"])
 
 # =========================================================
-# CURRENT REPORT
+# CURRENT REPORT (LATEST PERIOD)
 # =========================================================
 r = records[-1]
 grand = r["grand"]
@@ -537,7 +537,7 @@ vip_color = "#aaaaaa"
 
 l, r2 = st.columns(2)
 
-# ---------- Revenue Share (Pie) – BLACK TEXT ----------
+# ---------- Revenue Share (Pie) ----------
 with l:
     st.markdown("**Revenue Share**")
     chart_f = chart[chart["Revenue"] > 0]
@@ -567,7 +567,7 @@ with l:
             radius=95,
             fontSize=15,
             fontWeight="normal",
-            color="#000000"  # BLACK TEXT
+            color="#000000"
         ).encode(
             theta="Revenue:Q",
             text=alt.Text("label:N")
@@ -582,11 +582,11 @@ with l:
     else:
         st.write("No revenue data to display.")
 
-# ---------- Active Customers by Status (Bar) – WHITE TEXT ----------
+# ---------- Active Customers by Status ----------
 with r2:
     st.markdown("**Active Customers by Status**")
-    base = alt.Chart(chart).properties(width=300, height=300)
-    bars = base.mark_bar(
+    base_chart = alt.Chart(chart).properties(width=300, height=300)
+    bars = base_chart.mark_bar(
         color=act_color,
         stroke=com_color,
         strokeWidth=2,
@@ -602,21 +602,128 @@ with r2:
             alt.Tooltip("ARPU:Q", format="$.2f"),
         ],
     )
-    labels = base.mark_text(
+    labels_bar = base_chart.mark_text(
         dy=-10,
         fontSize=15,
         fontWeight="normal",
-        color="#ffffff"  # WHITE TEXT
+        color="#ffffff"
     ).encode(
         x=alt.X("Status:N", sort=["ACT","COM","VIP"]),
         y=alt.Y("Customers:Q"),
         text=alt.Text("Customers:Q", format=",.0f"),
     )
     st.altair_chart(
-        (bars + labels).configure_view(strokeWidth=0)
+        (bars + labels_bar).configure_view(strokeWidth=0)
         .configure_axis(labelColor="#ffffff", titleColor="#ffffff", gridColor="#222222", domainColor="#222222"),
         use_container_width=True,
     )
+
+# =========================================================
+# COMPARISON BETWEEN MULTIPLE FILES
+# =========================================================
+if len(records) > 1:
+    st.subheader("Compare Periods")
+
+    period_options = [rec["period"] for rec in records]
+    sel_col1, sel_col2 = st.columns(2)
+
+    base_period_label = sel_col1.selectbox(
+        "Base period",
+        options=period_options,
+        index=0,
+        key="cmp_base_period"
+    )
+    comp_period_label = sel_col2.selectbox(
+        "Compare to",
+        options=period_options,
+        index=len(period_options) - 1,
+        key="cmp_comp_period"
+    )
+
+    if base_period_label == comp_period_label:
+        st.info("Select two different periods to compare.")
+    else:
+        base_rec = next(rec for rec in records if rec["period"] == base_period_label)
+        comp_rec = next(rec for rec in records if rec["period"] == comp_period_label)
+
+        base_grand = base_rec["grand"]
+        comp_grand = comp_rec["grand"]
+        base_by_status = base_rec["by_status"]
+        comp_by_status = comp_rec["by_status"]
+
+        base_arpu = (base_grand["amt"] / base_grand["act"]) if base_grand["act"] else 0
+        comp_arpu = (comp_grand["amt"] / comp_grand["act"]) if comp_grand["act"] else 0
+
+        delta_customers = comp_grand["act"] - base_grand["act"]
+        delta_revenue = comp_grand["amt"] - base_grand["amt"]
+        delta_arpu = comp_arpu - base_arpu
+
+        # --- Overall comparison cards ---
+        st.markdown(
+            f"""
+            <div style="display:flex;gap:20px;justify-content:space-between;margin:20px 0;">
+              <div style="flex:1;background-color:#111111;border:1px solid #222222;
+                          border-radius:14px;padding:16px;text-align:center;">
+                <p style="margin:0;font-size:14px;color:#aaaaaa;">{base_period_label}</p>
+                <p style="margin:0;font-size:16px;color:#aaaaaa;">FTTH Customers</p>
+                <p style="margin:0;font-size:24px;font-weight:700;color:#49d0ff;">{base_grand['act']:,}</p>
+                <p style="margin:4px 0;font-size:14px;color:#3ddc97;">Rev ${base_grand['amt']:,.2f}</p>
+                <p style="margin:0;font-size:14px;color:#3ddc97;">ARPU ${base_arpu:,.2f}</p>
+              </div>
+              <div style="flex:1;background-color:#111111;border:1px solid #222222;
+                          border-radius:14px;padding:16px;text-align:center;">
+                <p style="margin:0;font-size:14px;color:#aaaaaa;">{comp_period_label}</p>
+                <p style="margin:0;font-size:16px;color:#aaaaaa;">FTTH Customers</p>
+                <p style="margin:0;font-size:24px;font-weight:700;color:#49d0ff;">{comp_grand['act']:,}</p>
+                <p style="margin:4px 0;font-size:14px;color:#3ddc97;">Rev ${comp_grand['amt']:,.2f}</p>
+                <p style="margin:0;font-size:14px;color:#3ddc97;">ARPU ${comp_arpu:,.2f}</p>
+              </div>
+              <div style="flex:1;background-color:#111111;border:1px solid #222222;
+                          border-radius:14px;padding:16px;text-align:center;">
+                <p style="margin:0;font-size:14px;color:#aaaaaa;">Change ({base_period_label} → {comp_period_label})</p>
+                <p style="margin:0;font-size:16px;color:#aaaaaa;">FTTH Customers Δ</p>
+                <p style="margin:0;font-size:24px;font-weight:700;color:#49d0ff;">{delta_customers:+,}</p>
+                <p style="margin:4px 0;font-size:14px;color:#3ddc97;">Rev Δ ${delta_revenue:+,.2f}</p>
+                <p style="margin:0;font-size:14px;color:#3ddc97;">ARPU Δ ${delta_arpu:+.2f}</p>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        # --- Per-status comparison table ---
+        rows = []
+        for status in ["ACT", "COM", "VIP"]:
+            base_cust = base_by_status[status]["act"]
+            comp_cust = comp_by_status[status]["act"]
+            base_rev = base_by_status[status]["amt"]
+            comp_rev = comp_by_status[status]["amt"]
+            base_rpc = base_by_status[status].get("rpc", base_rev / base_cust if base_cust else 0)
+            comp_rpc = comp_by_status[status].get("rpc", comp_rev / comp_cust if comp_cust else 0)
+
+            rows.append({
+                "Status": status,
+                f"{base_period_label} Customers": base_cust,
+                f"{comp_period_label} Customers": comp_cust,
+                "Δ Customers": comp_cust - base_cust,
+                f"{base_period_label} Revenue": base_rev,
+                f"{comp_period_label} Revenue": comp_rev,
+                "Δ Revenue": comp_rev - base_rev,
+                f"{base_period_label} ARPU": base_rpc,
+                f"{comp_period_label} ARPU": comp_rpc,
+                "Δ ARPU": comp_rpc - base_rpc,
+            })
+
+        df_compare = pd.DataFrame(rows).set_index("Status")
+        st.markdown("**Status Breakdown Comparison (ACT / COM / VIP)**")
+        st.dataframe(
+            df_compare.style.format({
+                col: "{:,.0f}" for col in df_compare.columns if "Customers" in col or "Δ Customers" in col
+            }).format({
+                col: "${:,.2f}" for col in df_compare.columns if "Revenue" in col or "ARPU" in col or "Δ Rev" in col or "Δ ARPU" in col
+            }),
+            use_container_width=True
+        )
 
 # =========================================================
 # EXPORTS - PERFECT BLACK
