@@ -36,6 +36,7 @@ st.markdown("""
     --text-muted: #aaaaaa !important;
     --accent-blue: #49d0ff !important;
     --accent-green: #3ddc97 !important;
+    --accent-red: #ff4b4b !important;
 }
 /* -------------------------------------------------
    2. FORCE BLACK EVEN IN LIGHT MODE
@@ -184,7 +185,7 @@ def parse_one_pdf(pdf_bytes: bytes):
     return grand, by_status, text
 
 # =========================================================
-# SNAPSHOT FIGURE - FIXED: NO CRASH ON ZERO REVENUE
+# SNAPSHOT FIGURE
 # =========================================================
 def build_snapshot_figure(period_label, grand, by_status):
     fig = plt.figure(figsize=(10, 6), dpi=150, facecolor='#111111')
@@ -249,7 +250,7 @@ def build_snapshot_figure(period_label, grand, by_status):
     return fig
 
 # =========================================================
-# EXPORT FUNCTIONS - BLACK PNG & PDF
+# EXPORT FUNCTIONS
 # =========================================================
 def export_snapshot_png(period_label, grand, by_status):
     fig = build_snapshot_figure(period_label, grand, by_status)
@@ -450,13 +451,47 @@ if not records:
 records.sort(key=lambda r: r["period"])
 
 # =========================================================
-# CURRENT REPORT (LATEST PERIOD)
+# DATA PREP (COMPARISON)
 # =========================================================
-r = records[-1]
-grand = r["grand"]
-by_status = r["by_status"]
-period_label = r["period"]
+curr = records[-1]
+prev = records[-2] if len(records) > 1 else None
+
+grand = curr["grand"]
+by_status = curr["by_status"]
+period_label = curr["period"]
 overall_arpu = (grand["amt"]/grand["act"]) if grand["act"] else 0
+
+# Helper to generate delta HTML
+def get_delta_html(current_val, prev_val, is_currency=False):
+    if prev_val is None:
+        return ""
+    diff = current_val - prev_val
+    if diff == 0:
+        return ""
+    
+    color = "#3ddc97" if diff > 0 else "#ff4b4b" # Green for positive, Red for negative
+    sign = "+" if diff > 0 else ""
+    val_str = f"{sign}${diff:,.2f}" if is_currency else f"{sign}{diff:,}"
+    
+    # Render small text next to value
+    return f'<span style="font-size:16px; color:{color}; margin-left:8px;">{val_str}</span>'
+
+# Calculate Top Row Deltas
+d_act_html = ""
+d_rev_html = ""
+d_arpu_html = ""
+
+if prev:
+    p_grand = prev["grand"]
+    p_arpu = (p_grand["amt"]/p_grand["act"]) if p_grand["act"] else 0
+    
+    d_act_html = get_delta_html(grand["act"], p_grand["act"])
+    d_rev_html = get_delta_html(grand["amt"], p_grand["amt"], True)
+    d_arpu_html = get_delta_html(overall_arpu, p_arpu, True)
+
+# =========================================================
+# KPI REPORT
+# =========================================================
 
 # --- TOP KPI ROW ---
 html_top = f"""
@@ -464,32 +499,53 @@ html_top = f"""
     <div style="flex:1;background-color:#111111;border:1px solid #222222;
                 border-radius:14px;padding:16px;text-align:center;">
         <p style="margin:0;font-size:16px;color:#aaaaaa;">FTTH Customers</p>
-        <p style="margin:0;font-size:28px;font-weight:700;color:#49d0ff;">{grand['act']:,}</p>
+        <p style="margin:0;font-size:28px;font-weight:700;color:#49d0ff;">
+            {grand['act']:,} {d_act_html}
+        </p>
     </div>
     <div style="flex:1;background-color:#111111;border:1px solid #222222;
                 border-radius:14px;padding:16px;text-align:center;">
         <p style="margin:0;font-size:16px;color:#aaaaaa;">Total Revenue</p>
-        <p style="margin:0;font-size:28px;font-weight:700;color:#3ddc97;">${grand['amt']:,.2f}</p>
+        <p style="margin:0;font-size:28px;font-weight:700;color:#3ddc97;">
+            ${grand['amt']:,.2f} {d_rev_html}
+        </p>
     </div>
     <div style="flex:1;background-color:#111111;border:1px solid #222222;
                 border-radius:14px;padding:16px;text-align:center;">
         <p style="margin:0;font-size:16px;color:#aaaaaa;">ARPU</p>
-        <p style="margin:0;font-size:28px;font-weight:700;color:#3ddc97;">${overall_arpu:,.2f}</p>
+        <p style="margin:0;font-size:28px;font-weight:700;color:#3ddc97;">
+            ${overall_arpu:,.2f} {d_arpu_html}
+        </p>
     </div>
 </div>
 """
 st.markdown(html_top, unsafe_allow_html=True)
+if prev:
+    st.caption(f"Comparing: {curr['period']} (Current) vs {prev['period']} (Previous)")
 st.divider()
 
-# --- KPI BOXES (SAME STYLE AS TOP ROW) ---
-def metric_box(col, title, value, subtitle1, subtitle2):
+# --- KPI BOXES ---
+def metric_box(col, title, stat_key, label_sub1, label_sub2):
+    # Retrieve current values
+    c_act = by_status[stat_key]["act"]
+    c_amt = by_status[stat_key]["amt"]
+    c_rpc = by_status[stat_key]["rpc"]
+    
+    # Delta logic
+    d_act = ""
+    if prev:
+        p_act = prev["by_status"][stat_key]["act"]
+        d_act = get_delta_html(c_act, p_act)
+
     html = f"""
     <div style="background-color:#111111;border:1px solid #222222;
                 border-radius:14px;padding:16px;text-align:center;">
         <p style="margin:0;font-size:16px;color:#aaaaaa;">{title}</p>
-        <p style="margin:0;font-size:28px;font-weight:700;color:#49d0ff;">{value:,}</p>
+        <p style="margin:0;font-size:28px;font-weight:700;color:#49d0ff;">
+            {c_act:,} {d_act}
+        </p>
         <p style="margin:0;font-size:14px;color:#3ddc97;">
-            {subtitle1} • {subtitle2}
+            Rev ${c_amt:,.2f} • ARPU ${c_rpc:,.2f}
         </p>
     </div>
     """
@@ -497,32 +553,12 @@ def metric_box(col, title, value, subtitle1, subtitle2):
 
 c1, c2, c3 = st.columns(3)
 
-metric_box(
-    c1,
-    "ACT — Active Residential",
-    by_status["ACT"]["act"],
-    f"Rev ${by_status['ACT']['amt']:,.2f}",
-    f"ARPU ${by_status['ACT']['rpc']:,.2f}"
-)
-
-metric_box(
-    c2,
-    "COM — Active Commercial",
-    by_status["COM"]["act"],
-    f"Rev ${by_status['COM']['amt']:,.2f}",
-    f"ARPU ${by_status['COM']['rpc']:,.2f}"
-)
-
-metric_box(
-    c3,
-    "VIP",
-    by_status["VIP"]["act"],
-    f"Rev ${by_status['VIP']['amt']:,.2f}",
-    f"ARPU ${by_status['VIP']['rpc']:,.2f}"
-)
+metric_box(c1, "ACT — Active Residential", "ACT", "Rev", "ARPU")
+metric_box(c2, "COM — Active Commercial", "COM", "Rev", "ARPU")
+metric_box(c3, "VIP", "VIP", "Rev", "ARPU")
 
 # =========================================================
-# CHARTS – REVENUE SHARE: BLACK LABELS | BAR: WHITE LABELS
+# CHARTS – REVENUE SHARE & BAR
 # =========================================================
 st.subheader("Visuals")
 
@@ -537,7 +573,7 @@ vip_color = "#aaaaaa"
 
 l, r2 = st.columns(2)
 
-# ---------- Revenue Share (Pie) ----------
+# ---------- Revenue Share (Pie) – BLACK TEXT ----------
 with l:
     st.markdown("**Revenue Share**")
     chart_f = chart[chart["Revenue"] > 0]
@@ -567,7 +603,7 @@ with l:
             radius=95,
             fontSize=15,
             fontWeight="normal",
-            color="#000000"
+            color="#000000"  # BLACK TEXT
         ).encode(
             theta="Revenue:Q",
             text=alt.Text("label:N")
@@ -582,11 +618,11 @@ with l:
     else:
         st.write("No revenue data to display.")
 
-# ---------- Active Customers by Status ----------
+# ---------- Active Customers by Status (Bar) – WHITE TEXT ----------
 with r2:
     st.markdown("**Active Customers by Status**")
-    base_chart = alt.Chart(chart).properties(width=300, height=300)
-    bars = base_chart.mark_bar(
+    base = alt.Chart(chart).properties(width=300, height=300)
+    bars = base.mark_bar(
         color=act_color,
         stroke=com_color,
         strokeWidth=2,
@@ -602,131 +638,24 @@ with r2:
             alt.Tooltip("ARPU:Q", format="$.2f"),
         ],
     )
-    labels_bar = base_chart.mark_text(
+    labels = base.mark_text(
         dy=-10,
         fontSize=15,
         fontWeight="normal",
-        color="#ffffff"
+        color="#ffffff"  # WHITE TEXT
     ).encode(
         x=alt.X("Status:N", sort=["ACT","COM","VIP"]),
         y=alt.Y("Customers:Q"),
         text=alt.Text("Customers:Q", format=",.0f"),
     )
     st.altair_chart(
-        (bars + labels_bar).configure_view(strokeWidth=0)
+        (bars + labels).configure_view(strokeWidth=0)
         .configure_axis(labelColor="#ffffff", titleColor="#ffffff", gridColor="#222222", domainColor="#222222"),
         use_container_width=True,
     )
 
 # =========================================================
-# COMPARISON BETWEEN MULTIPLE FILES
-# =========================================================
-if len(records) > 1:
-    st.subheader("Compare Periods")
-
-    period_options = [rec["period"] for rec in records]
-    sel_col1, sel_col2 = st.columns(2)
-
-    base_period_label = sel_col1.selectbox(
-        "Base period",
-        options=period_options,
-        index=0,
-        key="cmp_base_period"
-    )
-    comp_period_label = sel_col2.selectbox(
-        "Compare to",
-        options=period_options,
-        index=len(period_options) - 1,
-        key="cmp_comp_period"
-    )
-
-    if base_period_label == comp_period_label:
-        st.info("Select two different periods to compare.")
-    else:
-        base_rec = next(rec for rec in records if rec["period"] == base_period_label)
-        comp_rec = next(rec for rec in records if rec["period"] == comp_period_label)
-
-        base_grand = base_rec["grand"]
-        comp_grand = comp_rec["grand"]
-        base_by_status = base_rec["by_status"]
-        comp_by_status = comp_rec["by_status"]
-
-        base_arpu = (base_grand["amt"] / base_grand["act"]) if base_grand["act"] else 0
-        comp_arpu = (comp_grand["amt"] / comp_grand["act"]) if comp_grand["act"] else 0
-
-        delta_customers = comp_grand["act"] - base_grand["act"]
-        delta_revenue = comp_grand["amt"] - base_grand["amt"]
-        delta_arpu = comp_arpu - base_arpu
-
-        # --- Overall comparison cards ---
-        st.markdown(
-            f"""
-            <div style="display:flex;gap:20px;justify-content:space-between;margin:20px 0;">
-              <div style="flex:1;background-color:#111111;border:1px solid #222222;
-                          border-radius:14px;padding:16px;text-align:center;">
-                <p style="margin:0;font-size:14px;color:#aaaaaa;">{base_period_label}</p>
-                <p style="margin:0;font-size:16px;color:#aaaaaa;">FTTH Customers</p>
-                <p style="margin:0;font-size:24px;font-weight:700;color:#49d0ff;">{base_grand['act']:,}</p>
-                <p style="margin:4px 0;font-size:14px;color:#3ddc97;">Rev ${base_grand['amt']:,.2f}</p>
-                <p style="margin:0;font-size:14px;color:#3ddc97;">ARPU ${base_arpu:,.2f}</p>
-              </div>
-              <div style="flex:1;background-color:#111111;border:1px solid #222222;
-                          border-radius:14px;padding:16px;text-align:center;">
-                <p style="margin:0;font-size:14px;color:#aaaaaa;">{comp_period_label}</p>
-                <p style="margin:0;font-size:16px;color:#aaaaaa;">FTTH Customers</p>
-                <p style="margin:0;font-size:24px;font-weight:700;color:#49d0ff;">{comp_grand['act']:,}</p>
-                <p style="margin:4px 0;font-size:14px;color:#3ddc97;">Rev ${comp_grand['amt']:,.2f}</p>
-                <p style="margin:0;font-size:14px;color:#3ddc97;">ARPU ${comp_arpu:,.2f}</p>
-              </div>
-              <div style="flex:1;background-color:#111111;border:1px solid #222222;
-                          border-radius:14px;padding:16px;text-align:center;">
-                <p style="margin:0;font-size:14px;color:#aaaaaa;">Change ({base_period_label} → {comp_period_label})</p>
-                <p style="margin:0;font-size:16px;color:#aaaaaa;">FTTH Customers Δ</p>
-                <p style="margin:0;font-size:24px;font-weight:700;color:#49d0ff;">{delta_customers:+,}</p>
-                <p style="margin:4px 0;font-size:14px;color:#3ddc97;">Rev Δ ${delta_revenue:+,.2f}</p>
-                <p style="margin:0;font-size:14px;color:#3ddc97;">ARPU Δ ${delta_arpu:+.2f}</p>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        # --- Per-status comparison table ---
-        rows = []
-        for status in ["ACT", "COM", "VIP"]:
-            base_cust = base_by_status[status]["act"]
-            comp_cust = comp_by_status[status]["act"]
-            base_rev = base_by_status[status]["amt"]
-            comp_rev = comp_by_status[status]["amt"]
-            base_rpc = base_by_status[status].get("rpc", base_rev / base_cust if base_cust else 0)
-            comp_rpc = comp_by_status[status].get("rpc", comp_rev / comp_cust if comp_cust else 0)
-
-            rows.append({
-                "Status": status,
-                f"{base_period_label} Customers": base_cust,
-                f"{comp_period_label} Customers": comp_cust,
-                "Δ Customers": comp_cust - base_cust,
-                f"{base_period_label} Revenue": base_rev,
-                f"{comp_period_label} Revenue": comp_rev,
-                "Δ Revenue": comp_rev - base_rev,
-                f"{base_period_label} ARPU": base_rpc,
-                f"{comp_period_label} ARPU": comp_rpc,
-                "Δ ARPU": comp_rpc - base_rpc,
-            })
-
-        df_compare = pd.DataFrame(rows).set_index("Status")
-        st.markdown("**Status Breakdown Comparison (ACT / COM / VIP)**")
-        st.dataframe(
-            df_compare.style.format({
-                col: "{:,.0f}" for col in df_compare.columns if "Customers" in col or "Δ Customers" in col
-            }).format({
-                col: "${:,.2f}" for col in df_compare.columns if "Revenue" in col or "ARPU" in col or "Δ Rev" in col or "Δ ARPU" in col
-            }),
-            use_container_width=True
-        )
-
-# =========================================================
-# EXPORTS - PERFECT BLACK
+# EXPORTS
 # =========================================================
 png_bytes = export_snapshot_png(period_label, grand, by_status)
 pdf_bytes = export_snapshot_pdf(period_label, grand, by_status)
