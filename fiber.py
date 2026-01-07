@@ -137,11 +137,15 @@ alt.themes.enable('black_theme')
 # =========================================================
 def _clean_int(s):
     if not s: return 0
-    return int(s.replace(",", ""))
+    # Remove whitespace and commas
+    s = s.strip().replace(",", "")
+    return int(s)
 
 def _clean_amt(s):
     if not s: return 0.0
-    return float(s.replace(",", "").replace("(", "-").replace(")", "").replace("$", ""))
+    # Remove currency symbols, commas, whitespace, and handle parenthesis for negatives
+    s = s.strip().replace(",", "").replace("$", "").replace("\\", "").replace("(", "-").replace(")", "")
+    return float(s)
 
 def _read_pdf_text(pdf_bytes: bytes) -> str:
     import pdfplumber
@@ -162,18 +166,19 @@ def parse_one_pdf(pdf_bytes: bytes):
     text = _read_pdf_text(pdf_bytes)
     compact = re.sub(r"\s+", " ", text)
     
-    # UPDATED PATTERN: Matches CSV-style lines in PDF
-    # Example: "ACT Active residential ","3,727 ","3,727 ","\$308,445.88 "
-    # Groups: 1=Status, 2=Total Subs, 3=Active Subs, 4=Revenue
+    # -------------------------------------------------------------
+    # FIXED REGEX: Allows for whitespace inside quotes
+    # Matches: "ACT Active residential "," 3,727 "," 3,727 "," $308,445.88 "
+    # -------------------------------------------------------------
     row_pat = re.compile(
-        r'"(ACT|COM|VIP)[^"]*"\s*,\s*"([0-9,]+)"\s*,\s*"([0-9,]+)"\s*,\s*"\$([0-9,.\(\)-]+)"',
+        r'"(ACT|COM|VIP)[^"]*"\s*,\s*"\s*([0-9,]+)\s*"\s*,\s*"\s*([0-9,]+)\s*"\s*,\s*"\s*[^0-9"-]*([0-9,.\(\)-]+)\s*"',
         re.IGNORECASE
     )
     
     starts = []
     for m in row_pat.finditer(compact):
         status = m.group(1).upper()
-        # We use group(3) for Active Count based on previous logic
+        # group(2) = Subs Count, group(3) = Act Sub Count. We want Act Sub Count (3).
         act_count = _clean_int(m.group(3))
         revenue = _clean_amt(m.group(4))
         starts.append((status, act_count, revenue))
@@ -184,9 +189,11 @@ def parse_one_pdf(pdf_bytes: bytes):
             by_status[status]["act"] += act
             by_status[status]["amt"] += amt
 
-    # UPDATED TOTAL PATTERN
+    # -------------------------------------------------------------
+    # FIXED TOTAL PATTERN: Allows for whitespace inside quotes
+    # -------------------------------------------------------------
     m_total = re.search(
-        r'"Total[^"]*"\s*,\s*"([0-9,]+)"\s*,\s*"([0-9,]+)"\s*,\s*"\$([0-9,.\(\)-]+)"', 
+        r'"Total[^"]*"\s*,\s*"\s*([0-9,]+)\s*"\s*,\s*"\s*([0-9,]+)\s*"\s*,\s*"\s*[^0-9"-]*([0-9,.\(\)-]+)\s*"', 
         compact, 
         re.IGNORECASE
     )
