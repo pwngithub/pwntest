@@ -137,14 +137,19 @@ alt.themes.enable('black_theme')
 # =========================================================
 def _clean_int(s):
     if not s: return 0
-    # Remove whitespace and commas
+    # Strip whitespace, remove commas
     s = s.strip().replace(",", "")
-    return int(s)
+    # Ensure we only have digits (handle edge cases)
+    s = re.sub(r"[^0-9]", "", s)
+    return int(s) if s else 0
 
 def _clean_amt(s):
     if not s: return 0.0
-    # Remove currency symbols, commas, whitespace, and handle parenthesis for negatives
-    s = s.strip().replace(",", "").replace("$", "").replace("\\", "").replace("(", "-").replace(")", "")
+    # Strip whitespace, remove $ and , and \ (escape char sometimes seen)
+    s = s.strip().replace(",", "").replace("$", "").replace("\\", "").replace(")", "")
+    # Handle negative in parenthesis
+    if "(" in s:
+        s = s.replace("(", "-")
     return float(s)
 
 def _read_pdf_text(pdf_bytes: bytes) -> str:
@@ -153,7 +158,7 @@ def _read_pdf_text(pdf_bytes: bytes) -> str:
         return "\n".join((p.extract_text() or "") for p in pdf.pages)
 
 def _extract_date_label(text: str, fallback_label: str) -> str:
-    # UPDATED: Handles "Date: ","11/12/2025" format seen in the PDF
+    # "Loose" Date Regex: Looks for 'Date:', skips any non-digits, captures date
     m = re.search(r'Date:[^0-9]*([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})', text)
     if m:
         try:
@@ -166,12 +171,21 @@ def parse_one_pdf(pdf_bytes: bytes):
     text = _read_pdf_text(pdf_bytes)
     compact = re.sub(r"\s+", " ", text)
     
-    # -------------------------------------------------------------
-    # FIXED REGEX: Allows for whitespace inside quotes
-    # Matches: "ACT Active residential "," 3,727 "," 3,727 "," $308,445.88 "
-    # -------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # LOOSE REGEX STRATEGY
+    # Instead of matching exact "CSV" format, we match:
+    # 1. KEYWORD (ACT|COM|VIP)
+    # 2. Skip ANY characters (text, quotes, commas) until we find a number
+    # 3. Capture 1st Number (Subs Count)
+    # 4. Skip ANY characters until next number
+    # 5. Capture 2nd Number (Act Sub Count) <-- This is the one we use
+    # 6. Skip ANY characters until next number
+    # 7. Capture 3rd Number (Amount) - allows decimals
+    # -------------------------------------------------------------------------
+    
+    # Matches: ACT ... 3,727 ... 3,727 ... 308,445.88
     row_pat = re.compile(
-        r'"(ACT|COM|VIP)[^"]*"\s*,\s*"\s*([0-9,]+)\s*"\s*,\s*"\s*([0-9,]+)\s*"\s*,\s*"\s*[^0-9"-]*([0-9,.\(\)-]+)\s*"',
+        r'(ACT|COM|VIP).*?([0-9,]+).*?([0-9,]+).*?([0-9,.]+\b)',
         re.IGNORECASE
     )
     
@@ -189,11 +203,11 @@ def parse_one_pdf(pdf_bytes: bytes):
             by_status[status]["act"] += act
             by_status[status]["amt"] += amt
 
-    # -------------------------------------------------------------
-    # FIXED TOTAL PATTERN: Allows for whitespace inside quotes
-    # -------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # LOOSE TOTAL PATTERN
+    # -------------------------------------------------------------------------
     m_total = re.search(
-        r'"Total[^"]*"\s*,\s*"\s*([0-9,]+)\s*"\s*,\s*"\s*([0-9,]+)\s*"\s*,\s*"\s*[^0-9"-]*([0-9,.\(\)-]+)\s*"', 
+        r'Total.*?([0-9,]+).*?([0-9,]+).*?([0-9,.]+\b)', 
         compact, 
         re.IGNORECASE
     )
