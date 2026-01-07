@@ -136,10 +136,12 @@ alt.themes.enable('black_theme')
 # HELPERS
 # =========================================================
 def _clean_int(s):
+    if not s: return 0
     return int(s.replace(",", ""))
 
 def _clean_amt(s):
-    return float(s.replace(",", "").replace("(", "-").replace(")", ""))
+    if not s: return 0.0
+    return float(s.replace(",", "").replace("(", "-").replace(")", "").replace("$", ""))
 
 def _read_pdf_text(pdf_bytes: bytes) -> str:
     import pdfplumber
@@ -147,7 +149,8 @@ def _read_pdf_text(pdf_bytes: bytes) -> str:
         return "\n".join((p.extract_text() or "") for p in pdf.pages)
 
 def _extract_date_label(text: str, fallback_label: str) -> str:
-    m = re.search(r"Date:\s*([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})", text)
+    # UPDATED: Handles "Date: ","11/12/2025" format seen in the PDF
+    m = re.search(r'Date:[^0-9]*([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})', text)
     if m:
         try:
             return dt.date(int(m.group(3)), int(m.group(1)), int(m.group(2))).isoformat()
@@ -158,19 +161,36 @@ def _extract_date_label(text: str, fallback_label: str) -> str:
 def parse_one_pdf(pdf_bytes: bytes):
     text = _read_pdf_text(pdf_bytes)
     compact = re.sub(r"\s+", " ", text)
-    header_pat = re.compile(
-        r'Customer Status\s*",\s*"(ACT|COM|VIP)"\s*,\s*"(Active residential|Active Commercial|VIP)"\s*,\s*"([0-9,]+)"\s*,\s*"([0-9,]+)"',
-        re.IGNORECASE)
-    starts = [(m.group(1).upper(), _clean_int(m.group(4)), m.start(), m.end())
-              for m in header_pat.finditer(compact)]
+    
+    # UPDATED PATTERN: Matches CSV-style lines in PDF
+    # Example: "ACT Active residential ","3,727 ","3,727 ","\$308,445.88 "
+    # Groups: 1=Status, 2=Total Subs, 3=Active Subs, 4=Revenue
+    row_pat = re.compile(
+        r'"(ACT|COM|VIP)[^"]*"\s*,\s*"([0-9,]+)"\s*,\s*"([0-9,]+)"\s*,\s*"\$([0-9,.\(\)-]+)"',
+        re.IGNORECASE
+    )
+    
+    starts = []
+    for m in row_pat.finditer(compact):
+        status = m.group(1).upper()
+        # We use group(3) for Active Count based on previous logic
+        act_count = _clean_int(m.group(3))
+        revenue = _clean_amt(m.group(4))
+        starts.append((status, act_count, revenue))
+
     by_status = {"ACT": {"act": 0, "amt": 0.0}, "COM": {"act": 0, "amt": 0.0}, "VIP": {"act": 0, "amt": 0.0}}
-    for status, act, s, e in starts:
-        win = compact[max(0, s - 300): s]
-        dollars = list(re.finditer(r"\$([0-9][0-9,.\(\)-]*)", win))
-        amt = _clean_amt(dollars[-1].group(1)) if dollars else 0.0
-        by_status[status]["act"] += act
-        by_status[status]["amt"] += amt
-    m_total = re.search(r"Total\s*:\s*([0-9,]+)\s+([0-9,]+)\s+\$([0-9,.\(\)-]+)", compact)
+    for status, act, amt in starts:
+        if status in by_status:
+            by_status[status]["act"] += act
+            by_status[status]["amt"] += amt
+
+    # UPDATED TOTAL PATTERN
+    m_total = re.search(
+        r'"Total[^"]*"\s*,\s*"([0-9,]+)"\s*,\s*"([0-9,]+)"\s*,\s*"\$([0-9,.\(\)-]+)"', 
+        compact, 
+        re.IGNORECASE
+    )
+
     if m_total:
         grand = {
             "subs": _clean_int(m_total.group(1)),
@@ -182,6 +202,7 @@ def parse_one_pdf(pdf_bytes: bytes):
             "act": sum(v["act"] for v in by_status.values()),
             "amt": sum(v["amt"] for v in by_status.values())
         }
+        
     return grand, by_status, text
 
 # =========================================================
