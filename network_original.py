@@ -119,27 +119,45 @@ with col1:
         edgecolor="white",
         linewidth=2.5
     )
-    ax.set_ylim(0, max(total_in, total_out) * 1.15)
+    
+    # ---------------------------------------------------------
+    # FIX: Handle case where total_in and total_out are both 0
+    # ---------------------------------------------------------
+    current_max = max(total_in, total_out)
+    if current_max > 0:
+        ax.set_ylim(0, current_max * 1.15)
+    else:
+        # Default scale if no data is present to prevent crash
+        ax.set_ylim(0, 100)
+
     ax.set_ylabel("Mbps", fontsize=16, fontweight="bold", color="white")
     ax.set_title(f"Total Combined Peak – {period}", fontsize=24, fontweight="bold", color="white", pad=30)
     ax.set_facecolor("#0e1117")
     fig.patch.set_facecolor("#0e1117")
-    ax.spines[["top", "right", "left"]].set_visible(False)
+    
+    # ---------------------------------------------------------
+    # FIX: Use loop for spines to support older Matplotlib versions
+    # ---------------------------------------------------------
+    for spine in ["top", "right", "left"]:
+        ax.spines[spine].set_visible(False)
+        
     ax.tick_params(colors="white", labelsize=14, length=0)
     ax.grid(axis="y", alpha=0.2, color="white", linestyle="--")
 
     for bar in bars:
         height = bar.get_height()
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            height + max(total_in, total_out) * 0.02,
-            f"{height:,.0f}",
-            ha="center",
-            va="bottom",
-            fontsize=28,
-            fontweight="bold",
-            color="white"
-        )
+        # Only draw text if height > 0 to keep it clean
+        if height > 0:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                height + (current_max * 0.02),
+                f"{height:,.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=28,
+                fontweight="bold",
+                color="white"
+            )
     st.pyplot(fig, use_container_width=True)
 
 with col2:
