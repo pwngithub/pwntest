@@ -117,7 +117,8 @@ def show_dashboard():
     if st.sidebar.button("🔄 Refresh Data", key="projects_refresh_btn"):
         load_data.clear()
         st.session_state["rerun_triggered"] = True
-        st.experimental_rerun()
+        # FIXED: Updated from experimental_rerun to rerun
+        st.rerun()
 
     all_types = sorted(kpi["Type"].unique())
     selected = st.sidebar.multiselect(
@@ -197,7 +198,8 @@ def show_dashboard():
             if st.button("📂 Load Raw Data", key="projects_load_raw"):
                 st.session_state["show_raw"] = True
                 st.session_state["rerun_triggered"] = True
-                st.experimental_rerun()
+                # FIXED: Updated from experimental_rerun to rerun
+                st.rerun()
 
         else:
             cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
@@ -206,7 +208,8 @@ def show_dashboard():
             if st.button("❌ Hide Table", key="projects_hide_raw"):
                 st.session_state["show_raw"] = False
                 st.session_state["rerun_triggered"] = True
-                st.experimental_rerun()
+                # FIXED: Updated from experimental_rerun to rerun
+                st.rerun()
 
 # -----------------------------------------
 # RUN APP
