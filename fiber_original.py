@@ -36,6 +36,7 @@ st.markdown("""
     --text-muted: #aaaaaa !important;
     --accent-blue: #49d0ff !important;
     --accent-green: #3ddc97 !important;
+    --accent-red: #ff4b4b !important;
 }
 /* -------------------------------------------------
    2. FORCE BLACK EVEN IN LIGHT MODE
@@ -184,7 +185,7 @@ def parse_one_pdf(pdf_bytes: bytes):
     return grand, by_status, text
 
 # =========================================================
-# SNAPSHOT FIGURE - FIXED: NO CRASH ON ZERO REVENUE
+# SNAPSHOT FIGURE
 # =========================================================
 def build_snapshot_figure(period_label, grand, by_status):
     fig = plt.figure(figsize=(10, 6), dpi=150, facecolor='#111111')
@@ -249,7 +250,7 @@ def build_snapshot_figure(period_label, grand, by_status):
     return fig
 
 # =========================================================
-# EXPORT FUNCTIONS - BLACK PNG & PDF
+# EXPORT FUNCTIONS
 # =========================================================
 def export_snapshot_png(period_label, grand, by_status):
     fig = build_snapshot_figure(period_label, grand, by_status)
@@ -450,13 +451,47 @@ if not records:
 records.sort(key=lambda r: r["period"])
 
 # =========================================================
-# CURRENT REPORT
+# DATA PREP (COMPARISON)
 # =========================================================
-r = records[-1]
-grand = r["grand"]
-by_status = r["by_status"]
-period_label = r["period"]
+curr = records[-1]
+prev = records[-2] if len(records) > 1 else None
+
+grand = curr["grand"]
+by_status = curr["by_status"]
+period_label = curr["period"]
 overall_arpu = (grand["amt"]/grand["act"]) if grand["act"] else 0
+
+# Helper to generate delta HTML
+def get_delta_html(current_val, prev_val, is_currency=False):
+    if prev_val is None:
+        return ""
+    diff = current_val - prev_val
+    if diff == 0:
+        return ""
+    
+    color = "#3ddc97" if diff > 0 else "#ff4b4b" # Green for positive, Red for negative
+    sign = "+" if diff > 0 else ""
+    val_str = f"{sign}${diff:,.2f}" if is_currency else f"{sign}{diff:,}"
+    
+    # Render small text next to value
+    return f'<span style="font-size:16px; color:{color}; margin-left:8px;">{val_str}</span>'
+
+# Calculate Top Row Deltas
+d_act_html = ""
+d_rev_html = ""
+d_arpu_html = ""
+
+if prev:
+    p_grand = prev["grand"]
+    p_arpu = (p_grand["amt"]/p_grand["act"]) if p_grand["act"] else 0
+    
+    d_act_html = get_delta_html(grand["act"], p_grand["act"])
+    d_rev_html = get_delta_html(grand["amt"], p_grand["amt"], True)
+    d_arpu_html = get_delta_html(overall_arpu, p_arpu, True)
+
+# =========================================================
+# KPI REPORT
+# =========================================================
 
 # --- TOP KPI ROW ---
 html_top = f"""
@@ -464,32 +499,53 @@ html_top = f"""
     <div style="flex:1;background-color:#111111;border:1px solid #222222;
                 border-radius:14px;padding:16px;text-align:center;">
         <p style="margin:0;font-size:16px;color:#aaaaaa;">FTTH Customers</p>
-        <p style="margin:0;font-size:28px;font-weight:700;color:#49d0ff;">{grand['act']:,}</p>
+        <p style="margin:0;font-size:28px;font-weight:700;color:#49d0ff;">
+            {grand['act']:,} {d_act_html}
+        </p>
     </div>
     <div style="flex:1;background-color:#111111;border:1px solid #222222;
                 border-radius:14px;padding:16px;text-align:center;">
         <p style="margin:0;font-size:16px;color:#aaaaaa;">Total Revenue</p>
-        <p style="margin:0;font-size:28px;font-weight:700;color:#3ddc97;">${grand['amt']:,.2f}</p>
+        <p style="margin:0;font-size:28px;font-weight:700;color:#3ddc97;">
+            ${grand['amt']:,.2f} {d_rev_html}
+        </p>
     </div>
     <div style="flex:1;background-color:#111111;border:1px solid #222222;
                 border-radius:14px;padding:16px;text-align:center;">
         <p style="margin:0;font-size:16px;color:#aaaaaa;">ARPU</p>
-        <p style="margin:0;font-size:28px;font-weight:700;color:#3ddc97;">${overall_arpu:,.2f}</p>
+        <p style="margin:0;font-size:28px;font-weight:700;color:#3ddc97;">
+            ${overall_arpu:,.2f} {d_arpu_html}
+        </p>
     </div>
 </div>
 """
 st.markdown(html_top, unsafe_allow_html=True)
+if prev:
+    st.caption(f"Comparing: {curr['period']} (Current) vs {prev['period']} (Previous)")
 st.divider()
 
-# --- KPI BOXES (SAME STYLE AS TOP ROW) ---
-def metric_box(col, title, value, subtitle1, subtitle2):
+# --- KPI BOXES ---
+def metric_box(col, title, stat_key, label_sub1, label_sub2):
+    # Retrieve current values
+    c_act = by_status[stat_key]["act"]
+    c_amt = by_status[stat_key]["amt"]
+    c_rpc = by_status[stat_key]["rpc"]
+    
+    # Delta logic
+    d_act = ""
+    if prev:
+        p_act = prev["by_status"][stat_key]["act"]
+        d_act = get_delta_html(c_act, p_act)
+
     html = f"""
     <div style="background-color:#111111;border:1px solid #222222;
                 border-radius:14px;padding:16px;text-align:center;">
         <p style="margin:0;font-size:16px;color:#aaaaaa;">{title}</p>
-        <p style="margin:0;font-size:28px;font-weight:700;color:#49d0ff;">{value:,}</p>
+        <p style="margin:0;font-size:28px;font-weight:700;color:#49d0ff;">
+            {c_act:,} {d_act}
+        </p>
         <p style="margin:0;font-size:14px;color:#3ddc97;">
-            {subtitle1} • {subtitle2}
+            Rev ${c_amt:,.2f} • ARPU ${c_rpc:,.2f}
         </p>
     </div>
     """
@@ -497,32 +553,12 @@ def metric_box(col, title, value, subtitle1, subtitle2):
 
 c1, c2, c3 = st.columns(3)
 
-metric_box(
-    c1,
-    "ACT — Active Residential",
-    by_status["ACT"]["act"],
-    f"Rev ${by_status['ACT']['amt']:,.2f}",
-    f"ARPU ${by_status['ACT']['rpc']:,.2f}"
-)
-
-metric_box(
-    c2,
-    "COM — Active Commercial",
-    by_status["COM"]["act"],
-    f"Rev ${by_status['COM']['amt']:,.2f}",
-    f"ARPU ${by_status['COM']['rpc']:,.2f}"
-)
-
-metric_box(
-    c3,
-    "VIP",
-    by_status["VIP"]["act"],
-    f"Rev ${by_status['VIP']['amt']:,.2f}",
-    f"ARPU ${by_status['VIP']['rpc']:,.2f}"
-)
+metric_box(c1, "ACT — Active Residential", "ACT", "Rev", "ARPU")
+metric_box(c2, "COM — Active Commercial", "COM", "Rev", "ARPU")
+metric_box(c3, "VIP", "VIP", "Rev", "ARPU")
 
 # =========================================================
-# CHARTS – REVENUE SHARE: BLACK LABELS | BAR: WHITE LABELS
+# CHARTS – REVENUE SHARE & BAR
 # =========================================================
 st.subheader("Visuals")
 
@@ -619,7 +655,7 @@ with r2:
     )
 
 # =========================================================
-# EXPORTS - PERFECT BLACK
+# EXPORTS
 # =========================================================
 png_bytes = export_snapshot_png(period_label, grand, by_status)
 pdf_bytes = export_snapshot_pdf(period_label, grand, by_status)
