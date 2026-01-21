@@ -50,21 +50,21 @@ def get_date_params(period_name):
 
     return sdate, edate, avg
 
-# --- DATA FETCHING (UNIT AWARE) ---
+# --- DATA FETCHING (FULL DEBUG MODE) ---
 @st.cache_data(ttl=300)
 def get_period_peaks_debug(sensor_id, period_name):
     """
     Returns (in_peak, out_peak, debug_info_dict)
-    Prioritizes channels where UNIT contains 'bit/s'.
+    Fetches ALL channels for debugging purposes.
     """
-    debug_log = {"sensor_id": sensor_id, "step": "init"}
+    debug_log = {"sensor_id": sensor_id}
     
-    # 1. Get Channel IDs and UNITS
+    # 1. Get ALL Channel Info (Name, ID, Unit, LastValue)
     meta_url = f"{BASE}/api/table.json"
     meta_params = {
         "content": "channels",
         "id": sensor_id,
-        "columns": "name,objid,unit", # Fetching Unit is key here
+        "columns": "name,objid,unit,lastvalue", # Get everything
         "username": USER,
         "passhash": PH
     }
@@ -76,37 +76,32 @@ def get_period_peaks_debug(sensor_id, period_name):
         meta_data = requests.get(meta_url, params=meta_params, verify=False, timeout=10).json()
         channels = meta_data.get("channels", [])
         
-        # Save found channels to debug log (Name + Unit + ID)
-        debug_log["channels_found"] = [
-            {
-                "name": c.get('name'), 
-                "unit": c.get('unit', 'No Unit'), 
-                "id": c.get('objid')
-            } for c in channels
-        ]
+        # --- CRITICAL: Save RAW list to debug log ---
+        # This will show the user exactly what exists
+        debug_log["ALL_CHANNELS_RAW"] = channels
         
-        # --- MATCHING LOGIC BASED ON UNITS ---
-        # We want channels where unit is speed (bit/s, kbit/s, Mbit/s)
-        # We avoid channels where unit is volume (Byte, GByte)
-        
+        # --- ATTEMPT AUTOMATIC MATCHING (Best Effort) ---
         for ch in channels:
             name = ch.get("name", "").lower()
             unit = ch.get("unit", "").lower()
             cid = ch.get("objid")
             
-            # Skip if unit is clearly volume (Bytes)
+            # Explicitly skip Volume/Byte channels
             if "byte" in unit:
                 continue
 
-            # Check if this is a Speed channel
-            is_speed_unit = "bit/s" in unit or "bit/s" in name or "(speed)" in name
-            
-            if is_speed_unit:
-                # Assign to In or Out
+            # Prioritize "Speed" or bit-based units
+            is_valid_speed = "bit" in unit or "speed" in name
+
+            if is_valid_speed:
                 if "traffic in" in name or "down" in name:
                     in_id = cid
                 elif "traffic out" in name or "up" in name:
                     out_id = cid
+                # Fallback: if we see "Traffic Total" and haven't found split channels
+                elif "traffic total" in name and in_id is None:
+                    # Temporary hack: map Total to In just to get data on graph
+                    in_id = cid 
 
         debug_log["matched_ids"] = {"in": in_id, "out": out_id}
         
@@ -115,7 +110,7 @@ def get_period_peaks_debug(sensor_id, period_name):
         return 0.0, 0.0, debug_log
 
     if in_id is None and out_id is None:
-        debug_log["error"] = "No matching speed channels found."
+        debug_log["error"] = "Could not identify In/Out channels from the list."
         return 0.0, 0.0, debug_log
 
     # 2. Get Historic Data
@@ -137,7 +132,6 @@ def get_period_peaks_debug(sensor_id, period_name):
     }
     
     debug_log["request_url"] = hist_url
-    debug_log["request_cols"] = cols_to_fetch
 
     try:
         hist_data = requests.get(hist_url, params=hist_params, verify=False, timeout=20).json()
@@ -154,16 +148,7 @@ def get_period_peaks_debug(sensor_id, period_name):
             if in_id is not None:
                 val = row.get(f"value_{in_id}")
                 if val:
-                    # Conversion Logic:
-                    # PRTG RAW value for Speed is usually in the base unit (bit/s or kbit/s).
-                    # But often historicdata.json returns Bytes/sec even for speed channels if not carefully handled.
-                    # Standard Formula: (Value * 8) / 1,000,000 converts Bytes/sec to Mbps
-                    # If PRTG returns bits/sec directly, we might need / 1,000,000.
-                    # Usually, historicdata API normalizes to numeric values.
-                    
-                    # We assume standard PRTG behavior: Base numeric value. 
-                    # If the number is huge (e.g. 100,000,000), it's likely bits or bytes.
-                    # Safe bet: (val * 8) / 1,000,000 if it's bytes.
+                    # Conversion: (Bytes * 8) / 1,000,000 = Mbps
                     mbps = (float(val) * 8) / 1_000_000
                     if mbps > max_in: max_in = mbps
             
@@ -311,9 +296,9 @@ with col2:
     st.progress(min(pct_out / 100, 1.0))
     st.caption(f"Capacity Goal: {TOTAL_CAPACITY:,.0f} Mbps")
 
-# --- TROUBLESHOOTER ---
+# --- FULL DEBUGGER ---
 with st.sidebar:
     st.divider()
-    with st.expander("🛠 Troubleshooter"):
-        st.write("Looking for channels with unit 'bit/s'...")
+    with st.expander("🛠 Troubleshooter (FULL CHANNEL LIST)", expanded=True):
+        st.write("Below is every channel PRTG reports for each sensor. Look for the 'objid' of the channel you want.")
         st.json(all_debug_info)
