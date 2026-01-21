@@ -5,6 +5,7 @@ from io import BytesIO
 import urllib3
 import matplotlib.pyplot as plt
 import uuid
+from datetime import datetime, timedelta
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 st.set_page_config(page_title="PRTG Bandwidth", layout="wide", page_icon="Signal")
@@ -13,8 +14,7 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-# --- NEW: Define your total network capacity in Mbps here ---
-# Example: 40000 Mbps = 40 Gbps. Update this to match Pioneer's actual total uplink.
+# Define your total network capacity in Mbps here
 TOTAL_CAPACITY = 40000 
 
 if "period_key" not in st.session_state:
@@ -27,6 +27,7 @@ period = st.selectbox(
     key=st.session_state.period_key
 )
 
+# Map period to PRTG Graph ID (for the image)
 graphid = {
     "Live (2 hours)": "0",
     "Last 48 hours": "1",
@@ -42,31 +43,120 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
+def get_date_params(period_name):
+    """Calculates start/end dates and averaging interval based on period."""
+    now = datetime.now()
+    edate = now.strftime("%Y-%m-%d-%H-%M-%S")
+    
+    if period_name == "Live (2 hours)":
+        sdate = (now - timedelta(hours=2)).strftime("%Y-%m-%d-%H-%M-%S")
+        avg = 0 # Raw data
+    elif period_name == "Last 48 hours":
+        sdate = (now - timedelta(hours=48)).strftime("%Y-%m-%d-%H-%M-%S")
+        avg = 300 # 5 minute average
+    elif period_name == "Last 7 days":
+        sdate = (now - timedelta(days=7)).strftime("%Y-%m-%d-%H-%M-%S")
+        avg = 3600 # 1 hour average (matches standard PRTG graph views)
+    elif period_name == "Last 30 days":
+        sdate = (now - timedelta(days=30)).strftime("%Y-%m-%d-%H-%M-%S")
+        avg = 3600 # 1 hour average
+    elif period_name == "Last 365 days":
+        sdate = (now - timedelta(days=365)).strftime("%Y-%m-%d-%H-%M-%S")
+        avg = 86400 # 1 day average
+    else:
+        # Default fallback
+        sdate = (now - timedelta(hours=24)).strftime("%Y-%m-%d-%H-%M-%S")
+        avg = 900
+
+    return sdate, edate, avg
+
 @st.cache_data(ttl=300)
-def get_real_peaks(sensor_id):
-    url = f"{BASE}/api/table.json"
-    params = {
+def get_period_peaks(sensor_id, period_name):
+    """
+    1. Gets Channel IDs (In/Out) from table.json
+    2. Queries historicdata.json for the specific time period
+    3. Returns the max (Peak) for that period
+    """
+    
+    # --- Step 1: Identify Channel IDs ---
+    meta_url = f"{BASE}/api/table.json"
+    meta_params = {
         "content": "channels",
         "id": sensor_id,
-        "columns": "name,maximum_raw",
+        "columns": "name,objid", # We need the ID to query history
         "username": USER,
         "passhash": PH
     }
+    
+    in_id = None
+    out_id = None
+    
     try:
-        data = requests.get(url, params=params, verify=False, timeout=15).json()
-        in_peak = out_peak = 0.0
-        for ch in data.get("channels", []):
-            name = ch.get("name", "").strip()
-            raw = ch.get("maximum_raw", "0")
-            if not raw or float(raw) == 0:
-                continue
-            mbps = float(raw) / 10_000_000
+        meta_data = requests.get(meta_url, params=meta_params, verify=False, timeout=10).json()
+        for ch in meta_data.get("channels", []):
+            name = ch.get("name", "")
+            cid = ch.get("objid")
+            # Logic to identify In vs Out
             if "Traffic In" in name or "Down" in name:
-                in_peak = max(in_peak, round(mbps, 2))
+                in_id = cid
             elif "Traffic Out" in name or "Up" in name:
-                out_peak = max(out_peak, round(mbps, 2))
-        return in_peak, out_peak
-    except:
+                out_id = cid
+    except Exception as e:
+        return 0.0, 0.0
+
+    if in_id is None and out_id is None:
+        return 0.0, 0.0
+
+    # --- Step 2: Get Historic Data for those IDs ---
+    sdate, edate, avg = get_date_params(period_name)
+    hist_url = f"{BASE}/api/historicdata.json"
+    
+    # Construct columns parameter (e.g., value_0,value_1)
+    # PRTG historic data columns are accessed via 'value_CHANNELID'
+    cols_to_fetch = []
+    if in_id: cols_to_fetch.append(f"value_{in_id}")
+    if out_id: cols_to_fetch.append(f"value_{out_id}")
+    
+    hist_params = {
+        "id": sensor_id,
+        "sdate": sdate,
+        "edate": edate,
+        "avg": avg,
+        "columns": ",".join(cols_to_fetch),
+        "username": USER,
+        "passhash": PH
+    }
+
+    try:
+        hist_data = requests.get(hist_url, params=hist_params, verify=False, timeout=20).json()
+        
+        max_in = 0.0
+        max_out = 0.0
+        
+        if "histdata" in hist_data:
+            for row in hist_data["histdata"]:
+                # Parse Inbound
+                if in_id:
+                    val = row.get(f"value_{in_id}")
+                    if val:
+                        # PRTG History is usually Bytes/sec. Convert to Mbps.
+                        # Formula: (Bytes * 8) / 1,000,000
+                        mbps = (float(val) * 8) / 1_000_000
+                        if mbps > max_in:
+                            max_in = mbps
+                
+                # Parse Outbound
+                if out_id:
+                    val = row.get(f"value_{out_id}")
+                    if val:
+                        mbps = (float(val) * 8) / 1_000_000
+                        if mbps > max_out:
+                            max_out = mbps
+                            
+        return round(max_in, 2), round(max_out, 2)
+
+    except Exception as e:
+        # Fallback if history fails
         return 0.0, 0.0
 
 @st.cache_data(ttl=300)
@@ -98,7 +188,9 @@ for i in range(0, len(SENSORS), 2):
     pair = list(SENSORS.items())[i:i+2]
     for col, (name, sid) in zip(cols, pair):
         with col:
-            in_peak, out_peak = get_real_peaks(sid)
+            # Updated function call here passing the period
+            in_peak, out_peak = get_period_peaks(sid, period)
+            
             total_in  += in_peak
             total_out += out_peak
             st.subheader(name)
@@ -157,24 +249,20 @@ with col1:
     st.pyplot(fig, use_container_width=True)
 
 with col2:
-    # --- NEW: Percentage Calculations ---
-    # Avoid division by zero if capacity is not set
+    # --- Percentage Calculations ---
     cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1 
     
     pct_in = (total_in / cap) * 100
     pct_out = (total_out / cap) * 100
     
-    # Existing Metrics
     st.metric("**Total In**",  f"{total_in:,.0f} Mbps")
     st.metric("**Total Out**", f"{total_out:,.0f} Mbps")
     
     st.divider()
     
-    # New Percentage Metrics
     st.markdown("### Utilization")
     
     st.caption(f"Inbound ({pct_in:.1f}%)")
-    # Ensure progress bar doesn't crash if > 100%
     st.progress(min(pct_in / 100, 1.0))
     
     st.caption(f"Outbound ({pct_out:.1f}%)")
