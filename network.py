@@ -50,11 +50,12 @@ def get_date_params(period_name):
 
     return sdate, edate, avg
 
-# --- DATA FETCHING WITH DEBUGGING ---
+# --- DATA FETCHING WITH PRIORITY FOR 'SPEED' ---
 @st.cache_data(ttl=300)
 def get_period_peaks_debug(sensor_id, period_name):
     """
     Returns (in_peak, out_peak, debug_info_dict)
+    Prioritizes channels with "(Speed)" in the name.
     """
     debug_log = {"sensor_id": sensor_id, "step": "init"}
     
@@ -70,32 +71,61 @@ def get_period_peaks_debug(sensor_id, period_name):
     
     in_id = None
     out_id = None
+    total_id = None
     
     try:
         meta_data = requests.get(meta_url, params=meta_params, verify=False, timeout=10).json()
         channels = meta_data.get("channels", [])
         
-        # Save found channels to debug log so user can see names
+        # Save found channels to debug log
         debug_log["channels_found"] = [{c.get('name'): c.get('objid')} for c in channels]
         
+        # --- MATCHING LOGIC ---
+        # Pass 1: Look specifically for "(Speed)" channels (High Priority)
         for ch in channels:
-            name = ch.get("name", "").lower() # Convert to lowercase for safer matching
+            name = ch.get("name", "").lower()
             cid = ch.get("objid")
             
-            # Robust Matching Logic
-            if "traffic in" in name or "down" in name:
-                in_id = cid
-            elif "traffic out" in name or "up" in name:
-                out_id = cid
-                
-        debug_log["matched_ids"] = {"in": in_id, "out": out_id}
+            if "speed" in name:
+                if "traffic in" in name or "down" in name:
+                    in_id = cid
+                elif "traffic out" in name or "up" in name:
+                    out_id = cid
+                elif "traffic total" in name:
+                    total_id = cid
+
+        # Pass 2: If we didn't find specific Speed channels, try generic names 
+        # (but avoid "Volume" or "Traffic Total" if we already have specific matches)
+        if in_id is None:
+            for ch in channels:
+                name = ch.get("name", "").lower()
+                cid = ch.get("objid")
+                if "volume" not in name and "speed" not in name:
+                    if "traffic in" in name or "down" in name:
+                        in_id = cid
+
+        if out_id is None:
+            for ch in channels:
+                name = ch.get("name", "").lower()
+                cid = ch.get("objid")
+                if "volume" not in name and "speed" not in name:
+                    if "traffic out" in name or "up" in name:
+                        out_id = cid
+
+        debug_log["matched_ids"] = {"in": in_id, "out": out_id, "total_fallback": total_id}
         
     except Exception as e:
         debug_log["meta_error"] = str(e)
         return 0.0, 0.0, debug_log
 
-    if in_id is None and out_id is None:
-        debug_log["error"] = "No matching channels (in/out/down/up) found."
+    # If absolutely no In/Out found, but Total (Speed) exists, try to use that (rare fallback)
+    # This might split total 50/50 just to show *some* usage if distinct channels are missing
+    use_total_fallback = False
+    if in_id is None and out_id is None and total_id is not None:
+        use_total_fallback = True
+        
+    if in_id is None and out_id is None and not use_total_fallback:
+        debug_log["error"] = "No matching channels (in/out/speed) found."
         return 0.0, 0.0, debug_log
 
     # 2. Get Historic Data
@@ -103,9 +133,9 @@ def get_period_peaks_debug(sensor_id, period_name):
     hist_url = f"{BASE}/api/historicdata.json"
     
     cols_to_fetch = []
-    # FIX: Explicitly check 'is not None' because ID 0 evaluates to False
     if in_id is not None: cols_to_fetch.append(f"value_{in_id}")
     if out_id is not None: cols_to_fetch.append(f"value_{out_id}")
+    if use_total_fallback: cols_to_fetch.append(f"value_{total_id}")
     
     hist_params = {
         "id": sensor_id,
@@ -123,36 +153,42 @@ def get_period_peaks_debug(sensor_id, period_name):
     try:
         hist_data = requests.get(hist_url, params=hist_params, verify=False, timeout=20).json()
         
-        # Capture a sample of data for debug
-        if "histdata" in hist_data and len(hist_data["histdata"]) > 0:
-            debug_log["data_sample_first_row"] = hist_data["histdata"][0]
-            debug_log["row_count"] = len(hist_data["histdata"])
-        else:
+        if "histdata" not in hist_data or len(hist_data["histdata"]) == 0:
             debug_log["data_empty"] = True
-            debug_log["raw_response"] = hist_data
+            return 0.0, 0.0, debug_log
 
         max_in = 0.0
         max_out = 0.0
+        max_total = 0.0
         
-        if "histdata" in hist_data:
-            for row in hist_data["histdata"]:
-                # Inbound
-                if in_id is not None:
-                    val = row.get(f"value_{in_id}")
-                    if val:
-                        # (Bytes * 8) / 1,000,000 = Mbps
-                        mbps = (float(val) * 8) / 1_000_000
-                        if mbps > max_in:
-                            max_in = mbps
-                
-                # Outbound
-                if out_id is not None:
-                    val = row.get(f"value_{out_id}")
-                    if val:
-                        mbps = (float(val) * 8) / 1_000_000
-                        if mbps > max_out:
-                            max_out = mbps
-                            
+        for row in hist_data["histdata"]:
+            # Process Inbound
+            if in_id is not None:
+                val = row.get(f"value_{in_id}")
+                if val:
+                    # (Bytes * 8) / 1,000,000 = Mbps
+                    mbps = (float(val) * 8) / 1_000_000
+                    if mbps > max_in: max_in = mbps
+            
+            # Process Outbound
+            if out_id is not None:
+                val = row.get(f"value_{out_id}")
+                if val:
+                    mbps = (float(val) * 8) / 1_000_000
+                    if mbps > max_out: max_out = mbps
+
+            # Process Total Fallback
+            if use_total_fallback:
+                val = row.get(f"value_{total_id}")
+                if val:
+                    mbps = (float(val) * 8) / 1_000_000
+                    if mbps > max_total: max_total = mbps
+        
+        if use_total_fallback:
+            # If we only found "Total (Speed)", we return that as Inbound for visibility
+            # or split it. Returning as Inbound is safer for "Peak" tracking.
+            return round(max_total, 2), 0.0, debug_log
+
         return round(max_in, 2), round(max_out, 2), debug_log
 
     except Exception as e:
@@ -201,7 +237,6 @@ current_graph_id = graphid_map.get(period, "1")
 total_in = 0.0
 total_out = 0.0
 
-# Store debug info to show at the bottom if needed
 all_debug_info = {}
 
 for i in range(0, len(SENSORS), 2):
@@ -209,7 +244,6 @@ for i in range(0, len(SENSORS), 2):
     pair = list(SENSORS.items())[i:i+2]
     for col, (name, sid) in zip(cols, pair):
         with col:
-            # Fetch data with debug info
             in_peak, out_peak, dbg = get_period_peaks_debug(sid, period)
             all_debug_info[name] = dbg
             
@@ -295,6 +329,6 @@ with col2:
 # --- TROUBLESHOOTER SIDEBAR ---
 with st.sidebar:
     st.divider()
-    with st.expander("🛠 Troubleshooter (Expand if 0.00 Mbps)"):
-        st.write("If you see 0.00, check the 'Found Channels' below. We need 'Traffic In' and 'Traffic Out'.")
+    with st.expander("🛠 Troubleshooter"):
+        st.write("Checking for channels containing '(Speed)'...")
         st.json(all_debug_info)
