@@ -50,7 +50,7 @@ def get_date_params(period_name):
 
     return sdate, edate, avg
 
-# --- DATA FETCHING ---
+# --- DATA FETCHING WITH DEBUGGING ---
 @st.cache_data(ttl=300)
 def get_period_peaks_debug(sensor_id, period_name):
     """
@@ -73,15 +73,19 @@ def get_period_peaks_debug(sensor_id, period_name):
     
     try:
         meta_data = requests.get(meta_url, params=meta_params, verify=False, timeout=10).json()
-        debug_log["channels_found"] = meta_data.get("channels", [])
+        channels = meta_data.get("channels", [])
         
-        for ch in meta_data.get("channels", []):
-            name = ch.get("name", "")
+        # Save found channels to debug log so user can see names
+        debug_log["channels_found"] = [{c.get('name'): c.get('objid')} for c in channels]
+        
+        for ch in channels:
+            name = ch.get("name", "").lower() # Convert to lowercase for safer matching
             cid = ch.get("objid")
-            # Loose matching for "In" / "Out"
-            if "Traffic In" in name or "Down" in name:
+            
+            # Robust Matching Logic
+            if "traffic in" in name or "down" in name:
                 in_id = cid
-            elif "Traffic Out" in name or "Up" in name:
+            elif "traffic out" in name or "up" in name:
                 out_id = cid
                 
         debug_log["matched_ids"] = {"in": in_id, "out": out_id}
@@ -91,7 +95,7 @@ def get_period_peaks_debug(sensor_id, period_name):
         return 0.0, 0.0, debug_log
 
     if in_id is None and out_id is None:
-        debug_log["error"] = "No matching channels found"
+        debug_log["error"] = "No matching channels (in/out/down/up) found."
         return 0.0, 0.0, debug_log
 
     # 2. Get Historic Data
@@ -99,7 +103,7 @@ def get_period_peaks_debug(sensor_id, period_name):
     hist_url = f"{BASE}/api/historicdata.json"
     
     cols_to_fetch = []
-    # FIX: Explicitly check for None, because ID 0 evaluates to False in Python
+    # FIX: Explicitly check 'is not None' because ID 0 evaluates to False
     if in_id is not None: cols_to_fetch.append(f"value_{in_id}")
     if out_id is not None: cols_to_fetch.append(f"value_{out_id}")
     
@@ -113,18 +117,20 @@ def get_period_peaks_debug(sensor_id, period_name):
         "passhash": PH
     }
     
-    debug_log["hist_url"] = hist_url
-    debug_log["hist_params"] = hist_params
+    debug_log["request_url"] = hist_url
+    debug_log["request_cols"] = cols_to_fetch
 
     try:
         hist_data = requests.get(hist_url, params=hist_params, verify=False, timeout=20).json()
         
-        # Capture first 2 rows for debug
-        if "histdata" in hist_data:
-            debug_log["hist_sample"] = hist_data["histdata"][:2]
+        # Capture a sample of data for debug
+        if "histdata" in hist_data and len(hist_data["histdata"]) > 0:
+            debug_log["data_sample_first_row"] = hist_data["histdata"][0]
+            debug_log["row_count"] = len(hist_data["histdata"])
         else:
-            debug_log["hist_raw"] = hist_data
-        
+            debug_log["data_empty"] = True
+            debug_log["raw_response"] = hist_data
+
         max_in = 0.0
         max_out = 0.0
         
@@ -134,6 +140,7 @@ def get_period_peaks_debug(sensor_id, period_name):
                 if in_id is not None:
                     val = row.get(f"value_{in_id}")
                     if val:
+                        # (Bytes * 8) / 1,000,000 = Mbps
                         mbps = (float(val) * 8) / 1_000_000
                         if mbps > max_in:
                             max_in = mbps
@@ -202,6 +209,7 @@ for i in range(0, len(SENSORS), 2):
     pair = list(SENSORS.items())[i:i+2]
     for col, (name, sid) in zip(cols, pair):
         with col:
+            # Fetch data with debug info
             in_peak, out_peak, dbg = get_period_peaks_debug(sid, period)
             all_debug_info[name] = dbg
             
@@ -284,9 +292,9 @@ with col2:
     st.progress(min(pct_out / 100, 1.0))
     st.caption(f"Capacity Goal: {TOTAL_CAPACITY:,.0f} Mbps")
 
-# --- DEBUG / TROUBLESHOOTER ---
+# --- TROUBLESHOOTER SIDEBAR ---
 with st.sidebar:
     st.divider()
-    with st.expander("🛠 Troubleshooter (Check here if 0.00)"):
-        st.info("If you see 0.00 Mbps, check the data below to see what PRTG is returning.")
-        st.write(all_debug_info)
+    with st.expander("🛠 Troubleshooter (Expand if 0.00 Mbps)"):
+        st.write("If you see 0.00, check the 'Found Channels' below. We need 'Traffic In' and 'Traffic Out'.")
+        st.json(all_debug_info)
