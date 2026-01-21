@@ -50,82 +50,72 @@ def get_date_params(period_name):
 
     return sdate, edate, avg
 
-# --- DATA FETCHING WITH PRIORITY FOR 'SPEED' ---
+# --- DATA FETCHING (UNIT AWARE) ---
 @st.cache_data(ttl=300)
 def get_period_peaks_debug(sensor_id, period_name):
     """
     Returns (in_peak, out_peak, debug_info_dict)
-    Prioritizes channels with "(Speed)" in the name.
+    Prioritizes channels where UNIT contains 'bit/s'.
     """
     debug_log = {"sensor_id": sensor_id, "step": "init"}
     
-    # 1. Get Channel IDs
+    # 1. Get Channel IDs and UNITS
     meta_url = f"{BASE}/api/table.json"
     meta_params = {
         "content": "channels",
         "id": sensor_id,
-        "columns": "name,objid", 
+        "columns": "name,objid,unit", # Fetching Unit is key here
         "username": USER,
         "passhash": PH
     }
     
     in_id = None
     out_id = None
-    total_id = None
     
     try:
         meta_data = requests.get(meta_url, params=meta_params, verify=False, timeout=10).json()
         channels = meta_data.get("channels", [])
         
-        # Save found channels to debug log
-        debug_log["channels_found"] = [{c.get('name'): c.get('objid')} for c in channels]
+        # Save found channels to debug log (Name + Unit + ID)
+        debug_log["channels_found"] = [
+            {
+                "name": c.get('name'), 
+                "unit": c.get('unit', 'No Unit'), 
+                "id": c.get('objid')
+            } for c in channels
+        ]
         
-        # --- MATCHING LOGIC ---
-        # Pass 1: Look specifically for "(Speed)" channels (High Priority)
+        # --- MATCHING LOGIC BASED ON UNITS ---
+        # We want channels where unit is speed (bit/s, kbit/s, Mbit/s)
+        # We avoid channels where unit is volume (Byte, GByte)
+        
         for ch in channels:
             name = ch.get("name", "").lower()
+            unit = ch.get("unit", "").lower()
             cid = ch.get("objid")
             
-            if "speed" in name:
+            # Skip if unit is clearly volume (Bytes)
+            if "byte" in unit:
+                continue
+
+            # Check if this is a Speed channel
+            is_speed_unit = "bit/s" in unit or "bit/s" in name or "(speed)" in name
+            
+            if is_speed_unit:
+                # Assign to In or Out
                 if "traffic in" in name or "down" in name:
                     in_id = cid
                 elif "traffic out" in name or "up" in name:
                     out_id = cid
-                elif "traffic total" in name:
-                    total_id = cid
 
-        # Pass 2: If we didn't find specific Speed channels, try generic names 
-        # (but avoid "Volume" or "Traffic Total" if we already have specific matches)
-        if in_id is None:
-            for ch in channels:
-                name = ch.get("name", "").lower()
-                cid = ch.get("objid")
-                if "volume" not in name and "speed" not in name:
-                    if "traffic in" in name or "down" in name:
-                        in_id = cid
-
-        if out_id is None:
-            for ch in channels:
-                name = ch.get("name", "").lower()
-                cid = ch.get("objid")
-                if "volume" not in name and "speed" not in name:
-                    if "traffic out" in name or "up" in name:
-                        out_id = cid
-
-        debug_log["matched_ids"] = {"in": in_id, "out": out_id, "total_fallback": total_id}
+        debug_log["matched_ids"] = {"in": in_id, "out": out_id}
         
     except Exception as e:
         debug_log["meta_error"] = str(e)
         return 0.0, 0.0, debug_log
 
-    # If absolutely no In/Out found, but Total (Speed) exists, try to use that (rare fallback)
-    # This might split total 50/50 just to show *some* usage if distinct channels are missing
-    use_total_fallback = False
-    if in_id is None and out_id is None and total_id is not None:
-        use_total_fallback = True
-        
-    if in_id is None and out_id is None and not use_total_fallback:
-        debug_log["error"] = "No matching channels (in/out/speed) found."
+    if in_id is None and out_id is None:
+        debug_log["error"] = "No matching speed channels found."
         return 0.0, 0.0, debug_log
 
     # 2. Get Historic Data
@@ -135,7 +125,6 @@ def get_period_peaks_debug(sensor_id, period_name):
     cols_to_fetch = []
     if in_id is not None: cols_to_fetch.append(f"value_{in_id}")
     if out_id is not None: cols_to_fetch.append(f"value_{out_id}")
-    if use_total_fallback: cols_to_fetch.append(f"value_{total_id}")
     
     hist_params = {
         "id": sensor_id,
@@ -159,14 +148,22 @@ def get_period_peaks_debug(sensor_id, period_name):
 
         max_in = 0.0
         max_out = 0.0
-        max_total = 0.0
         
         for row in hist_data["histdata"]:
             # Process Inbound
             if in_id is not None:
                 val = row.get(f"value_{in_id}")
                 if val:
-                    # (Bytes * 8) / 1,000,000 = Mbps
+                    # Conversion Logic:
+                    # PRTG RAW value for Speed is usually in the base unit (bit/s or kbit/s).
+                    # But often historicdata.json returns Bytes/sec even for speed channels if not carefully handled.
+                    # Standard Formula: (Value * 8) / 1,000,000 converts Bytes/sec to Mbps
+                    # If PRTG returns bits/sec directly, we might need / 1,000,000.
+                    # Usually, historicdata API normalizes to numeric values.
+                    
+                    # We assume standard PRTG behavior: Base numeric value. 
+                    # If the number is huge (e.g. 100,000,000), it's likely bits or bytes.
+                    # Safe bet: (val * 8) / 1,000,000 if it's bytes.
                     mbps = (float(val) * 8) / 1_000_000
                     if mbps > max_in: max_in = mbps
             
@@ -176,18 +173,6 @@ def get_period_peaks_debug(sensor_id, period_name):
                 if val:
                     mbps = (float(val) * 8) / 1_000_000
                     if mbps > max_out: max_out = mbps
-
-            # Process Total Fallback
-            if use_total_fallback:
-                val = row.get(f"value_{total_id}")
-                if val:
-                    mbps = (float(val) * 8) / 1_000_000
-                    if mbps > max_total: max_total = mbps
-        
-        if use_total_fallback:
-            # If we only found "Total (Speed)", we return that as Inbound for visibility
-            # or split it. Returning as Inbound is safer for "Peak" tracking.
-            return round(max_total, 2), 0.0, debug_log
 
         return round(max_in, 2), round(max_out, 2), debug_log
 
@@ -326,9 +311,9 @@ with col2:
     st.progress(min(pct_out / 100, 1.0))
     st.caption(f"Capacity Goal: {TOTAL_CAPACITY:,.0f} Mbps")
 
-# --- TROUBLESHOOTER SIDEBAR ---
+# --- TROUBLESHOOTER ---
 with st.sidebar:
     st.divider()
     with st.expander("🛠 Troubleshooter"):
-        st.write("Checking for channels containing '(Speed)'...")
+        st.write("Looking for channels with unit 'bit/s'...")
         st.json(all_debug_info)
