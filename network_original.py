@@ -13,6 +13,10 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
+# --- NEW: Define your total network capacity in Mbps here ---
+# Example: 40000 Mbps = 40 Gbps. Update this to match Pioneer's actual total uplink.
+TOTAL_CAPACITY = 40000 
+
 if "period_key" not in st.session_state:
     st.session_state.period_key = f"period_{uuid.uuid4()}"
 
@@ -120,14 +124,10 @@ with col1:
         linewidth=2.5
     )
     
-    # ---------------------------------------------------------
-    # FIX: Handle case where total_in and total_out are both 0
-    # ---------------------------------------------------------
     current_max = max(total_in, total_out)
     if current_max > 0:
         ax.set_ylim(0, current_max * 1.15)
     else:
-        # Default scale if no data is present to prevent crash
         ax.set_ylim(0, 100)
 
     ax.set_ylabel("Mbps", fontsize=16, fontweight="bold", color="white")
@@ -135,9 +135,6 @@ with col1:
     ax.set_facecolor("#0e1117")
     fig.patch.set_facecolor("#0e1117")
     
-    # ---------------------------------------------------------
-    # FIX: Use loop for spines to support older Matplotlib versions
-    # ---------------------------------------------------------
     for spine in ["top", "right", "left"]:
         ax.spines[spine].set_visible(False)
         
@@ -146,7 +143,6 @@ with col1:
 
     for bar in bars:
         height = bar.get_height()
-        # Only draw text if height > 0 to keep it clean
         if height > 0:
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
@@ -161,5 +157,27 @@ with col1:
     st.pyplot(fig, use_container_width=True)
 
 with col2:
+    # --- NEW: Percentage Calculations ---
+    # Avoid division by zero if capacity is not set
+    cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1 
+    
+    pct_in = (total_in / cap) * 100
+    pct_out = (total_out / cap) * 100
+    
+    # Existing Metrics
     st.metric("**Total In**",  f"{total_in:,.0f} Mbps")
     st.metric("**Total Out**", f"{total_out:,.0f} Mbps")
+    
+    st.divider()
+    
+    # New Percentage Metrics
+    st.markdown("### Utilization")
+    
+    st.caption(f"Inbound ({pct_in:.1f}%)")
+    # Ensure progress bar doesn't crash if > 100%
+    st.progress(min(pct_in / 100, 1.0))
+    
+    st.caption(f"Outbound ({pct_out:.1f}%)")
+    st.progress(min(pct_out / 100, 1.0))
+    
+    st.caption(f"Capacity Goal: {TOTAL_CAPACITY:,.0f} Mbps")
