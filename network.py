@@ -24,6 +24,14 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
+# --- MANUAL OVERRIDE (Optional) ---
+# If the auto-detector fails, enter the IDs found in the Troubleshooter here.
+# Format: "SENSOR_ID": {"in": CHANNEL_ID, "out": CHANNEL_ID}
+# Example: "12435": {"in": 0, "out": 1}
+MANUAL_IDS = {
+    # "12435": {"in": 0, "out": 1}, 
+}
+
 # --- DATE HELPER ---
 def get_date_params(period_name):
     now = datetime.now()
@@ -50,70 +58,77 @@ def get_date_params(period_name):
 
     return sdate, edate, avg
 
-# --- DATA FETCHING (FULL DEBUG MODE) ---
+# --- DATA FETCHING (SHOWHIDE=1) ---
 @st.cache_data(ttl=300)
 def get_period_peaks_debug(sensor_id, period_name):
     """
     Returns (in_peak, out_peak, debug_info_dict)
-    Fetches ALL channels for debugging purposes.
+    Uses showhide=1 to find channels from Tab 2.
     """
     debug_log = {"sensor_id": sensor_id}
-    
-    # 1. Get ALL Channel Info (Name, ID, Unit, LastValue)
-    meta_url = f"{BASE}/api/table.json"
-    meta_params = {
-        "content": "channels",
-        "id": sensor_id,
-        "columns": "name,objid,unit,lastvalue", # Get everything
-        "username": USER,
-        "passhash": PH
-    }
     
     in_id = None
     out_id = None
     
-    try:
-        meta_data = requests.get(meta_url, params=meta_params, verify=False, timeout=10).json()
-        channels = meta_data.get("channels", [])
+    # 1. Check Manual Override First
+    if str(sensor_id) in MANUAL_IDS:
+        mapping = MANUAL_IDS[str(sensor_id)]
+        in_id = mapping.get("in")
+        out_id = mapping.get("out")
+        debug_log["method"] = "Manual Override"
+    else:
+        # 2. Auto-Detect with SHOWHIDE=1
+        meta_url = f"{BASE}/api/table.json"
+        meta_params = {
+            "content": "channels",
+            "id": sensor_id,
+            "columns": "name,objid,unit,lastvalue",
+            "showhide": 1,  # <--- CRITICAL FIX: Shows hidden/Tab 2 channels
+            "username": USER,
+            "passhash": PH
+        }
         
-        # --- CRITICAL: Save RAW list to debug log ---
-        # This will show the user exactly what exists
-        debug_log["ALL_CHANNELS_RAW"] = channels
-        
-        # --- ATTEMPT AUTOMATIC MATCHING (Best Effort) ---
-        for ch in channels:
-            name = ch.get("name", "").lower()
-            unit = ch.get("unit", "").lower()
-            cid = ch.get("objid")
+        try:
+            meta_data = requests.get(meta_url, params=meta_params, verify=False, timeout=10).json()
+            channels = meta_data.get("channels", [])
+            debug_log["channels_found"] = channels # Save for troubleshooter
             
-            # Explicitly skip Volume/Byte channels
-            if "byte" in unit:
-                continue
+            for ch in channels:
+                name = ch.get("name", "").lower()
+                unit = ch.get("unit", "").lower()
+                cid = ch.get("objid")
+                
+                # Skip pure Volume channels
+                if "byte" in unit: 
+                    continue
 
-            # Prioritize "Speed" or bit-based units
-            is_valid_speed = "bit" in unit or "speed" in name
+                # Look for Speed indicators
+                is_speed = "bit" in unit or "speed" in name
+                
+                if is_speed:
+                    if "traffic in" in name or "down" in name:
+                        in_id = cid
+                    elif "traffic out" in name or "up" in name:
+                        out_id = cid
+                    
+                    # Fallback: simple "In" / "Out" if matched with Speed unit
+                    if in_id is None and (" in" in name or name == "in"):
+                        in_id = cid
+                    if out_id is None and (" out" in name or name == "out"):
+                        out_id = cid
 
-            if is_valid_speed:
-                if "traffic in" in name or "down" in name:
-                    in_id = cid
-                elif "traffic out" in name or "up" in name:
-                    out_id = cid
-                # Fallback: if we see "Traffic Total" and haven't found split channels
-                elif "traffic total" in name and in_id is None:
-                    # Temporary hack: map Total to In just to get data on graph
-                    in_id = cid 
+            debug_log["method"] = "Auto-Detect"
+            
+        except Exception as e:
+            debug_log["meta_error"] = str(e)
+            return 0.0, 0.0, debug_log
 
-        debug_log["matched_ids"] = {"in": in_id, "out": out_id}
-        
-    except Exception as e:
-        debug_log["meta_error"] = str(e)
-        return 0.0, 0.0, debug_log
+    debug_log["matched_ids"] = {"in": in_id, "out": out_id}
 
     if in_id is None and out_id is None:
-        debug_log["error"] = "Could not identify In/Out channels from the list."
         return 0.0, 0.0, debug_log
 
-    # 2. Get Historic Data
+    # 3. Get Historic Data
     sdate, edate, avg = get_date_params(period_name)
     hist_url = f"{BASE}/api/historicdata.json"
     
@@ -131,8 +146,6 @@ def get_period_peaks_debug(sensor_id, period_name):
         "passhash": PH
     }
     
-    debug_log["request_url"] = hist_url
-
     try:
         hist_data = requests.get(hist_url, params=hist_params, verify=False, timeout=20).json()
         
@@ -144,7 +157,7 @@ def get_period_peaks_debug(sensor_id, period_name):
         max_out = 0.0
         
         for row in hist_data["histdata"]:
-            # Process Inbound
+            # Inbound
             if in_id is not None:
                 val = row.get(f"value_{in_id}")
                 if val:
@@ -152,7 +165,7 @@ def get_period_peaks_debug(sensor_id, period_name):
                     mbps = (float(val) * 8) / 1_000_000
                     if mbps > max_in: max_in = mbps
             
-            # Process Outbound
+            # Outbound
             if out_id is not None:
                 val = row.get(f"value_{out_id}")
                 if val:
@@ -296,9 +309,9 @@ with col2:
     st.progress(min(pct_out / 100, 1.0))
     st.caption(f"Capacity Goal: {TOTAL_CAPACITY:,.0f} Mbps")
 
-# --- FULL DEBUGGER ---
+# --- DEBUGGER ---
 with st.sidebar:
     st.divider()
-    with st.expander("🛠 Troubleshooter (FULL CHANNEL LIST)", expanded=True):
-        st.write("Below is every channel PRTG reports for each sensor. Look for the 'objid' of the channel you want.")
+    with st.expander("🛠 Troubleshooter (Check Channels Here)"):
+        st.write("Using 'showhide=1' to see all channels (including Tab 2).")
         st.json(all_debug_info)
