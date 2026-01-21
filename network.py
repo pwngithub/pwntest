@@ -6,7 +6,7 @@ import urllib3
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
-# Disable SSL warnings for the internal PRTG connection
+# Disable SSL warnings for internal PRTG connection
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="PRTG Bandwidth", layout="wide", page_icon="Signal")
@@ -15,9 +15,8 @@ st.set_page_config(page_title="PRTG Bandwidth", layout="wide", page_icon="Signal
 USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
-TOTAL_CAPACITY = 40000  # Set this to your total network capacity in Mbps
+TOTAL_CAPACITY = 40000 
 
-# --- SENSOR MAPPING ---
 SENSORS = {
     "Firstlight":          "12435",
     "NNINIX":              "12506",
@@ -27,27 +26,25 @@ SENSORS = {
 
 # --- DATE HELPER ---
 def get_date_params(period_name):
-    """Calculates start/end dates and averaging interval based on period."""
     now = datetime.now()
     edate = now.strftime("%Y-%m-%d-%H-%M-%S")
     
     if period_name == "Live (2 hours)":
         sdate = (now - timedelta(hours=2)).strftime("%Y-%m-%d-%H-%M-%S")
-        avg = 0 # Raw data
+        avg = 0 
     elif period_name == "Last 48 hours":
         sdate = (now - timedelta(hours=48)).strftime("%Y-%m-%d-%H-%M-%S")
-        avg = 300 # 5 minute average
+        avg = 300 
     elif period_name == "Last 7 days":
         sdate = (now - timedelta(days=7)).strftime("%Y-%m-%d-%H-%M-%S")
-        avg = 3600 # 1 hour average
+        avg = 3600 
     elif period_name == "Last 30 days":
         sdate = (now - timedelta(days=30)).strftime("%Y-%m-%d-%H-%M-%S")
         avg = 3600 
     elif period_name == "Last 365 days":
         sdate = (now - timedelta(days=365)).strftime("%Y-%m-%d-%H-%M-%S")
-        avg = 86400 # 1 day average
+        avg = 86400 
     else:
-        # Default fallback
         sdate = (now - timedelta(hours=24)).strftime("%Y-%m-%d-%H-%M-%S")
         avg = 900
 
@@ -55,11 +52,13 @@ def get_date_params(period_name):
 
 # --- DATA FETCHING ---
 @st.cache_data(ttl=300)
-def get_period_peaks(sensor_id, period_name):
+def get_period_peaks_debug(sensor_id, period_name):
     """
-    Queries historicdata.json to find the true peak (max) for the selected period.
+    Returns (in_peak, out_peak, debug_info_dict)
     """
-    # 1. Get Channel IDs (In/Out) from table.json
+    debug_log = {"sensor_id": sensor_id, "step": "init"}
+    
+    # 1. Get Channel IDs
     meta_url = f"{BASE}/api/table.json"
     meta_params = {
         "content": "channels",
@@ -74,26 +73,35 @@ def get_period_peaks(sensor_id, period_name):
     
     try:
         meta_data = requests.get(meta_url, params=meta_params, verify=False, timeout=10).json()
+        debug_log["channels_found"] = meta_data.get("channels", [])
+        
         for ch in meta_data.get("channels", []):
             name = ch.get("name", "")
             cid = ch.get("objid")
+            # Loose matching for "In" / "Out"
             if "Traffic In" in name or "Down" in name:
                 in_id = cid
             elif "Traffic Out" in name or "Up" in name:
                 out_id = cid
-    except Exception:
-        return 0.0, 0.0
+                
+        debug_log["matched_ids"] = {"in": in_id, "out": out_id}
+        
+    except Exception as e:
+        debug_log["meta_error"] = str(e)
+        return 0.0, 0.0, debug_log
 
     if in_id is None and out_id is None:
-        return 0.0, 0.0
+        debug_log["error"] = "No matching channels found"
+        return 0.0, 0.0, debug_log
 
     # 2. Get Historic Data
     sdate, edate, avg = get_date_params(period_name)
     hist_url = f"{BASE}/api/historicdata.json"
     
     cols_to_fetch = []
-    if in_id: cols_to_fetch.append(f"value_{in_id}")
-    if out_id: cols_to_fetch.append(f"value_{out_id}")
+    # FIX: Explicitly check for None, because ID 0 evaluates to False in Python
+    if in_id is not None: cols_to_fetch.append(f"value_{in_id}")
+    if out_id is not None: cols_to_fetch.append(f"value_{out_id}")
     
     hist_params = {
         "id": sensor_id,
@@ -104,9 +112,18 @@ def get_period_peaks(sensor_id, period_name):
         "username": USER,
         "passhash": PH
     }
+    
+    debug_log["hist_url"] = hist_url
+    debug_log["hist_params"] = hist_params
 
     try:
         hist_data = requests.get(hist_url, params=hist_params, verify=False, timeout=20).json()
+        
+        # Capture first 2 rows for debug
+        if "histdata" in hist_data:
+            debug_log["hist_sample"] = hist_data["histdata"][:2]
+        else:
+            debug_log["hist_raw"] = hist_data
         
         max_in = 0.0
         max_out = 0.0
@@ -114,26 +131,26 @@ def get_period_peaks(sensor_id, period_name):
         if "histdata" in hist_data:
             for row in hist_data["histdata"]:
                 # Inbound
-                if in_id:
+                if in_id is not None:
                     val = row.get(f"value_{in_id}")
                     if val:
-                        # (Bytes * 8) / 1,000,000 = Mbps
                         mbps = (float(val) * 8) / 1_000_000
                         if mbps > max_in:
                             max_in = mbps
                 
                 # Outbound
-                if out_id:
+                if out_id is not None:
                     val = row.get(f"value_{out_id}")
                     if val:
                         mbps = (float(val) * 8) / 1_000_000
                         if mbps > max_out:
                             max_out = mbps
                             
-        return round(max_in, 2), round(max_out, 2)
+        return round(max_in, 2), round(max_out, 2), debug_log
 
-    except Exception:
-        return 0.0, 0.0
+    except Exception as e:
+        debug_log["hist_error"] = str(e)
+        return 0.0, 0.0, debug_log
 
 @st.cache_data(ttl=300)
 def get_graph_image(sensor_id, graphid):
@@ -154,20 +171,17 @@ def get_graph_image(sensor_id, graphid):
     except:
         return None
 
-# --- MAIN APP LAYOUT ---
+# --- MAIN APP ---
 st.title("PRTG Bandwidth Dashboard")
 
-# Fixed Key: Prevents "Duplicate Widget ID" error
 period = st.selectbox(
     "Time Period",
     ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
     index=1,
     key="period_selector_main"
 )
-
 st.caption(f"Showing peak usage for: **{period}**")
 
-# Map period to PRTG Graph ID for the images
 graphid_map = {
     "Live (2 hours)": "0",
     "Last 48 hours": "1",
@@ -180,13 +194,16 @@ current_graph_id = graphid_map.get(period, "1")
 total_in = 0.0
 total_out = 0.0
 
-# Render Rows of Sensors
+# Store debug info to show at the bottom if needed
+all_debug_info = {}
+
 for i in range(0, len(SENSORS), 2):
     cols = st.columns(2)
     pair = list(SENSORS.items())[i:i+2]
     for col, (name, sid) in zip(cols, pair):
         with col:
-            in_peak, out_peak = get_period_peaks(sid, period)
+            in_peak, out_peak, dbg = get_period_peaks_debug(sid, period)
+            all_debug_info[name] = dbg
             
             total_in  += in_peak
             total_out += out_peak
@@ -207,7 +224,6 @@ st.markdown("## Combined Peak Bandwidth Across All Circuits")
 
 col1, col2 = st.columns([3, 1])
 
-# Left Column: Matplotlib Chart
 with col1:
     fig, ax = plt.subplots(figsize=(12, 7))
     bars = ax.bar(
@@ -251,10 +267,8 @@ with col1:
             )
     st.pyplot(fig, use_container_width=True)
 
-# Right Column: Metrics & KPI
 with col2:
     cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1 
-    
     pct_in = (total_in / cap) * 100
     pct_out = (total_out / cap) * 100
     
@@ -264,11 +278,15 @@ with col2:
     st.divider()
     
     st.markdown("### Utilization")
-    
     st.caption(f"Inbound ({pct_in:.1f}%)")
     st.progress(min(pct_in / 100, 1.0))
-    
     st.caption(f"Outbound ({pct_out:.1f}%)")
     st.progress(min(pct_out / 100, 1.0))
-    
     st.caption(f"Capacity Goal: {TOTAL_CAPACITY:,.0f} Mbps")
+
+# --- DEBUG / TROUBLESHOOTER ---
+with st.sidebar:
+    st.divider()
+    with st.expander("🛠 Troubleshooter (Check here if 0.00)"):
+        st.info("If you see 0.00 Mbps, check the data below to see what PRTG is returning.")
+        st.write(all_debug_info)
