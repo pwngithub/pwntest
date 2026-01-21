@@ -4,38 +4,20 @@ from PIL import Image
 from io import BytesIO
 import urllib3
 import matplotlib.pyplot as plt
-import uuid
 from datetime import datetime, timedelta
 
+# Disable SSL warnings for the internal PRTG connection
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 st.set_page_config(page_title="PRTG Bandwidth", layout="wide", page_icon="Signal")
 
+# --- CONFIGURATION ---
 USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
+TOTAL_CAPACITY = 40000  # Set this to your total network capacity in Mbps
 
-# Define your total network capacity in Mbps here
-TOTAL_CAPACITY = 40000 
-
-if "period_key" not in st.session_state:
-    st.session_state.period_key = f"period_{uuid.uuid4()}"
-
-period = st.selectbox(
-    "Time Period",
-    ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
-    index=1,
-    key=st.session_state.period_key
-)
-
-# Map period to PRTG Graph ID (for the image)
-graphid = {
-    "Live (2 hours)": "0",
-    "Last 48 hours": "1",
-    "Last 7 days": "-7",
-    "Last 30 days": "2",
-    "Last 365 days": "3"
-}[period]
-
+# --- SENSOR MAPPING ---
 SENSORS = {
     "Firstlight":          "12435",
     "NNINIX":              "12506",
@@ -43,6 +25,7 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
+# --- DATE HELPER ---
 def get_date_params(period_name):
     """Calculates start/end dates and averaging interval based on period."""
     now = datetime.now()
@@ -56,10 +39,10 @@ def get_date_params(period_name):
         avg = 300 # 5 minute average
     elif period_name == "Last 7 days":
         sdate = (now - timedelta(days=7)).strftime("%Y-%m-%d-%H-%M-%S")
-        avg = 3600 # 1 hour average (matches standard PRTG graph views)
+        avg = 3600 # 1 hour average
     elif period_name == "Last 30 days":
         sdate = (now - timedelta(days=30)).strftime("%Y-%m-%d-%H-%M-%S")
-        avg = 3600 # 1 hour average
+        avg = 3600 
     elif period_name == "Last 365 days":
         sdate = (now - timedelta(days=365)).strftime("%Y-%m-%d-%H-%M-%S")
         avg = 86400 # 1 day average
@@ -70,20 +53,18 @@ def get_date_params(period_name):
 
     return sdate, edate, avg
 
+# --- DATA FETCHING ---
 @st.cache_data(ttl=300)
 def get_period_peaks(sensor_id, period_name):
     """
-    1. Gets Channel IDs (In/Out) from table.json
-    2. Queries historicdata.json for the specific time period
-    3. Returns the max (Peak) for that period
+    Queries historicdata.json to find the true peak (max) for the selected period.
     """
-    
-    # --- Step 1: Identify Channel IDs ---
+    # 1. Get Channel IDs (In/Out) from table.json
     meta_url = f"{BASE}/api/table.json"
     meta_params = {
         "content": "channels",
         "id": sensor_id,
-        "columns": "name,objid", # We need the ID to query history
+        "columns": "name,objid", 
         "username": USER,
         "passhash": PH
     }
@@ -96,23 +77,20 @@ def get_period_peaks(sensor_id, period_name):
         for ch in meta_data.get("channels", []):
             name = ch.get("name", "")
             cid = ch.get("objid")
-            # Logic to identify In vs Out
             if "Traffic In" in name or "Down" in name:
                 in_id = cid
             elif "Traffic Out" in name or "Up" in name:
                 out_id = cid
-    except Exception as e:
+    except Exception:
         return 0.0, 0.0
 
     if in_id is None and out_id is None:
         return 0.0, 0.0
 
-    # --- Step 2: Get Historic Data for those IDs ---
+    # 2. Get Historic Data
     sdate, edate, avg = get_date_params(period_name)
     hist_url = f"{BASE}/api/historicdata.json"
     
-    # Construct columns parameter (e.g., value_0,value_1)
-    # PRTG historic data columns are accessed via 'value_CHANNELID'
     cols_to_fetch = []
     if in_id: cols_to_fetch.append(f"value_{in_id}")
     if out_id: cols_to_fetch.append(f"value_{out_id}")
@@ -135,17 +113,16 @@ def get_period_peaks(sensor_id, period_name):
         
         if "histdata" in hist_data:
             for row in hist_data["histdata"]:
-                # Parse Inbound
+                # Inbound
                 if in_id:
                     val = row.get(f"value_{in_id}")
                     if val:
-                        # PRTG History is usually Bytes/sec. Convert to Mbps.
-                        # Formula: (Bytes * 8) / 1,000,000
+                        # (Bytes * 8) / 1,000,000 = Mbps
                         mbps = (float(val) * 8) / 1_000_000
                         if mbps > max_in:
                             max_in = mbps
                 
-                # Parse Outbound
+                # Outbound
                 if out_id:
                     val = row.get(f"value_{out_id}")
                     if val:
@@ -155,8 +132,7 @@ def get_period_peaks(sensor_id, period_name):
                             
         return round(max_in, 2), round(max_out, 2)
 
-    except Exception as e:
-        # Fallback if history fails
+    except Exception:
         return 0.0, 0.0
 
 @st.cache_data(ttl=300)
@@ -178,33 +154,60 @@ def get_graph_image(sensor_id, graphid):
     except:
         return None
 
+# --- MAIN APP LAYOUT ---
 st.title("PRTG Bandwidth Dashboard")
-st.caption(f"Period: **{period}**")
 
-total_in = total_out = 0.0
+# Fixed Key: Prevents "Duplicate Widget ID" error
+period = st.selectbox(
+    "Time Period",
+    ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
+    index=1,
+    key="period_selector_main"
+)
 
+st.caption(f"Showing peak usage for: **{period}**")
+
+# Map period to PRTG Graph ID for the images
+graphid_map = {
+    "Live (2 hours)": "0",
+    "Last 48 hours": "1",
+    "Last 7 days": "-7",
+    "Last 30 days": "2",
+    "Last 365 days": "3"
+}
+current_graph_id = graphid_map.get(period, "1")
+
+total_in = 0.0
+total_out = 0.0
+
+# Render Rows of Sensors
 for i in range(0, len(SENSORS), 2):
     cols = st.columns(2)
     pair = list(SENSORS.items())[i:i+2]
     for col, (name, sid) in zip(cols, pair):
         with col:
-            # Updated function call here passing the period
             in_peak, out_peak = get_period_peaks(sid, period)
             
             total_in  += in_peak
             total_out += out_peak
+            
             st.subheader(name)
             st.metric("Peak In",  f"{in_peak:,.2f} Mbps")
             st.metric("Peak Out", f"{out_peak:,.2f} Mbps")
-            img = get_graph_image(sid, graphid)
+            
+            img = get_graph_image(sid, current_graph_id)
             if img:
                 st.image(img, use_container_width=True)
             else:
                 st.caption("Graph unavailable")
 
+# --- SUMMARY SECTION ---
+st.markdown("---")
 st.markdown("## Combined Peak Bandwidth Across All Circuits")
 
 col1, col2 = st.columns([3, 1])
+
+# Left Column: Matplotlib Chart
 with col1:
     fig, ax = plt.subplots(figsize=(12, 7))
     bars = ax.bar(
@@ -248,8 +251,8 @@ with col1:
             )
     st.pyplot(fig, use_container_width=True)
 
+# Right Column: Metrics & KPI
 with col2:
-    # --- Percentage Calculations ---
     cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1 
     
     pct_in = (total_in / cap) * 100
