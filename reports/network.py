@@ -31,8 +31,8 @@ def handle_error(resp, label="Request"):
     if txt:
         st.write(txt[:2500])
     else:
-        st.write("No error text returned.")
-        st.json(resp)
+        # For successful calls this will be empty; don't spam.
+        pass
 
 
 def iso_z(dt: datetime) -> str:
@@ -41,145 +41,109 @@ def iso_z(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _to_datetime_utc(value):
-    """
-    Convert various time formats to pandas datetime UTC.
-    Supports:
-      - unix minutes (e.g., 29483785)
-      - unix seconds
-      - unix milliseconds
-      - ISO strings
-    """
-    if value is None:
-        return pd.NaT
-
-    # numeric
+def unix_minutes_to_dt(v):
     try:
-        v = float(value)
-        # Heuristics by magnitude:
-        # minutes ~ 1e7-1e8
-        # seconds ~ 1e9-1e10
-        # millis ~ 1e12-1e13
-        if v > 1e11:   # milliseconds
-            return pd.to_datetime(v, unit="ms", utc=True, errors="coerce")
-        if v > 1e9:    # seconds
-            return pd.to_datetime(v, unit="s", utc=True, errors="coerce")
-        # otherwise treat as minutes
-        return pd.to_datetime(v * 60, unit="s", utc=True, errors="coerce")
+        return pd.to_datetime(float(v) * 60, unit="s", utc=True, errors="coerce")
     except Exception:
-        pass
-
-    # string
-    return pd.to_datetime(value, utc=True, errors="coerce")
+        return pd.NaT
 
 
 def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
     """
-    Output DataFrame columns:
-      time, tx_bps, rx_bps, total_bps
+    Parses Auvik stat/interface/bandwidth response in YOUR observed format:
 
-    Supports TWO formats:
-    A) Table format:
-       { "columns": ["Recorded At","Transmit","Receive","Bandwidth"],
-         "data" or "rows": [[...],[...]] }
-       and also rows as dicts with numeric keys: {"0":..., "1":...}
-    B) JSON:API format with attributes containing points list.
+    {
+      "data": [
+        {
+          "attributes": {
+            "stats": [
+              {
+                "legend": ["Recorded At","Transmit","Receive","Bandwidth"],
+                "unit":   ["unix_mins","bits_per_sec","bits_per_sec","bits_per_sec"],
+                "data":   [[29483790, 1633..., 795, 1633...], ...]
+              }
+            ]
+          }
+        }
+      ]
+    }
+
+    Returns DataFrame with: time, tx_bps, rx_bps, total_bps
     """
     if not isinstance(stat_json, dict):
         return pd.DataFrame()
 
-    # ---------- A) TABLE FORMAT ----------
-    cols = stat_json.get("columns") or stat_json.get("header") or stat_json.get("headers")
-    rows = stat_json.get("data") or stat_json.get("rows")
-
-    if isinstance(cols, list) and isinstance(rows, list) and len(cols) >= 2:
-        # normalize column names
-        col_norm = [str(c).strip().lower() for c in cols]
-
-        def idx_of(name):
-            name = name.lower()
-            for i, c in enumerate(col_norm):
-                if c == name:
-                    return i
-            return None
-
-        t_i = idx_of("recorded at") or idx_of("time") or idx_of("timestamp")
-        tx_i = idx_of("transmit") or idx_of("tx") or idx_of("transmitted")
-        rx_i = idx_of("receive") or idx_of("rx") or idx_of("received")
-        tot_i = idx_of("bandwidth") or idx_of("total")
-
-        parsed = []
-        for r in rows:
-            # rows might be list or dict with numeric keys
-            if isinstance(r, dict):
-                # convert {"0":..., "1":...} → list in key order
-                # handle int keys too
-                keys = sorted(r.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x))
-                row_list = [r[k] for k in keys]
-            else:
-                row_list = r
-
-            if not isinstance(row_list, (list, tuple)):
-                continue
-
-            def safe_get(i):
-                if i is None:
-                    return None
-                return row_list[i] if i < len(row_list) else None
-
-            t = safe_get(t_i)
-            tx = safe_get(tx_i)
-            rx = safe_get(rx_i)
-            tot = safe_get(tot_i)
-
-            parsed.append({"time": t, "tx_bps": tx, "rx_bps": rx, "total_bps": tot})
-
-        df = pd.DataFrame(parsed)
-        if df.empty:
-            return df
-
-        df["time"] = df["time"].apply(_to_datetime_utc)
-        df["tx_bps"] = pd.to_numeric(df["tx_bps"], errors="coerce")
-        df["rx_bps"] = pd.to_numeric(df["rx_bps"], errors="coerce")
-        df["total_bps"] = pd.to_numeric(df["total_bps"], errors="coerce")
-
-        df = df.dropna(subset=["time"]).sort_values("time")
-        return df
-
-    # ---------- B) JSON:API FORMAT ----------
-    data = stat_json.get("data", [])
-    if not isinstance(data, list) or not data:
+    top = stat_json.get("data")
+    if not isinstance(top, list) or not top:
         return pd.DataFrame()
 
-    all_points = []
+    all_rows = []
 
-    for item in data:
+    for item in top:
         attrs = (item or {}).get("attributes", {}) or {}
+        stats_blocks = attrs.get("stats")
 
-        points = None
-        for k in ("stats", "dataPoints", "points", "series"):
-            v = attrs.get(k)
-            if isinstance(v, list) and v and isinstance(v[0], dict):
-                points = v
-                break
+        # stats_blocks should be a list of dicts (your case)
+        if isinstance(stats_blocks, list) and stats_blocks and isinstance(stats_blocks[0], dict):
+            for block in stats_blocks:
+                legend = block.get("legend", [])
+                rows = block.get("data", [])
 
-        if not points:
-            continue
+                if not isinstance(legend, list) or not isinstance(rows, list) or not legend:
+                    continue
 
-        for p in points:
-            t = p.get("time") or p.get("timestamp") or p.get("dateTime")
-            rx = p.get("averageReceived") or p.get("received")
-            tx = p.get("averageTransmitted") or p.get("transmitted")
-            tot = p.get("averageTotal") or p.get("total")
-            all_points.append({"time": t, "tx_bps": tx, "rx_bps": rx, "total_bps": tot})
+                # map indices from legend
+                legend_norm = [str(x).strip().lower() for x in legend]
 
-    df = pd.DataFrame(all_points)
+                def idx(name):
+                    name = name.lower()
+                    for i, c in enumerate(legend_norm):
+                        if c == name:
+                            return i
+                    return None
+
+                t_i = idx("recorded at")  # unix_mins
+                tx_i = idx("transmit")
+                rx_i = idx("receive")
+                bw_i = idx("bandwidth")
+
+                # Some tenants might label differently; be slightly forgiving
+                if t_i is None:
+                    t_i = idx("time") or idx("timestamp")
+                if tx_i is None:
+                    tx_i = idx("tx") or idx("transmitted")
+                if rx_i is None:
+                    rx_i = idx("rx") or idx("received")
+                if bw_i is None:
+                    bw_i = idx("total")
+
+                for r in rows:
+                    if not isinstance(r, (list, tuple)):
+                        continue
+
+                    def g(i):
+                        if i is None:
+                            return None
+                        return r[i] if i < len(r) else None
+
+                    all_rows.append({
+                        "time": g(t_i),
+                        "tx_bps": g(tx_i),
+                        "rx_bps": g(rx_i),
+                        "total_bps": g(bw_i),
+                    })
+
+    df = pd.DataFrame(all_rows)
     if df.empty:
         return df
 
-    df["time"] = df["time"].apply(_to_datetime_utc)
-    for col in ("tx_bps", "rx_bps", "total_bps"):
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    # Convert time from unix minutes -> datetime
+    df["time"] = df["time"].apply(unix_minutes_to_dt)
+
+    # Convert numeric
+    df["tx_bps"] = pd.to_numeric(df["tx_bps"], errors="coerce")
+    df["rx_bps"] = pd.to_numeric(df["rx_bps"], errors="coerce")
+    df["total_bps"] = pd.to_numeric(df["total_bps"], errors="coerce")
 
     df = df.dropna(subset=["time"]).sort_values("time")
     return df
@@ -273,7 +237,7 @@ def show_network_report(auvik_get):
 
         st.divider()
 
-        # Interfaces
+        # Interfaces (filtered to selected device)
         st.subheader("Interfaces (only for selected device)")
         iface_page_size = st.number_input("Interface page size (page[first])", 1, 100, 100, 10, key="iface_page_size")
         device_changed = st.session_state.get("interfaces_device_id") != selected_device_id
@@ -358,7 +322,6 @@ def show_network_report(auvik_get):
             }
 
             stats = auvik_get("stat/interface/bandwidth", params=params)
-
             if isinstance(stats, dict) and stats.get("_error"):
                 handle_error(stats, "Interface Usage")
                 return
@@ -368,7 +331,7 @@ def show_network_report(auvik_get):
 
             df = extract_bandwidth_points(stats)
             if df.empty:
-                st.warning("I could not parse datapoints. Keep 'Show raw API response' on and paste the top-level keys here.")
+                st.warning("Stats returned, but no datapoints parsed. Leave 'Show raw' on and paste the response.")
                 return
 
             # Convert bps -> Mbps
