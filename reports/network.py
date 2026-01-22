@@ -2,13 +2,12 @@ import streamlit as st
 import requests
 from requests.auth import HTTPBasicAuth
 import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta, timezone
 
 st.set_page_config(page_title="Network Report", layout="wide")
 
 
-# ────────────────────────────────────────────────
-# Error display helpers
-# ────────────────────────────────────────────────
 def handle_error(resp, label="Request"):
     st.error(f"{label} failed")
 
@@ -33,13 +32,49 @@ def handle_error(resp, label="Request"):
         st.json(resp)
 
 
-# ────────────────────────────────────────────────
-# Report function (importable by your main dashboard)
-# ────────────────────────────────────────────────
+def _iso_z(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _compute_mbps_from_counters(df: pd.DataFrame, ts_col: str, in_col: str, out_col: str) -> pd.DataFrame:
+    """
+    Given cumulative octet counters + timestamps, compute Mbps time series.
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+    df[ts_col] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
+    df = df.dropna(subset=[ts_col]).sort_values(ts_col)
+
+    # Ensure numeric
+    df[in_col] = pd.to_numeric(df[in_col], errors="coerce")
+    df[out_col] = pd.to_numeric(df[out_col], errors="coerce")
+
+    # Deltas
+    df["dt_seconds"] = df[ts_col].diff().dt.total_seconds()
+    df["din"] = df[in_col].diff()
+    df["dout"] = df[out_col].diff()
+
+    # Handle counter resets / negatives
+    df.loc[df["din"] < 0, "din"] = None
+    df.loc[df["dout"] < 0, "dout"] = None
+    df.loc[df["dt_seconds"] <= 0, "dt_seconds"] = None
+
+    df["in_mbps"] = (df["din"] * 8) / df["dt_seconds"] / 1_000_000
+    df["out_mbps"] = (df["dout"] * 8) / df["dt_seconds"] / 1_000_000
+
+    return df
+
+
 def show_network_report(auvik_get):
     st.title("🌐 Network Report")
 
-    # Load tenants so we can scope inventory calls
+    # ────────────────────────────────────────────────
+    # Tenants
+    # ────────────────────────────────────────────────
     tenants_resp = auvik_get("tenants")
     if isinstance(tenants_resp, dict) and tenants_resp.get("_error"):
         handle_error(tenants_resp, "Load Tenants")
@@ -69,23 +104,21 @@ def show_network_report(auvik_get):
 
     st.divider()
 
+    # ────────────────────────────────────────────────
+    # Devices + Interfaces
+    # ────────────────────────────────────────────────
     col1, col2 = st.columns(2)
 
-    # ────────────────
-    # Devices
-    # ────────────────
+    devices_df = None
+    interfaces_df = None
+
     with col1:
         st.subheader("Devices")
-        page_size = st.number_input("Page size (page[first])", min_value=1, max_value=100, value=100, step=10)
-
+        page_size = st.number_input("Page size (page[first])", min_value=1, max_value=100, value=100, step=10, key="dev_page")
         if st.button("Load Devices", key="btn_load_devices"):
-            # Auvik uses page[first] (NOT page[limit]) :contentReference[oaicite:1]{index=1}
             devices = auvik_get(
                 "inventory/device/info",
-                params={
-                    "tenants": tenant_id,
-                    "page[first]": page_size,  # ✅ correct param
-                },
+                params={"tenants": tenant_id, "page[first]": page_size},
             )
 
             if isinstance(devices, dict) and devices.get("_error"):
@@ -102,39 +135,27 @@ def show_network_report(auvik_get):
             for d in data:
                 attr = d.get("attributes", {}) or {}
                 rows.append({
-                    "ID": d.get("id"),
-                    "Name": attr.get("deviceName") or attr.get("name") or "N/A",
-                    "Type": attr.get("deviceType", "N/A"),
-                    "Model": attr.get("makeModel") or attr.get("model") or "N/A",
-                    "IP": attr.get("ipAddress", "N/A"),
-                    "Status": attr.get("onlineStatus") or attr.get("status") or "N/A",
+                    "device_id": d.get("id"),
+                    "name": attr.get("deviceName") or attr.get("name") or "N/A",
+                    "type": attr.get("deviceType", "N/A"),
+                    "ip": attr.get("ipAddress", "N/A"),
+                    "status": attr.get("onlineStatus") or attr.get("status") or "N/A",
                 })
 
-            df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True)
-            st.success(f"Found {len(df)} devices")
+            devices_df = pd.DataFrame(rows)
+            st.session_state["devices_df"] = devices_df
+            st.dataframe(devices_df, use_container_width=True)
+            st.success(f"Found {len(devices_df)} devices")
 
-            # Helpful for paging
-            links = (devices or {}).get("links", {})
-            if links:
-                st.caption("Pagination links returned by API:")
-                st.json(links)
-
-    # ────────────────
-    # Interfaces
-    # ────────────────
     with col2:
         st.subheader("Interfaces")
-        device_id = st.text_input("Filter by Device ID (optional)", "", key="device_id_filter").strip()
-        page_size_i = st.number_input("Page size (page[first])", min_value=1, max_value=100, value=100, step=10, key="iface_page_size")
+        device_id_filter = st.text_input("Filter by Device ID (optional)", "", key="iface_dev_filter").strip()
+        page_size_i = st.number_input("Page size (page[first])", min_value=1, max_value=100, value=100, step=10, key="iface_page")
 
         if st.button("Load Interfaces", key="btn_load_interfaces"):
-            params = {
-                "tenants": tenant_id,
-                "page[first]": page_size_i,  # ✅ correct param (same paging model) :contentReference[oaicite:2]{index=2}
-            }
-            if device_id:
-                params["filter[deviceId]"] = device_id
+            params = {"tenants": tenant_id, "page[first]": page_size_i}
+            if device_id_filter:
+                params["filter[deviceId]"] = device_id_filter
 
             interfaces = auvik_get("inventory/interface/info", params=params)
 
@@ -152,22 +173,121 @@ def show_network_report(auvik_get):
             for i in data:
                 attr = i.get("attributes", {}) or {}
                 rows.append({
-                    "Interface ID": i.get("id"),
-                    "Name": attr.get("interfaceName") or attr.get("name") or "N/A",
-                    "Device": attr.get("deviceName", "N/A"),
-                    "Speed": attr.get("speed", "N/A"),
-                    "Status": attr.get("status", "N/A"),
-                    "MAC": attr.get("macAddress", "N/A"),
+                    "interface_id": i.get("id"),
+                    "name": attr.get("interfaceName") or attr.get("name") or "N/A",
+                    "device_name": attr.get("deviceName", "N/A"),
+                    "device_id": attr.get("deviceId", "N/A"),
+                    "speed": attr.get("speed", "N/A"),
+                    "status": attr.get("status", "N/A"),
                 })
 
-            df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True)
-            st.success(f"Found {len(df)} interfaces")
+            interfaces_df = pd.DataFrame(rows)
+            st.session_state["interfaces_df"] = interfaces_df
+            st.dataframe(interfaces_df, use_container_width=True)
+            st.success(f"Found {len(interfaces_df)} interfaces")
 
-            links = (interfaces or {}).get("links", {})
-            if links:
-                st.caption("Pagination links returned by API:")
-                st.json(links)
+    st.divider()
+
+    # ────────────────────────────────────────────────
+    # Bandwidth (Mbps) from interface statistics
+    # ────────────────────────────────────────────────
+    st.subheader("📈 Bandwidth (Mbps) – Interface Statistics")
+
+    devices_df = st.session_state.get("devices_df")
+    interfaces_df = st.session_state.get("interfaces_df")
+
+    if devices_df is None or interfaces_df is None or devices_df.empty or interfaces_df.empty:
+        st.info("Load Devices and Interfaces above first, then come back here.")
+        return
+
+    # Device picker
+    device_map = dict(zip(devices_df["name"], devices_df["device_id"]))
+    selected_device_name = st.selectbox("Device", options=list(device_map.keys()), key="bw_device")
+    selected_device_id = device_map[selected_device_name]
+
+    # Filter interfaces by device (if device_id exists in interface data)
+    iface_filtered = interfaces_df.copy()
+    if "device_id" in iface_filtered.columns:
+        iface_filtered = iface_filtered[iface_filtered["device_id"].astype(str) == str(selected_device_id)]
+
+    if iface_filtered.empty:
+        st.warning("No interfaces matched that device from the loaded interface list. Try reloading interfaces with device filter.")
+        return
+
+    iface_map = dict(zip(iface_filtered["name"], iface_filtered["interface_id"]))
+    selected_iface_name = st.selectbox("Interface", options=list(iface_map.keys()), key="bw_iface")
+    selected_iface_id = iface_map[selected_iface_name]
+
+    # Time range
+    hours = st.slider("Lookback window (hours)", min_value=1, max_value=72, value=24, step=1)
+    interval = st.selectbox("Interval", options=["5m", "15m", "30m", "1h"], index=0)
+
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=hours)
+
+    if st.button("Get Mbps Stats", key="bw_go"):
+        params = {
+            "tenants": tenant_id,
+            "from": _iso_z(start),
+            "to": _iso_z(end),
+            "interval": interval,
+        }
+
+        # Your API already worked with interface/statistics earlier; keeping this path.
+        stats = auvik_get(f"interface/statistics/{selected_iface_id}", params=params)
+
+        if isinstance(stats, dict) and stats.get("_error"):
+            handle_error(stats, "Interface Statistics")
+            return
+
+        points = (stats or {}).get("data", [])
+        if not points:
+            st.warning("No statistics returned for that interface/time range.")
+            st.json(stats)
+            return
+
+        # Try common field names
+        # Many APIs use timestamp + inOctets/outOctets.
+        df = pd.DataFrame(points)
+        ts_col = "timestamp" if "timestamp" in df.columns else ("time" if "time" in df.columns else None)
+
+        if ts_col is None:
+            st.warning("Could not find timestamp column in returned data. Showing raw sample:")
+            st.json(points[:5])
+            return
+
+        # Counters might be named inOctets/outOctets (common in your earlier code)
+        in_col = "inOctets" if "inOctets" in df.columns else None
+        out_col = "outOctets" if "outOctets" in df.columns else None
+
+        if in_col is None or out_col is None:
+            st.warning("Could not find inOctets/outOctets in returned data. Showing columns:")
+            st.write(list(df.columns))
+            st.json(points[:5])
+            return
+
+        df2 = _compute_mbps_from_counters(df, ts_col=ts_col, in_col=in_col, out_col=out_col)
+        df2 = df2.dropna(subset=["in_mbps", "out_mbps"])
+
+        if df2.empty:
+            st.warning("Not enough valid datapoints to compute Mbps (possible counter resets or missing values).")
+            st.json(points[:10])
+            return
+
+        st.metric("Peak In (Mbps)", f"{df2['in_mbps'].max():.2f}")
+        st.metric("Peak Out (Mbps)", f"{df2['out_mbps'].max():.2f}")
+
+        st.dataframe(df2[[ts_col, "in_mbps", "out_mbps"]].tail(50), use_container_width=True)
+
+        # Plot (no fixed colors per your environment rules)
+        fig = plt.figure()
+        plt.plot(df2[ts_col], df2["in_mbps"], label="In Mbps")
+        plt.plot(df2[ts_col], df2["out_mbps"], label="Out Mbps")
+        plt.legend()
+        plt.xlabel("Time (UTC)")
+        plt.ylabel("Mbps")
+        plt.title(f"Interface Mbps: {selected_device_name} / {selected_iface_name}")
+        st.pyplot(fig)
 
 
 # ────────────────────────────────────────────────
@@ -199,8 +319,6 @@ def main():
     st.sidebar.write("Secrets keys:", list(st.secrets.keys()))
     st.sidebar.write("Username loaded:", bool(API_USERNAME))
     st.sidebar.write("API key loaded:", bool(API_KEY))
-    if API_KEY:
-        st.sidebar.write("API key length:", len(API_KEY))
 
     if not API_USERNAME or not API_KEY:
         st.error("Missing Auvik credentials in Streamlit Secrets.")
@@ -211,7 +329,7 @@ def main():
         st.stop()
 
     BASE_URL = "https://auvikapi.us6.my.auvik.com/v1"
-    HEADERS = {"Accept": "application/vnd.api+json"}  # Auvik uses JSON:API
+    HEADERS = {"Accept": "application/vnd.api+json"}
     auth = HTTPBasicAuth(API_USERNAME, API_KEY)
 
     def auvik_get(endpoint, params=None):
@@ -225,12 +343,9 @@ def main():
                 timeout=60,
                 allow_redirects=True,
             )
-
             if r.status_code >= 400:
                 return {"_error": True, "status": r.status_code, "text": r.text, "url": url}
-
             return r.json()
-
         except Exception as e:
             return {"_error": True, "status": None, "text": repr(e), "url": url}
 
