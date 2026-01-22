@@ -13,12 +13,14 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-TOTAL_CAPACITY = 40000  # Mbps – adjust if needed
+TOTAL_CAPACITY = 40000  # Mbps
 
+# Unique key for the period selector
 period = st.selectbox(
     "Time Period",
     ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
-    index=1
+    index=1,
+    key="main_period_selector"   # ← this fixes the duplicate ID error
 )
 
 graphid = {
@@ -29,15 +31,15 @@ graphid = {
     "Last 365 days":  "3"
 }[period]
 
-# Time deltas and suggested averaging (seconds)
-period_settings = {
-    "Live (2 hours)": (timedelta(hours=2),   60),   # ~1 min
-    "Last 48 hours":  (timedelta(hours=48),  300),  # 5 min
-    "Last 7 days":    (timedelta(days=7),    900),  # 15 min
-    "Last 30 days":   (timedelta(days=30),   3600), # 1 hour
-    "Last 365 days":  (timedelta(days=365),  86400) # 1 day
+# Time range
+delta_map = {
+    "Live (2 hours)": timedelta(hours=2),
+    "Last 48 hours":  timedelta(hours=48),
+    "Last 7 days":    timedelta(days=7),
+    "Last 30 days":   timedelta(days=30),
+    "Last 365 days":  timedelta(days=365)
 }
-delta, suggested_avg = period_settings[period]
+delta = delta_map[period]
 
 now = datetime.now()
 edate = now.strftime("%Y-%m-%d-%H-%M-%S")
@@ -51,13 +53,13 @@ SENSORS = {
 }
 
 @st.cache_data(ttl=300)
-def get_peak_speeds(sensor_id, sdate, edate, avg):
+def get_peak_speeds(sensor_id, sdate, edate):
     url = f"{BASE}/api/historicdata.json"
     params = {
         "id": sensor_id,
         "sdate": sdate,
         "edate": edate,
-        "avg": avg,
+        "avg": 300,                 # 5 minutes – good balance
         "usecaption": 1,
         "username": USER,
         "passhash": PH
@@ -65,54 +67,39 @@ def get_peak_speeds(sensor_id, sdate, edate, avg):
     try:
         resp = requests.get(url, params=params, verify=False, timeout=30).json()
         histdata = resp.get("histdata", [])
+        
         if not histdata:
+            st.caption(f"No data returned for sensor {sensor_id}")
             return 0.0, 0.0
 
-        # Find the formatted and raw keys dynamically
-        first = histdata[0]
-        in_key = out_key = None
-        for k in first:
-            k_lower = k.lower()
-            if "traffic in" in k_lower and "(speed)" in k_lower and "_raw" not in k_lower:
-                in_key = k
-            if "traffic out" in k_lower and "(speed)" in k_lower and "_raw" not in k_lower:
-                out_key = k
+        # Debug: show what keys we actually got
+        if histdata:
+            st.caption(f"Keys in data for {sensor_id}: {list(histdata[0].keys())}")
 
-        if not in_key or not out_key:
-            # Fallback if names differ slightly
-            in_key = next((k for k in first if "traffic in" in k.lower() and "_raw" not in k), None)
-            out_key = next((k for k in first if "traffic out" in k.lower() and "_raw" not in k), None)
-
-        if not in_key or not out_key:
-            st.caption(f"No speed channels found for {sensor_id}")
-            return 0.0, 0.0
-
-        # Collect numeric values from raw channels (for accurate peak)
-        in_raw_key = in_key + "_raw" if in_key + "_raw" in first else None
-        out_raw_key = out_key + "_raw" if out_key + "_raw" in first else None
-
-        in_peaks = []
-        out_peaks = []
+        # Look for Traffic In_raw and Traffic Out_raw (or similar)
+        in_values = []
+        out_values = []
 
         for item in histdata:
-            if in_raw_key and item.get(in_raw_key):
-                try:
-                    in_peaks.append(float(item[in_raw_key]))
-                except:
-                    pass
-            if out_raw_key and item.get(out_raw_key):
-                try:
-                    out_peaks.append(float(item[out_raw_key]))
-                except:
-                    pass
+            for k, v in item.items():
+                if "_raw" in k:
+                    try:
+                        val = float(v)
+                        if val > 0:
+                            if "in" in k.lower() or "down" in k.lower() or "rx" in k.lower():
+                                in_values.append(val)
+                            elif "out" in k.lower() or "up" in k.lower() or "tx" in k.lower():
+                                out_values.append(val)
+                    except:
+                        pass
 
-        peak_in = max(in_peaks) / 10_000_000 if in_peaks else 0.0   # adjust divisor if needed
-        peak_out = max(out_peaks) / 10_000_000 if out_peaks else 0.0
+        peak_in  = max(in_values) / 1000000 if in_values else 0.0   # ← changed to 1e6
+        peak_out = max(out_values) / 1000000 if out_values else 0.0
 
         return round(peak_in, 2), round(peak_out, 2)
 
     except Exception as e:
-        st.caption(f"Error for {sensor_id}: {str(e)[:100]}")
+        st.caption(f"Error fetching {sensor_id}: {str(e)}")
         return 0.0, 0.0
 
 @st.cache_data(ttl=300)
@@ -133,8 +120,7 @@ def get_graph_image(sensor_id, graphid):
         if resp.status_code == 200:
             return Image.open(BytesIO(resp.content))
     except:
-        pass
-    return None
+        return None
 
 # ────────────────────────────────────────────────
 
@@ -149,9 +135,9 @@ for i in range(0, len(SENSORS), 2):
 
     for col, (name, sid) in zip(cols, pair):
         with col:
-            peak_in, peak_out = get_peak_speeds(sid, sdate, edate, suggested_avg)
+            peak_in, peak_out = get_peak_speeds(sid, sdate, edate)
 
-            total_peak_in += peak_in
+            total_peak_in  += peak_in
             total_peak_out += peak_out
 
             st.subheader(name)
@@ -159,7 +145,7 @@ for i in range(0, len(SENSORS), 2):
             with c1:
                 st.metric("Peak Download", f"{peak_in:,.2f} Mbps")
             with c2:
-                st.metric("Peak Upload", f"{peak_out:,.2f} Mbps")
+                st.metric("Peak Upload",   f"{peak_out:,.2f} Mbps")
 
             img = get_graph_image(sid, graphid)
             if img:
@@ -167,6 +153,7 @@ for i in range(0, len(SENSORS), 2):
             else:
                 st.caption("Graph unavailable")
 
+# Combined
 st.markdown("## Combined Peak Across All Circuits")
 
 col_left, col_right = st.columns([3, 1])
@@ -177,9 +164,7 @@ with col_left:
     peaks = [total_peak_in, total_peak_out]
 
     x = range(len(groups))
-    width = 0.5
-
-    ax.bar(x, peaks, width, color=["#00ff9d", "#ff3366"], edgecolor="white")
+    ax.bar(x, peaks, 0.5, color=["#00ff9d", "#ff3366"], edgecolor="white")
 
     ax.set_xticks(x)
     ax.set_xticklabels(groups, fontsize=16, fontweight="bold", color="white")
@@ -203,7 +188,7 @@ with col_left:
 
 with col_right:
     st.metric("**Total Peak Download**", f"{total_peak_in:,.0f} Mbps")
-    st.metric("**Total Peak Upload**", f"{total_peak_out:,.0f} Mbps")
+    st.metric("**Total Peak Upload**",   f"{total_peak_out:,.0f} Mbps")
 
     st.divider()
     st.markdown("### Utilization (based on peak)")
