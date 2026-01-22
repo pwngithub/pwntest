@@ -1,3 +1,9 @@
+import streamlit as st
+import requests
+from requests.auth import HTTPBasicAuth
+from datetime import datetime, timedelta
+import pandas as pd
+
 if st.button("Load Devices"):
     # Common Auvik inventory endpoint
     devices = auvik_get("inventory/device/info", params={"page[limit]": 200})
