@@ -19,7 +19,7 @@ def handle_error(resp, label="Request"):
         return
 
     if not isinstance(resp, dict):
-        st.write("Unexpected error type:", type(resp))
+        st.write("Unexpected response type:", type(resp))
         st.write(resp)
         return
 
@@ -41,16 +41,114 @@ def iso_z(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _to_datetime_utc(value):
+    """
+    Convert various time formats to pandas datetime UTC.
+    Supports:
+      - unix minutes (e.g., 29483785)
+      - unix seconds
+      - unix milliseconds
+      - ISO strings
+    """
+    if value is None:
+        return pd.NaT
+
+    # numeric
+    try:
+        v = float(value)
+        # Heuristics by magnitude:
+        # minutes ~ 1e7-1e8
+        # seconds ~ 1e9-1e10
+        # millis ~ 1e12-1e13
+        if v > 1e11:   # milliseconds
+            return pd.to_datetime(v, unit="ms", utc=True, errors="coerce")
+        if v > 1e9:    # seconds
+            return pd.to_datetime(v, unit="s", utc=True, errors="coerce")
+        # otherwise treat as minutes
+        return pd.to_datetime(v * 60, unit="s", utc=True, errors="coerce")
+    except Exception:
+        pass
+
+    # string
+    return pd.to_datetime(value, utc=True, errors="coerce")
+
+
 def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
     """
-    Flatten Auvik stat/interface/bandwidth response to a DataFrame:
-      time, rx_bps, tx_bps, total_bps
+    Output DataFrame columns:
+      time, tx_bps, rx_bps, total_bps
 
-    The Auvik payload can vary slightly; this tries common shapes.
-    If it can't find datapoints, return empty DF.
+    Supports TWO formats:
+    A) Table format:
+       { "columns": ["Recorded At","Transmit","Receive","Bandwidth"],
+         "data" or "rows": [[...],[...]] }
+       and also rows as dicts with numeric keys: {"0":..., "1":...}
+    B) JSON:API format with attributes containing points list.
     """
-    data = (stat_json or {}).get("data", [])
-    if not data:
+    if not isinstance(stat_json, dict):
+        return pd.DataFrame()
+
+    # ---------- A) TABLE FORMAT ----------
+    cols = stat_json.get("columns") or stat_json.get("header") or stat_json.get("headers")
+    rows = stat_json.get("data") or stat_json.get("rows")
+
+    if isinstance(cols, list) and isinstance(rows, list) and len(cols) >= 2:
+        # normalize column names
+        col_norm = [str(c).strip().lower() for c in cols]
+
+        def idx_of(name):
+            name = name.lower()
+            for i, c in enumerate(col_norm):
+                if c == name:
+                    return i
+            return None
+
+        t_i = idx_of("recorded at") or idx_of("time") or idx_of("timestamp")
+        tx_i = idx_of("transmit") or idx_of("tx") or idx_of("transmitted")
+        rx_i = idx_of("receive") or idx_of("rx") or idx_of("received")
+        tot_i = idx_of("bandwidth") or idx_of("total")
+
+        parsed = []
+        for r in rows:
+            # rows might be list or dict with numeric keys
+            if isinstance(r, dict):
+                # convert {"0":..., "1":...} → list in key order
+                # handle int keys too
+                keys = sorted(r.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x))
+                row_list = [r[k] for k in keys]
+            else:
+                row_list = r
+
+            if not isinstance(row_list, (list, tuple)):
+                continue
+
+            def safe_get(i):
+                if i is None:
+                    return None
+                return row_list[i] if i < len(row_list) else None
+
+            t = safe_get(t_i)
+            tx = safe_get(tx_i)
+            rx = safe_get(rx_i)
+            tot = safe_get(tot_i)
+
+            parsed.append({"time": t, "tx_bps": tx, "rx_bps": rx, "total_bps": tot})
+
+        df = pd.DataFrame(parsed)
+        if df.empty:
+            return df
+
+        df["time"] = df["time"].apply(_to_datetime_utc)
+        df["tx_bps"] = pd.to_numeric(df["tx_bps"], errors="coerce")
+        df["rx_bps"] = pd.to_numeric(df["rx_bps"], errors="coerce")
+        df["total_bps"] = pd.to_numeric(df["total_bps"], errors="coerce")
+
+        df = df.dropna(subset=["time"]).sort_values("time")
+        return df
+
+    # ---------- B) JSON:API FORMAT ----------
+    data = stat_json.get("data", [])
+    if not isinstance(data, list) or not data:
         return pd.DataFrame()
 
     all_points = []
@@ -58,7 +156,6 @@ def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
     for item in data:
         attrs = (item or {}).get("attributes", {}) or {}
 
-        # Common containers
         points = None
         for k in ("stats", "dataPoints", "points", "series"):
             v = attrs.get(k)
@@ -66,40 +163,22 @@ def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
                 points = v
                 break
 
-        # Sometimes stats are nested one more level
-        if points is None:
-            for v in attrs.values():
-                if isinstance(v, list) and v and isinstance(v[0], dict) and ("time" in v[0] or "timestamp" in v[0]):
-                    points = v
-                    break
-
         if not points:
             continue
 
         for p in points:
-            if not isinstance(p, dict):
-                continue
-
             t = p.get("time") or p.get("timestamp") or p.get("dateTime")
-
-            # Bandwidth fields (bps) - try common naming
-            rx = p.get("averageReceived") or p.get("avgReceived") or p.get("received")
-            tx = p.get("averageTransmitted") or p.get("avgTransmitted") or p.get("transmitted")
-            total = p.get("averageTotal") or p.get("avgTotal") or p.get("total")
-
-            all_points.append({"time": t, "rx_bps": rx, "tx_bps": tx, "total_bps": total})
+            rx = p.get("averageReceived") or p.get("received")
+            tx = p.get("averageTransmitted") or p.get("transmitted")
+            tot = p.get("averageTotal") or p.get("total")
+            all_points.append({"time": t, "tx_bps": tx, "rx_bps": rx, "total_bps": tot})
 
     df = pd.DataFrame(all_points)
     if df.empty:
         return df
 
-    # time can be unix minutes (int) or iso string
-    if pd.api.types.is_numeric_dtype(df["time"]):
-        df["time"] = pd.to_datetime(df["time"].astype("float") * 60, unit="s", utc=True, errors="coerce")
-    else:
-        df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
-
-    for col in ("rx_bps", "tx_bps", "total_bps"):
+    df["time"] = df["time"].apply(_to_datetime_utc)
+    for col in ("tx_bps", "rx_bps", "total_bps"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     df = df.dropna(subset=["time"]).sort_values("time")
@@ -112,9 +191,7 @@ def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
 def show_network_report(auvik_get):
     st.title("🌐 Network Report")
 
-    # ────────────────
     # Tenants
-    # ────────────────
     tenants_resp = auvik_get("tenants")
     if isinstance(tenants_resp, dict) and tenants_resp.get("_error"):
         handle_error(tenants_resp, "Load Tenants")
@@ -133,37 +210,20 @@ def show_network_report(auvik_get):
         tenant_options.append((name, tid))
 
     st.subheader("Tenant")
-    tenant_name = st.selectbox(
-        "Select Tenant",
-        options=[x[0] for x in tenant_options],
-        index=0,
-        key="tenant_select",
-    )
+    tenant_name = st.selectbox("Select Tenant", [x[0] for x in tenant_options], index=0, key="tenant_select")
     tenant_id = dict(tenant_options)[tenant_name]
     st.caption(f"Using tenantId: {tenant_id}")
 
     st.divider()
 
-    # ────────────────
     # Devices
-    # ────────────────
     st.subheader("Devices")
-
-    page_size = st.number_input(
-        "Device page size (page[first])",
-        min_value=1, max_value=100, value=100, step=10,
-        key="dev_page_size"
-    )
-
+    page_size = st.number_input("Device page size (page[first])", 1, 100, 100, 10, key="dev_page_size")
     load_devices = st.button("Load Devices", key="btn_load_devices")
 
-    # Load devices if button pressed OR reuse cached list for this tenant
     if load_devices or ("devices_df" in st.session_state and st.session_state.get("devices_tenant") == tenant_id):
         if load_devices or st.session_state.get("devices_tenant") != tenant_id:
-            devices = auvik_get(
-                "inventory/device/info",
-                params={"tenants": tenant_id, "page[first]": page_size},
-            )
+            devices = auvik_get("inventory/device/info", params={"tenants": tenant_id, "page[first]": page_size})
             if isinstance(devices, dict) and devices.get("_error"):
                 handle_error(devices, "Load Devices")
                 return
@@ -188,8 +248,6 @@ def show_network_report(auvik_get):
             devices_df = pd.DataFrame(rows)
             st.session_state["devices_df"] = devices_df
             st.session_state["devices_tenant"] = tenant_id
-
-            # Reset interface cache when tenant/device list refreshes
             st.session_state.pop("interfaces_df", None)
             st.session_state.pop("interfaces_device_id", None)
         else:
@@ -198,9 +256,8 @@ def show_network_report(auvik_get):
         st.success(f"Loaded {len(devices_df)} devices")
         st.dataframe(devices_df[["device_name", "device_type", "ip", "status"]], use_container_width=True)
 
-        # Select device by name
         device_names = devices_df["device_name"].fillna("N/A").tolist()
-        selected_device_name = st.selectbox("Select Device (by name)", options=device_names, key="selected_device_name")
+        selected_device_name = st.selectbox("Select Device (by name)", device_names, key="selected_device_name")
 
         matches = devices_df[devices_df["device_name"] == selected_device_name]
         if matches.empty:
@@ -208,12 +265,7 @@ def show_network_report(auvik_get):
             return
 
         if len(matches) > 1:
-            st.warning("Multiple devices share this name. Select the correct device ID:")
-            selected_device_id = st.selectbox(
-                "Device ID",
-                options=matches["device_id"].tolist(),
-                key="selected_device_id_dupe"
-            )
+            selected_device_id = st.selectbox("Device ID", matches["device_id"].tolist(), key="selected_device_id_dupe")
         else:
             selected_device_id = matches.iloc[0]["device_id"]
 
@@ -221,17 +273,9 @@ def show_network_report(auvik_get):
 
         st.divider()
 
-        # ────────────────
-        # Interfaces (only for selected device)
-        # ────────────────
+        # Interfaces
         st.subheader("Interfaces (only for selected device)")
-
-        iface_page_size = st.number_input(
-            "Interface page size (page[first])",
-            min_value=1, max_value=100, value=100, step=10,
-            key="iface_page_size"
-        )
-
+        iface_page_size = st.number_input("Interface page size (page[first])", 1, 100, 100, 10, key="iface_page_size")
         device_changed = st.session_state.get("interfaces_device_id") != selected_device_id
         load_ifaces = st.button("Load Interfaces for Selected Device", key="btn_load_ifaces")
 
@@ -240,11 +284,10 @@ def show_network_report(auvik_get):
                 "inventory/interface/info",
                 params={
                     "tenants": tenant_id,
-                    "filter[parentDevice]": selected_device_id,  # ✅ correct filter
+                    "filter[parentDevice]": selected_device_id,
                     "page[first]": iface_page_size,
                 }
             )
-
             if isinstance(interfaces, dict) and interfaces.get("_error"):
                 handle_error(interfaces, "Load Interfaces")
                 return
@@ -261,11 +304,9 @@ def show_network_report(auvik_get):
                 rows_i.append({
                     "interface_id": i.get("id"),
                     "interface_name": attr.get("interfaceName") or attr.get("name") or "N/A",
-                    "interface_type": attr.get("interfaceType", "N/A"),
                     "admin_status": attr.get("adminStatus", "N/A"),
                     "oper_status": attr.get("operationalStatus", attr.get("status", "N/A")),
                     "speed": attr.get("speed", "N/A"),
-                    "mac": attr.get("macAddress", "N/A"),
                 })
 
             interfaces_df = pd.DataFrame(rows_i)
@@ -279,9 +320,7 @@ def show_network_report(auvik_get):
 
         st.divider()
 
-        # ────────────────
-        # Interface Usage (Bandwidth)
-        # ────────────────
+        # Usage
         st.subheader("📈 Interface Usage (Mbps)")
 
         iface_choices = interfaces_df["interface_name"].tolist()
@@ -293,11 +332,7 @@ def show_network_report(auvik_get):
             return
 
         if len(iface_row) > 1:
-            selected_iface_id = st.selectbox(
-                "Interface ID",
-                options=iface_row["interface_id"].tolist(),
-                key="usage_iface_id_dupe"
-            )
+            selected_iface_id = st.selectbox("Interface ID", iface_row["interface_id"].tolist(), key="usage_iface_id_dupe")
         else:
             selected_iface_id = iface_row.iloc[0]["interface_id"]
 
@@ -305,7 +340,7 @@ def show_network_report(auvik_get):
         with c1:
             lookback_hours = st.slider("Lookback (hours)", 1, 168, 24, 1, key="usage_hours")
         with c2:
-            interval = st.selectbox("Interval", ["minute", "hour", "day"], index=0, key="usage_interval")
+            interval = st.selectbox("Interval", ["minute", "hour", "day"], index=1, key="usage_interval")
         with c3:
             show_raw = st.checkbox("Show raw API response", value=False, key="usage_raw")
 
@@ -322,7 +357,6 @@ def show_network_report(auvik_get):
                 "page[first]": 100,
             }
 
-            # ✅ Correct Auvik statistics endpoint
             stats = auvik_get("stat/interface/bandwidth", params=params)
 
             if isinstance(stats, dict) and stats.get("_error"):
@@ -334,27 +368,27 @@ def show_network_report(auvik_get):
 
             df = extract_bandwidth_points(stats)
             if df.empty:
-                st.warning("No bandwidth datapoints returned (or payload shape not recognized). Turn on 'Show raw API response'.")
+                st.warning("I could not parse datapoints. Keep 'Show raw API response' on and paste the top-level keys here.")
                 return
 
-            # Convert bps → Mbps
-            df["rx_mbps"] = df["rx_bps"] / 1_000_000
+            # Convert bps -> Mbps
             df["tx_mbps"] = df["tx_bps"] / 1_000_000
+            df["rx_mbps"] = df["rx_bps"] / 1_000_000
             df["total_mbps"] = df["total_bps"] / 1_000_000
 
             last = df.iloc[-1]
 
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Current RX (Mbps)", f"{(last['rx_mbps'] or 0):.2f}")
-            m2.metric("Current TX (Mbps)", f"{(last['tx_mbps'] or 0):.2f}")
-            m3.metric("Peak RX (Mbps)", f"{df['rx_mbps'].max():.2f}")
-            m4.metric("Peak TX (Mbps)", f"{df['tx_mbps'].max():.2f}")
+            m1.metric("Current TX (Mbps)", f"{(last['tx_mbps'] or 0):.2f}")
+            m2.metric("Current RX (Mbps)", f"{(last['rx_mbps'] or 0):.2f}")
+            m3.metric("Peak TX (Mbps)", f"{df['tx_mbps'].max():.2f}")
+            m4.metric("Peak RX (Mbps)", f"{df['rx_mbps'].max():.2f}")
 
-            st.dataframe(df[["time", "rx_mbps", "tx_mbps", "total_mbps"]].tail(50), use_container_width=True)
+            st.dataframe(df[["time", "tx_mbps", "rx_mbps", "total_mbps"]].tail(50), use_container_width=True)
 
             fig = plt.figure()
-            plt.plot(df["time"], df["rx_mbps"], label="RX Mbps")
             plt.plot(df["time"], df["tx_mbps"], label="TX Mbps")
+            plt.plot(df["time"], df["rx_mbps"], label="RX Mbps")
             plt.plot(df["time"], df["total_mbps"], label="Total Mbps")
             plt.legend()
             plt.xlabel("Time (UTC)")
@@ -367,7 +401,7 @@ def show_network_report(auvik_get):
 
 
 # ────────────────────────────────────────────────
-# Standalone mode (so this file can run independently)
+# Standalone mode
 # ────────────────────────────────────────────────
 def _load_auvik_creds_from_secrets():
     username = ""
@@ -398,10 +432,7 @@ def main():
 
     if not API_USERNAME or not API_KEY:
         st.error("Missing Auvik credentials in Streamlit Secrets.")
-        st.code(
-            'auvik_api_username = "api-user@yourdomain.com"\n'
-            'auvik_api_key = "YOUR_AUVIK_API_KEY_HERE"'
-        )
+        st.code('auvik_api_username = "api-user@yourdomain.com"\nauvik_api_key = "YOUR_AUVIK_API_KEY_HERE"')
         st.stop()
 
     BASE_URL = "https://auvikapi.us6.my.auvik.com/v1"
@@ -411,14 +442,7 @@ def main():
     def auvik_get(endpoint, params=None):
         url = f"{BASE_URL}/{endpoint.lstrip('/')}"
         try:
-            r = requests.get(
-                url,
-                headers=HEADERS,
-                auth=auth,
-                params=params,
-                timeout=60,
-                allow_redirects=True,
-            )
+            r = requests.get(url, headers=HEADERS, auth=auth, params=params, timeout=60, allow_redirects=True)
             if r.status_code >= 400:
                 return {"_error": True, "status": r.status_code, "text": r.text, "url": url}
             return r.json()
