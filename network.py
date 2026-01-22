@@ -14,7 +14,7 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-TOTAL_CAPACITY = 40000  # Mbps
+TOTAL_CAPACITY = 40000  # Mbps - adjust as needed
 
 if "period_key" not in st.session_state:
     st.session_state.period_key = f"period_{uuid.uuid4()}"
@@ -34,18 +34,25 @@ graphid = {
     "Last 365 days":  "3"
 }[period]
 
+# For short periods: use channel max (PRTG computes over recent data)
+# For longer: use historicdata with avg
+use_historic = period in ["Last 7 days", "Last 30 days", "Last 365 days"]
+
 period_deltas = {
-    "Live (2 hours)": (timedelta(hours=2), 0),       # raw
-    "Last 48 hours":  (timedelta(hours=48), 60),     # 1 min
-    "Last 7 days":    (timedelta(days=7), 300),      # 5 min
-    "Last 30 days":   (timedelta(days=30), 900),     # 15 min
-    "Last 365 days":  (timedelta(days=365), 86400)   # daily
+    "Live (2 hours)": timedelta(hours=2),
+    "Last 48 hours":  timedelta(hours=48),
+    "Last 7 days":    timedelta(days=7),
+    "Last 30 days":   timedelta(days=30),
+    "Last 365 days":  timedelta(days=365)
 }
-delta, avg_interval = period_deltas[period]
+delta = period_deltas[period]
 
 now = datetime.now()
 edate = now.strftime("%Y-%m-%d-%H-%M-%S")
 sdate = (now - delta).strftime("%Y-%m-%d-%H-%M-%S")
+
+# Avg only for historic (seconds); short periods skip
+avg_interval = 300 if use_historic else 0  # 5 min for longer periods
 
 SENSORS = {
     "Firstlight":          "12435",
@@ -55,81 +62,86 @@ SENSORS = {
 }
 
 @st.cache_data(ttl=300)
-def get_traffic_stats(sensor_id, sdate, edate, avg):
-    url = f"{BASE}/api/historicdata.json"
-    params = {
-        "id": sensor_id,
-        "sdate": sdate,
-        "edate": edate,
-        "avg": avg,
-        "usecaption": 1,
-        "username": USER,
-        "passhash": PH
-    }
-    try:
-        resp = requests.get(url, params=params, verify=False, timeout=30).json()
-        histdata = resp.get("histdata", [])
-        
-        if not histdata:
-            st.warning(f"No historic data for sensor {sensor_id} in period {sdate} to {edate} with avg={avg}")
+def get_traffic_stats(sensor_id, use_hist, sdate=None, edate=None, avg=0):
+    divisor = 10_000_000  # raw bit/s → Mbps; test/adjust if needed (try 1_000_000 if too small)
+
+    if not use_hist:
+        # Short periods: channel overview (max over recent, reliable for live)
+        url = f"{BASE}/api/table.json"
+        params = {
+            "content": "channels",
+            "id": sensor_id,
+            "columns": "name,minimum_raw,maximum_raw,lastvalue_raw",
+            "username": USER,
+            "passhash": PH
+        }
+        try:
+            resp = requests.get(url, params=params, verify=False, timeout=20).json()
+            channels = resp.get("channels", [])
+            if not channels:
+                return 0.0, 0.0, 0.0, 0.0
+
+            in_min = in_max = out_min = out_max = 0.0
+            for ch in channels:
+                name = ch.get("name", "").strip().lower()
+                min_raw = float(ch.get("minimum_raw", 0)) / divisor
+                max_raw = float(ch.get("maximum_raw", 0)) / divisor
+
+                if "traffic in" in name or "in" in name or "down" in name or "rx" in name:
+                    in_min = min(in_min, min_raw) if in_min else min_raw
+                    in_max = max(in_max, max_raw)
+                elif "traffic out" in name or "out" in name or "up" in name or "tx" in name:
+                    out_min = min(out_min, min_raw) if out_min else min_raw
+                    out_max = max(out_max, max_raw)
+
+            return round(in_min, 2), round(in_max, 2), round(out_min, 2), round(out_max, 2)
+        except:
             return 0.0, 0.0, 0.0, 0.0
-        
-        # Debug: show first item keys
-        first_keys = list(histdata[0].keys())
-        st.caption(f"Data keys for {sensor_id}: {', '.join(first_keys)}")
-        
-        raw_keys = [k for k in first_keys if k.lower().endswith("_raw")]
-        st.caption(f"Raw keys: {', '.join(raw_keys)}")
-        
-        in_raw_keys = []
-        out_raw_keys = []
-        
-        for key in raw_keys:
-            base_name = key[:-4].strip().lower()
-            if any(w in base_name for w in ["traffic in", "in", "down", "download", "rx", "receive", "input", "ingress"]):
-                in_raw_keys.append(key)
-            elif any(w in base_name for w in ["traffic out", "out", "up", "upload", "tx", "send", "transmit", "output", "egress"]):
-                out_raw_keys.append(key)
-        
-        if not in_raw_keys or not out_raw_keys:
-            st.error(f"No matching in/out keys for {sensor_id}. Raw keys: {raw_keys}")
+
+    else:
+        # Longer periods: historicdata min/max from buckets
+        url = f"{BASE}/api/historicdata.json"
+        params = {
+            "id": sensor_id,
+            "sdate": sdate,
+            "edate": edate,
+            "avg": avg,
+            "usecaption": 1,
+            "username": USER,
+            "passhash": PH
+        }
+        try:
+            resp = requests.get(url, params=params, verify=False, timeout=30).json()
+            histdata = resp.get("histdata", [])
+            if not histdata:
+                st.caption(f"No hist data for {sensor_id} ({period})")
+                return 0.0, 0.0, 0.0, 0.0
+
+            raw_keys = [k for k in histdata[0] if k.lower().endswith("_raw")]
+
+            in_raw_keys = [k for k in raw_keys if any(w in k.lower() for w in ["in", "down", "rx", "receive"])]
+            out_raw_keys = [k for k in raw_keys if any(w in k.lower() for w in ["out", "up", "tx", "transmit"])]
+
+            if not in_raw_keys or not out_raw_keys:
+                st.caption(f"No matching keys for {sensor_id}")
+                return 0.0, 0.0, 0.0, 0.0
+
+            in_values = [float(item.get(k, 0)) for item in histdata for k in in_raw_keys if item.get(k)]
+            out_values = [float(item.get(k, 0)) for item in histdata for k in out_raw_keys if item.get(k)]
+
+            in_values = [v for v in in_values if v > 0]  # ignore 0s for meaningful min
+            out_values = [v for v in out_values if v > 0]
+
+            in_min = min(in_values) / divisor if in_values else 0
+            in_max = max(in_values) / divisor if in_values else 0
+            out_min = min(out_values) / divisor if out_values else 0
+            out_max = max(out_values) / divisor if out_values else 0
+
+            return round(in_min, 2), round(in_max, 2), round(out_min, 2), round(out_max, 2)
+        except Exception as e:
+            st.caption(f"Hist error {sensor_id}: {str(e)}")
             return 0.0, 0.0, 0.0, 0.0
-        
-        in_values = []
-        out_values = []
-        
-        for item in histdata:
-            for k in in_raw_keys:
-                val = item.get(k)
-                if val is not None and val != '':
-                    try:
-                        in_values.append(float(val))
-                    except ValueError:
-                        pass
-            for k in out_raw_keys:
-                val = item.get(k)
-                if val is not None and val != '':
-                    try:
-                        out_values.append(float(val))
-                    except ValueError:
-                        pass
-        
-        if not in_values or not out_values:
-            st.warning(f"No valid values found for {sensor_id}")
-            return 0.0, 0.0, 0.0, 0.0
-        
-        divisor = 10_000_000
-        
-        in_min = min(in_values) / divisor
-        in_max = max(in_values) / divisor
-        out_min = min(out_values) / divisor
-        out_max = max(out_values) / divisor
-        
-        return round(in_min, 2), round(in_max, 2), round(out_min, 2), round(out_max, 2)
-    
-    except Exception as e:
-        st.error(f"Error for {sensor_id}: {str(e)}")
-        return 0.0, 0.0, 0.0, 0.0
+
 
 @st.cache_data(ttl=300)
 def get_graph_image(sensor_id, graphid):
@@ -150,8 +162,10 @@ def get_graph_image(sensor_id, graphid):
     except:
         return None
 
+# ────────────────────────────────────────────────
+
 st.title("PRTG Bandwidth Dashboard")
-st.caption(f"Period: {period} ({sdate} to {edate}) | Graph ID: {graphid}")
+st.caption(f"Period: **{period}** ({sdate} to {edate}) | Graph ID: {graphid}")
 
 total_in_min = total_in_max = total_out_min = total_out_max = 0.0
 
@@ -161,15 +175,15 @@ for i in range(0, len(SENSORS), 2):
 
     for col, (name, sid) in zip(cols, pair):
         with col:
-            in_min, in_max, out_min, out_max = get_traffic_stats(sid, sdate, edate, avg_interval)
-            
+            in_min, in_max, out_min, out_max = get_traffic_stats(sid, use_historic, sdate, edate, avg_interval)
+
             total_in_min += in_min
             total_in_max += in_max
             total_out_min += out_min
             total_out_max += out_max
-            
+
             st.subheader(name)
-            
+
             c1, c2 = st.columns(2)
             with c1:
                 st.metric("Download Min", f"{in_min:,.2f} Mbps")
@@ -177,7 +191,7 @@ for i in range(0, len(SENSORS), 2):
             with c2:
                 st.metric("Upload Min", f"{out_min:,.2f} Mbps")
                 st.metric("Upload Max", f"{out_max:,.2f} Mbps")
-            
+
             img = get_graph_image(sid, graphid)
             if img:
                 st.image(img, use_container_width=True)
@@ -190,7 +204,6 @@ col_left, col_right = st.columns([3, 1])
 
 with col_left:
     fig, ax = plt.subplots(figsize=(12, 7))
-
     groups = ["Download", "Upload"]
     mins = [total_in_min, total_out_min]
     maxs = [total_in_max, total_out_max]
