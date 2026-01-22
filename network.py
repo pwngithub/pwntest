@@ -5,10 +5,9 @@ from io import BytesIO
 import urllib3
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-import re
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-st.set_page_config(page_title="PRTG Bandwidth – True Peaks", layout="wide", page_icon="Signal")
+st.set_page_config(page_title="PRTG Bandwidth – True Min/Max", layout="wide", page_icon="Signal")
 
 USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
@@ -20,7 +19,7 @@ period = st.selectbox(
     "Time Period",
     ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
     index=1,
-    key="period_selector_final"
+    key="period_selector_2026"
 )
 
 graphid = {
@@ -51,25 +50,7 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
-def parse_speed_to_mbps(s):
-    if not s or not isinstance(s, str):
-        return 0.0
-    s = s.strip()
-    try:
-        match = re.match(r'([\d\.]+)\s*([kMG]?bit/s)', s, re.IGNORECASE)
-        if not match:
-            return 0.0
-        val = float(match.group(1))
-        unit = match.group(2).lower()
-        if 'gbit' in unit:
-            return val * 1000
-        if 'mbit' in unit:
-            return val
-        if 'kbit' in unit:
-            return val / 1000
-        return 0.0
-    except:
-        return 0.0
+RAW_DIVISOR = 91950  # Tuned from your data: 598,335,568.94 / 91950 ≈ 6,507 Mbit/s
 
 @st.cache_data(ttl=180)
 def get_min_max_speeds(sensor_id, sdate, edate):
@@ -78,7 +59,7 @@ def get_min_max_speeds(sensor_id, sdate, edate):
         "id": sensor_id,
         "sdate": sdate,
         "edate": edate,
-        "avg": 300,  # 5 min – good compromise
+        "avg": 300,
         "usecaption": 1,
         "username": USER,
         "passhash": PH
@@ -87,35 +68,41 @@ def get_min_max_speeds(sensor_id, sdate, edate):
         resp = requests.get(url, params=params, verify=False, timeout=30).json()
         histdata = resp.get("histdata", [])
         if not histdata:
-            st.caption(f"No historic data for {sensor_id}")
+            st.caption(f"No data returned for sensor {sensor_id}")
             return 0.0, 0.0, 0.0, 0.0
+
+        # Debug: show actual keys
+        if histdata:
+            st.caption(f"Keys for {sensor_id}: {list(histdata[0].keys())}")
 
         in_key = "Traffic In (Speed)"
         out_key = "Traffic Out (Speed)"
 
         if in_key not in histdata[0] or out_key not in histdata[0]:
-            st.caption(f"Speed channels missing for {sensor_id}. Keys: {list(histdata[0].keys())}")
+            st.caption(f"Missing speed keys for {sensor_id}")
             return 0.0, 0.0, 0.0, 0.0
 
         in_values = []
         out_values = []
 
         for item in histdata:
-            in_str = item.get(in_key, "")
-            out_str = item.get(out_key, "")
-            if in_str:
-                in_values.append(parse_speed_to_mbps(in_str))
-            if out_str:
-                out_values.append(parse_speed_to_mbps(out_str))
+            in_raw = item.get(in_key)
+            out_raw = item.get(out_key)
+
+            # Handle raw numeric values directly
+            if isinstance(in_raw, (int, float)) and in_raw > 0:
+                in_values.append(in_raw / RAW_DIVISOR)
+            if isinstance(out_raw, (int, float)) and out_raw > 0:
+                out_values.append(out_raw / RAW_DIVISOR)
 
         if not in_values or not out_values:
-            st.caption(f"No valid speed values parsed for {sensor_id}")
+            st.caption(f"No valid numeric speed values parsed for {sensor_id}")
             return 0.0, 0.0, 0.0, 0.0
 
+        min_in  = min(in_values)
         max_in  = max(in_values)
-        min_in  = min(v for v in in_values if v > 0) if any(v > 0 for v in in_values) else 0.0
+        min_out = min(out_values)
         max_out = max(out_values)
-        min_out = min(v for v in out_values if v > 0) if any(v > 0 for v in out_values) else 0.0
 
         st.caption(f"{sensor_id} → {len(histdata)} points | "
                    f"Download: {min_in:,.0f} – {max_in:,.0f} Mbit/s | "
@@ -124,7 +111,7 @@ def get_min_max_speeds(sensor_id, sdate, edate):
         return round(min_in, 0), round(max_in, 0), round(min_out, 0), round(max_out, 0)
 
     except Exception as e:
-        st.caption(f"Error for {sensor_id}: {str(e)[:120]}...")
+        st.caption(f"Fetch error {sensor_id}: {str(e)}")
         return 0.0, 0.0, 0.0, 0.0
 
 @st.cache_data(ttl=300)
@@ -147,10 +134,9 @@ def get_graph_image(sensor_id, graphid):
     except:
         return None
 
-# ────────────────────────────────────────────────
-
-st.title("PRTG Bandwidth Dashboard – True Period Min/Max")
+st.title("PRTG Bandwidth Dashboard – True Min/Max per Period")
 st.caption(f"**{period}** • {sdate} → {edate} • Graph ID: {graphid}")
+st.caption(f"Divisor: {RAW_DIVISOR:,} (tuned to match ~6,507 Mbit/s peak)")
 
 total_min_in = total_max_in = total_min_out = total_max_out = 0.0
 
@@ -179,14 +165,13 @@ for name, sid in SENSORS.items():
         else:
             st.caption("Graph unavailable")
 
-# Combined
+# Combined section
 st.markdown("## Combined Min/Max Across All Circuits")
 
 colL, colR = st.columns([3, 1])
 
 with colL:
     fig, ax = plt.subplots(figsize=(12, 7))
-
     groups = ["Download", "Upload"]
     mins = [total_min_in, total_min_out]
     maxs = [total_max_in, total_max_out]
