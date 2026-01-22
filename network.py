@@ -4,16 +4,16 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 # ────────────────────────────────────────────────
-# Auvik API Token (from Secrets)
+# Auvik API Token (from Streamlit Secrets)
 # ────────────────────────────────────────────────
 
 API_TOKEN = st.secrets.get("auvik_api_token")
 
 if not API_TOKEN:
     st.error("""
-    Auvik API token not found.
+    **Auvik API token not found.**
     
-    Fix: Go to your app → Settings → Secrets tab
+    Go to your app → Settings → Secrets tab
     Add exactly:
     
     auvik_api_token = "your_real_token_here"
@@ -22,14 +22,13 @@ if not API_TOKEN:
     """)
     st.stop()
 
-st.success("API token loaded ✓")
+st.success("Auvik API token loaded ✓")
 
 # ────────────────────────────────────────────────
-# IMPORTANT: Use YOUR correct regional base URL
-# Check your Auvik dashboard URL (e.g. us1.my.auvik.com → auvikapi.us1.my.auvik.com)
+# YOUR CORRECT REGIONAL BASE URL (from your dashboard)
 # ────────────────────────────────────────────────
 
-BASE_URL = "https://auvikapi.us1.my.auvik.com/api/v1"   # Change this to match your region!
+BASE_URL = "https://auvikapi.us6.my.auvik.com/api/v1"
 
 HEADERS = {
     "Authorization": f"Bearer {API_TOKEN}",
@@ -38,7 +37,7 @@ HEADERS = {
 }
 
 # ────────────────────────────────────────────────
-# Helpers
+# Helper
 # ────────────────────────────────────────────────
 
 @st.cache_data(ttl=300)
@@ -49,32 +48,31 @@ def auvik_get(endpoint, params=None):
         r.raise_for_status()
         return r.json()
     except requests.exceptions.RequestException as e:
-        st.error(f"API request failed: {str(e)}\n\n"
-                 f"URL attempted: {url}\n"
-                 f"Tip: Double-check BASE_URL matches your Auvik region (see dashboard URL).")
+        st.error(f"API request failed: {str(e)}\n\nURL: {url}\n\nTip: Check token, region, or network.")
         return None
 
 # ────────────────────────────────────────────────
 # UI
 # ────────────────────────────────────────────────
 
-st.title("Auvik API Explorer")
+st.title("Auvik API Explorer – Your Data")
 
-st.info(f"Using base URL: {BASE_URL}\n\n"
-        "If requests fail with DNS/name resolution → change BASE_URL to your region (e.g. us2, eu1...)")
+st.info(f"Using your regional base: {BASE_URL}")
 
-# Load organizations
-if st.button("Load Organizations"):
+# Organizations
+if st.button("Load My Organizations"):
     orgs = auvik_get("organization")
     if orgs and "data" in orgs:
-        st.success(f"Found {len(orgs['data'])} organizations")
-        st.json(orgs)
+        st.success(f"Found {len(orgs['data'])} organization(s)")
+        for org in orgs["data"]:
+            with st.expander(f"{org['attributes'].get('name', 'Unnamed')} (ID: {org['id']})"):
+                st.json(org)
     elif orgs is None:
-        st.warning("Request failed – check BASE_URL and token")
+        st.warning("Request failed – check token or URL")
     else:
         st.warning("No organizations returned")
 
-# Load devices
+# Devices
 if st.button("Load Devices"):
     devices = auvik_get("device")
     if devices and "data" in devices:
@@ -84,15 +82,15 @@ if st.button("Load Devices"):
                 "Name": d["attributes"].get("deviceName", "N/A"),
                 "Type": d["attributes"].get("deviceType", "N/A"),
                 "Model": d["attributes"].get("model", "N/A"),
-                "IP": d["attributes"].get("ipAddress", "N/A")
+                "IP": d["attributes"].get("ipAddress", "N/A"),
+                "Status": d["attributes"].get("status", "N/A")
             } for d in devices["data"]
         ])
         st.dataframe(df)
         st.success(f"Found {len(devices['data'])} devices")
     elif devices is None:
-        st.warning("Request failed – likely wrong BASE_URL or token issue")
+        st.warning("Request failed")
     else:
         st.warning("No devices returned")
 
-st.markdown("---")
-st.caption("Once this works, we can add bandwidth stats, peaks, graphs, etc. Reply with what you see!")
+st.caption("Once devices load, we can add bandwidth stats, peaks, graphs, alerts, etc. Reply with what you see!")
