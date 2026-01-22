@@ -38,22 +38,14 @@ def iso_z(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def unix_minutes_to_dt(v):
-    try:
-        return pd.to_datetime(float(v) * 60, unit="s", utc=True, errors="coerce")
-    except Exception:
-        return pd.NaT
-
-
 def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
     """
-    Parses Auvik stat/interface/bandwidth response shape:
+    Parses Auvik stat/interface/bandwidth response, including shapes where
+    stats/legend/data are dicts keyed by "0","1","2"... instead of arrays.
 
-    data[0].attributes.stats[0].legend + data[0].attributes.stats[0].data
-
-    legend = ["Recorded At","Transmit","Receive","Bandwidth"]
-    unit   = ["unix_mins","bits_per_sec","bits_per_sec","bits_per_sec"]
-    data   = [[unix_mins, tx_bps, rx_bps, total_bps], ...]
+    Expected semantic meaning:
+      legend: ["Recorded At","Transmit","Receive","Bandwidth"]
+      data:   [[unix_mins, tx_bps, rx_bps, total_bps], ...]
     """
     if not isinstance(stat_json, dict):
         return pd.DataFrame()
@@ -62,23 +54,40 @@ def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
     if not isinstance(top, list) or not top:
         return pd.DataFrame()
 
+    def to_list_maybe(x):
+        """Convert list OR dict-with-numeric-keys into a python list."""
+        if isinstance(x, list):
+            return x
+        if isinstance(x, dict):
+            # sort keys like "0","1","2" safely
+            try:
+                keys = sorted(x.keys(), key=lambda k: int(k) if str(k).isdigit() else str(k))
+            except Exception:
+                keys = sorted(x.keys(), key=lambda k: str(k))
+            return [x[k] for k in keys]
+        return []
+
     all_rows = []
 
     for item in top:
         attrs = (item or {}).get("attributes", {}) or {}
         stats_blocks = attrs.get("stats")
 
-        if not (isinstance(stats_blocks, list) and stats_blocks):
-            continue
+        # stats can be list of blocks OR single block dict
+        blocks = to_list_maybe(stats_blocks)
+        if len(blocks) == 1 and isinstance(blocks[0], dict) and ("legend" in blocks[0] or "data" in blocks[0]):
+            pass  # ok
+        elif isinstance(stats_blocks, dict):
+            blocks = [stats_blocks]
 
-        for block in stats_blocks:
+        for block in blocks:
             if not isinstance(block, dict):
                 continue
 
-            legend = block.get("legend", [])
-            rows = block.get("data", [])
+            legend = to_list_maybe(block.get("legend", []))
+            rows = to_list_maybe(block.get("data", []))
 
-            if not (isinstance(legend, list) and isinstance(rows, list) and legend):
+            if not legend or not rows:
                 continue
 
             legend_norm = [str(x).strip().lower() for x in legend]
@@ -96,13 +105,14 @@ def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
             bw_i = idx("bandwidth") or idx("total")
 
             for r in rows:
-                if not isinstance(r, (list, tuple)):
+                r_list = to_list_maybe(r)
+                if not r_list:
                     continue
 
                 def g(i):
                     if i is None:
                         return None
-                    return r[i] if i < len(r) else None
+                    return r_list[i] if i < len(r_list) else None
 
                 all_rows.append({
                     "time": g(t_i),
@@ -115,7 +125,16 @@ def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
     if df.empty:
         return df
 
-    df["time"] = df["time"].apply(unix_minutes_to_dt)
+    # Recorded At is unix minutes in your payload
+    def to_dt(v):
+        try:
+            if v is None:
+                return pd.NaT
+            return pd.to_datetime(float(v) * 60, unit="s", utc=True, errors="coerce")
+        except Exception:
+            return pd.NaT
+
+    df["time"] = df["time"].apply(to_dt)
     df["tx_bps"] = pd.to_numeric(df["tx_bps"], errors="coerce")
     df["rx_bps"] = pd.to_numeric(df["rx_bps"], errors="coerce")
     df["total_bps"] = pd.to_numeric(df["total_bps"], errors="coerce")
@@ -124,8 +143,27 @@ def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
     return df
 
 
+def preset_to_timedelta(preset: str) -> timedelta:
+    if preset == "2 hours":
+        return timedelta(hours=2)
+    if preset == "24 hours":
+        return timedelta(hours=24)
+    if preset == "48 hours":
+        return timedelta(hours=48)
+    return timedelta(days=365)
+
+
+def default_interval_for_preset(preset: str) -> str:
+    # sensible defaults
+    if preset == "2 hours":
+        return "minute"
+    if preset in ("24 hours", "48 hours"):
+        return "hour"
+    return "day"
+
+
 # ────────────────────────────────────────────────
-# Report function (importable)
+# Report function (importable by your main dashboard)
 # ────────────────────────────────────────────────
 def show_network_report(auvik_get):
     st.title("🌐 Network Report")
@@ -212,7 +250,7 @@ def show_network_report(auvik_get):
 
         st.divider()
 
-        # Interfaces
+        # Interfaces (filtered to selected device)
         st.subheader("Interfaces (only for selected device)")
         iface_page_size = st.number_input("Interface page size (page[first])", 1, 100, 100, 10, key="iface_page_size")
         device_changed = st.session_state.get("interfaces_device_id") != selected_device_id
@@ -284,21 +322,15 @@ def show_network_report(auvik_get):
                 key="usage_lookback_preset"
             )
         with c2:
-            # "1 year" needs bigger buckets; hour/day usually makes sense
-            default_interval_idx = 1 if lookback_preset == "1 year" else 1  # hour
-            interval = st.selectbox("Interval", ["minute", "hour", "day"], index=default_interval_idx, key="usage_interval")
+            default_interval = default_interval_for_preset(lookback_preset)
+            interval = st.selectbox(
+                "Interval",
+                ["minute", "hour", "day"],
+                index=["minute", "hour", "day"].index(default_interval),
+                key="usage_interval"
+            )
         with c3:
             show_raw = st.checkbox("Show raw API response", value=False, key="usage_raw")
-
-        def preset_to_timedelta(preset: str) -> timedelta:
-            if preset == "2 hours":
-                return timedelta(hours=2)
-            if preset == "24 hours":
-                return timedelta(hours=24)
-            if preset == "48 hours":
-                return timedelta(hours=48)
-            # 1 year (approx) – Auvik stats should still handle this fine
-            return timedelta(days=365)
 
         if st.button("Load Usage", key="btn_load_usage"):
             end = datetime.now(timezone.utc)
@@ -322,6 +354,8 @@ def show_network_report(auvik_get):
                 st.json(stats)
 
             df = extract_bandwidth_points(stats)
+            st.caption(f"Parsed datapoints: {len(df)}")
+
             if df.empty:
                 st.warning("Stats returned, but no datapoints parsed.")
                 return
@@ -331,13 +365,14 @@ def show_network_report(auvik_get):
             df["rx_mbps"] = df["rx_bps"] / 1_000_000
             df["total_mbps"] = df["total_bps"] / 1_000_000
 
-            last = df.iloc[-1]
+            # Replace NaN with 0 for metrics only
+            last = df.iloc[-1].fillna(0)
 
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Current TX (Mbps)", f"{(last['tx_mbps'] or 0):.2f}")
-            m2.metric("Current RX (Mbps)", f"{(last['rx_mbps'] or 0):.2f}")
-            m3.metric("Peak TX (Mbps)", f"{df['tx_mbps'].max():.2f}")
-            m4.metric("Peak RX (Mbps)", f"{df['rx_mbps'].max():.2f}")
+            m1.metric("Current TX (Mbps)", f"{float(last['tx_mbps']):.2f}")
+            m2.metric("Current RX (Mbps)", f"{float(last['rx_mbps']):.2f}")
+            m3.metric("Peak TX (Mbps)", f"{float(df['tx_mbps'].max()):.2f}")
+            m4.metric("Peak RX (Mbps)", f"{float(df['rx_mbps'].max()):.2f}")
 
             st.dataframe(df[["time", "tx_mbps", "rx_mbps", "total_mbps"]].tail(50), use_container_width=True)
 
