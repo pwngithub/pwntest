@@ -1,95 +1,71 @@
 import streamlit as st
 import requests
 from requests.auth import HTTPBasicAuth
-from datetime import datetime, timedelta
-import pandas as pd
+import pandas as pd  # optional but common
 
-if st.button("Load Devices"):
-    # Common Auvik inventory endpoint
-    devices = auvik_get("inventory/device/info", params={"page[limit]": 200})
-    if devices.get("_error"):
-        st.error(f"Error ({devices.get('status')}): {devices.get('text')[:500]}")
-        st.code(devices.get("url"))
-    elif "data" in devices:
-        rows = []
-        for d in devices["data"]:
-            attr = d.get("attributes", {})
-            rows.append({
-                "ID": d.get("id"),
-                "Name": attr.get("deviceName") or attr.get("name") or "N/A",
-                "Type": attr.get("deviceType", "N/A"),
-                "Model": attr.get("model", "N/A"),
-                "IP": attr.get("ipAddress", "N/A"),
-                "Status": attr.get("status", "N/A"),
-            })
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True)
-        st.success(f"Found {len(df)} devices")
-    else:
-        st.warning("Unexpected response format")
-        st.json(devices)
+st.set_page_config(page_title="Auvik Dashboard", layout="wide")
 
-st.markdown("---")
-st.header("3. Interfaces")
-device_id_filter = st.text_input("Filter by Device ID (optional)", "")
+# ────────────────────────────────────────────────
+# Secrets loader (supports BOTH Streamlit TOML styles)
+# ────────────────────────────────────────────────
+def load_auvik_creds():
+    """
+    Supports:
+    A) Top-level:
+       auvik_api_username = "..."
+       auvik_api_key = "..."
 
-if st.button("Load Interfaces"):
-    params = {"page[limit]": 200}
-    if device_id_filter.strip():
-        # Some endpoints support filter; if this doesn't work, we can adjust once we see your response.
-        params["filter[deviceId]"] = device_id_filter.strip()
+    B) Section:
+       [auvik]
+       api_username = "..."
+       api_key = "..."
+    """
+    username = ""
+    api_key = ""
 
-    interfaces = auvik_get("inventory/interface/info", params=params)
-    if interfaces.get("_error"):
-        st.error(f"Error ({interfaces.get('status')}): {interfaces.get('text')[:500]}")
-        st.code(interfaces.get("url"))
-    elif "data" in interfaces:
-        rows = []
-        for i in interfaces["data"]:
-            attr = i.get("attributes", {})
-            rows.append({
-                "Interface ID": i.get("id"),
-                "Name": attr.get("interfaceName") or attr.get("name") or "N/A",
-                "Device": attr.get("deviceName", "N/A"),
-                "Speed": attr.get("speed", "N/A"),
-                "Status": attr.get("status", "N/A"),
-                "MAC": attr.get("macAddress", "N/A"),
-            })
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True)
-        st.success(f"Found {len(df)} interfaces")
-    else:
-        st.warning("Unexpected response format")
-        st.json(interfaces)
+    # A) top-level
+    if "auvik_api_username" in st.secrets:
+        username = str(st.secrets.get("auvik_api_username", "")).strip()
+    if "auvik_api_key" in st.secrets:
+        api_key = str(st.secrets.get("auvik_api_key", "")).strip()
 
-st.markdown("---")
-st.header("4. Traffic Stats (Interface)")
+    # B) section
+    if (not username or not api_key) and "auvik" in st.secrets:
+        block = st.secrets.get("auvik", {})
+        if isinstance(block, dict):
+            username = username or str(block.get("api_username", "")).strip()
+            api_key = api_key or str(block.get("api_key", "")).strip()
 
-interface_id = st.text_input("Enter Interface ID for 24h stats", "")
-if interface_id and st.button("Get 24h Bandwidth Stats"):
-    end = datetime.utcnow()
-    start = end - timedelta(hours=24)
+    return username, api_key
 
-    params = {
-        "from": start.isoformat() + "Z",
-        "to": end.isoformat() + "Z",
-        "interval": "5m"
-    }
 
-    stats = auvik_get(f"interface/statistics/{interface_id.strip()}", params=params)
-    if stats.get("_error"):
-        st.error(f"Error ({stats.get('status')}): {stats.get('text')[:500]}")
-        st.code(stats.get("url"))
-    elif "data" in stats:
-        st.success(f"Retrieved {len(stats['data'])} data points")
-        st.json(stats["data"][:5])
+API_USERNAME, API_KEY = load_auvik_creds()
 
-        # Example: show max octets (counters)
-        max_in = max((p.get("inOctets", 0) or 0) for p in stats["data"])
-        max_out = max((p.get("outOctets", 0) or 0) for p in stats["data"])
-        st.metric("Max In Octets (counter)", f"{int(max_in):,}")
-        st.metric("Max Out Octets (counter)", f"{int(max_out):,}")
-        st.info("To compute Mbps: delta_octets * 8 / delta_seconds / 1e6 between points.")
-    else:
-        st.warning("Unexpected response format / no data")
-        st.json(stats)
+# ────────────────────────────────────────────────
+# Sidebar: Safe Secrets Debug (does NOT expose key)
+# ────────────────────────────────────────────────
+with st.sidebar:
+    st.header("🔧 Debug")
+    try:
+        keys = list(st.secrets.keys())
+    except Exception:
+        keys = []
+    st.write("Secrets keys found:", keys)
+    st.write("Username loaded:", bool(API_USERNAME))
+    st.write("API key loaded:", bool(API_KEY))
+    if API_KEY:
+        st.write("API key length:", len(API_KEY))
+        st.write("API key prefix:", (API_KEY[:4] + "…") if len(API_KEY) >= 4 else "…")
+
+# ────────────────────────────────────────────────
+# Stop if missing creds
+# ────────────────────────────────────────────────
+if not API_USERNAME or not API_KEY:
+    st.error("Auvik API credentials not found / not loaded by Streamlit Cloud.")
+    st.markdown("""
+### Streamlit Cloud Secrets (VALID TOML)
+
+**Option A (top-level):**
+```toml
+auvik_api_username = "api-user@yourdomain.com"
+auvik_api_key = "YOUR_AUVIK_API_KEY_HERE"
