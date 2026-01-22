@@ -41,43 +41,80 @@ def iso_z(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def compute_mbps(df: pd.DataFrame, ts_col: str, in_col: str, out_col: str) -> pd.DataFrame:
+def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
     """
-    Convert cumulative octet counters to Mbps time series using deltas.
-    Mbps = (Δoctets * 8) / Δseconds / 1_000_000
+    Flatten Auvik stat/interface/bandwidth response to a DataFrame:
+      time, rx_bps, tx_bps, total_bps
+
+    The Auvik payload can vary slightly; this tries common shapes.
+    If it can't find datapoints, return empty DF.
     """
+    data = (stat_json or {}).get("data", [])
+    if not data:
+        return pd.DataFrame()
+
+    all_points = []
+
+    for item in data:
+        attrs = (item or {}).get("attributes", {}) or {}
+
+        # Common containers
+        points = None
+        for k in ("stats", "dataPoints", "points", "series"):
+            v = attrs.get(k)
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                points = v
+                break
+
+        # Sometimes stats are nested one more level
+        if points is None:
+            for v in attrs.values():
+                if isinstance(v, list) and v and isinstance(v[0], dict) and ("time" in v[0] or "timestamp" in v[0]):
+                    points = v
+                    break
+
+        if not points:
+            continue
+
+        for p in points:
+            if not isinstance(p, dict):
+                continue
+
+            t = p.get("time") or p.get("timestamp") or p.get("dateTime")
+
+            # Bandwidth fields (bps) - try common naming
+            rx = p.get("averageReceived") or p.get("avgReceived") or p.get("received")
+            tx = p.get("averageTransmitted") or p.get("avgTransmitted") or p.get("transmitted")
+            total = p.get("averageTotal") or p.get("avgTotal") or p.get("total")
+
+            all_points.append({"time": t, "rx_bps": rx, "tx_bps": tx, "total_bps": total})
+
+    df = pd.DataFrame(all_points)
     if df.empty:
         return df
 
-    df = df.copy()
-    df[ts_col] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
-    df = df.dropna(subset=[ts_col]).sort_values(ts_col)
+    # time can be unix minutes (int) or iso string
+    if pd.api.types.is_numeric_dtype(df["time"]):
+        df["time"] = pd.to_datetime(df["time"].astype("float") * 60, unit="s", utc=True, errors="coerce")
+    else:
+        df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
 
-    df[in_col] = pd.to_numeric(df[in_col], errors="coerce")
-    df[out_col] = pd.to_numeric(df[out_col], errors="coerce")
+    for col in ("rx_bps", "tx_bps", "total_bps"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    df["dt_seconds"] = df[ts_col].diff().dt.total_seconds()
-    df["din"] = df[in_col].diff()
-    df["dout"] = df[out_col].diff()
-
-    # Handle counter reset / negative deltas
-    df.loc[df["din"] < 0, "din"] = None
-    df.loc[df["dout"] < 0, "dout"] = None
-    df.loc[df["dt_seconds"] <= 0, "dt_seconds"] = None
-
-    df["in_mbps"] = (df["din"] * 8) / df["dt_seconds"] / 1_000_000
-    df["out_mbps"] = (df["dout"] * 8) / df["dt_seconds"] / 1_000_000
-
+    df = df.dropna(subset=["time"]).sort_values("time")
     return df
 
 
 # ────────────────────────────────────────────────
-# Main report (importable by your dashboard)
+# Report function (importable by your main dashboard)
 # ────────────────────────────────────────────────
 def show_network_report(auvik_get):
     st.title("🌐 Network Report")
 
-    # 1) Tenants
+    # ────────────────
+    # Tenants
+    # ────────────────
     tenants_resp = auvik_get("tenants")
     if isinstance(tenants_resp, dict) and tenants_resp.get("_error"):
         handle_error(tenants_resp, "Load Tenants")
@@ -107,7 +144,9 @@ def show_network_report(auvik_get):
 
     st.divider()
 
-    # 2) Devices
+    # ────────────────
+    # Devices
+    # ────────────────
     st.subheader("Devices")
 
     page_size = st.number_input(
@@ -118,6 +157,7 @@ def show_network_report(auvik_get):
 
     load_devices = st.button("Load Devices", key="btn_load_devices")
 
+    # Load devices if button pressed OR reuse cached list for this tenant
     if load_devices or ("devices_df" in st.session_state and st.session_state.get("devices_tenant") == tenant_id):
         if load_devices or st.session_state.get("devices_tenant") != tenant_id:
             devices = auvik_get(
@@ -158,7 +198,7 @@ def show_network_report(auvik_get):
         st.success(f"Loaded {len(devices_df)} devices")
         st.dataframe(devices_df[["device_name", "device_type", "ip", "status"]], use_container_width=True)
 
-        # Device selector by name
+        # Select device by name
         device_names = devices_df["device_name"].fillna("N/A").tolist()
         selected_device_name = st.selectbox("Select Device (by name)", options=device_names, key="selected_device_name")
 
@@ -181,7 +221,9 @@ def show_network_report(auvik_get):
 
         st.divider()
 
-        # 3) Interfaces (ONLY for selected device)
+        # ────────────────
+        # Interfaces (only for selected device)
+        # ────────────────
         st.subheader("Interfaces (only for selected device)")
 
         iface_page_size = st.number_input(
@@ -224,7 +266,6 @@ def show_network_report(auvik_get):
                     "oper_status": attr.get("operationalStatus", attr.get("status", "N/A")),
                     "speed": attr.get("speed", "N/A"),
                     "mac": attr.get("macAddress", "N/A"),
-                    "device_name": attr.get("parentDeviceName", selected_device_name),
                 })
 
             interfaces_df = pd.DataFrame(rows_i)
@@ -238,7 +279,9 @@ def show_network_report(auvik_get):
 
         st.divider()
 
-        # 4) Interface Usage (Mbps In/Out)
+        # ────────────────
+        # Interface Usage (Bandwidth)
+        # ────────────────
         st.subheader("📈 Interface Usage (Mbps)")
 
         iface_choices = interfaces_df["interface_name"].tolist()
@@ -249,7 +292,6 @@ def show_network_report(auvik_get):
             st.warning("Could not resolve interface selection to an ID.")
             return
 
-        # If duplicate interface names exist, disambiguate by ID
         if len(iface_row) > 1:
             selected_iface_id = st.selectbox(
                 "Interface ID",
@@ -259,74 +301,61 @@ def show_network_report(auvik_get):
         else:
             selected_iface_id = iface_row.iloc[0]["interface_id"]
 
-        colA, colB, colC = st.columns(3)
-        with colA:
-            hours = st.slider("Lookback (hours)", 1, 72, 24, 1, key="usage_hours")
-        with colB:
-            interval = st.selectbox("Interval", ["5m", "15m", "30m", "1h"], index=0, key="usage_interval")
-        with colC:
-            show_raw = st.checkbox("Show raw stats sample", value=False, key="usage_show_raw")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            lookback_hours = st.slider("Lookback (hours)", 1, 168, 24, 1, key="usage_hours")
+        with c2:
+            interval = st.selectbox("Interval", ["minute", "hour", "day"], index=0, key="usage_interval")
+        with c3:
+            show_raw = st.checkbox("Show raw API response", value=False, key="usage_raw")
 
         if st.button("Load Usage", key="btn_load_usage"):
             end = datetime.now(timezone.utc)
-            start = end - timedelta(hours=hours)
+            start = end - timedelta(hours=lookback_hours)
 
             params = {
                 "tenants": tenant_id,
-                "from": iso_z(start),
-                "to": iso_z(end),
-                "interval": interval,
+                "filter[fromTime]": iso_z(start),
+                "filter[thruTime]": iso_z(end),
+                "filter[interval]": interval,
+                "filter[interfaceId]": selected_iface_id,
+                "page[first]": 100,
             }
 
-            stats = auvik_get(f"interface/statistics/{selected_iface_id}", params=params)
+            # ✅ Correct Auvik statistics endpoint
+            stats = auvik_get("stat/interface/bandwidth", params=params)
+
             if isinstance(stats, dict) and stats.get("_error"):
                 handle_error(stats, "Interface Usage")
                 return
 
-            points = (stats or {}).get("data", [])
-            if not points:
-                st.warning("No stats returned for that interface/time range.")
-                st.json(stats)
-                return
-
             if show_raw:
-                st.json(points[:5])
+                st.json(stats)
 
-            df = pd.DataFrame(points)
-
-            # Try to find timestamp + counters
-            ts_col = "timestamp" if "timestamp" in df.columns else ("time" if "time" in df.columns else None)
-            in_col = "inOctets" if "inOctets" in df.columns else None
-            out_col = "outOctets" if "outOctets" in df.columns else None
-
-            if ts_col is None or in_col is None or out_col is None:
-                st.warning("Unexpected stats format. Columns returned:")
-                st.write(list(df.columns))
-                st.json(points[:5])
+            df = extract_bandwidth_points(stats)
+            if df.empty:
+                st.warning("No bandwidth datapoints returned (or payload shape not recognized). Turn on 'Show raw API response'.")
                 return
 
-            df2 = compute_mbps(df, ts_col, in_col, out_col)
-            df2 = df2.dropna(subset=["in_mbps", "out_mbps"])
+            # Convert bps → Mbps
+            df["rx_mbps"] = df["rx_bps"] / 1_000_000
+            df["tx_mbps"] = df["tx_bps"] / 1_000_000
+            df["total_mbps"] = df["total_bps"] / 1_000_000
 
-            if df2.empty:
-                st.warning("Not enough valid datapoints to compute Mbps (counter resets or missing values).")
-                return
+            last = df.iloc[-1]
 
-            # “Current” = last computed point
-            current_in = float(df2["in_mbps"].iloc[-1])
-            current_out = float(df2["out_mbps"].iloc[-1])
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Current RX (Mbps)", f"{(last['rx_mbps'] or 0):.2f}")
+            m2.metric("Current TX (Mbps)", f"{(last['tx_mbps'] or 0):.2f}")
+            m3.metric("Peak RX (Mbps)", f"{df['rx_mbps'].max():.2f}")
+            m4.metric("Peak TX (Mbps)", f"{df['tx_mbps'].max():.2f}")
 
-            st.metric("Current In (Mbps)", f"{current_in:.2f}")
-            st.metric("Current Out (Mbps)", f"{current_out:.2f}")
-            st.metric("Peak In (Mbps)", f"{df2['in_mbps'].max():.2f}")
-            st.metric("Peak Out (Mbps)", f"{df2['out_mbps'].max():.2f}")
-
-            st.write("Last 50 computed points:")
-            st.dataframe(df2[[ts_col, "in_mbps", "out_mbps"]].tail(50), use_container_width=True)
+            st.dataframe(df[["time", "rx_mbps", "tx_mbps", "total_mbps"]].tail(50), use_container_width=True)
 
             fig = plt.figure()
-            plt.plot(df2[ts_col], df2["in_mbps"], label="In Mbps")
-            plt.plot(df2[ts_col], df2["out_mbps"], label="Out Mbps")
+            plt.plot(df["time"], df["rx_mbps"], label="RX Mbps")
+            plt.plot(df["time"], df["tx_mbps"], label="TX Mbps")
+            plt.plot(df["time"], df["total_mbps"], label="Total Mbps")
             plt.legend()
             plt.xlabel("Time (UTC)")
             plt.ylabel("Mbps")
