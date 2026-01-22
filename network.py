@@ -1,31 +1,36 @@
 import streamlit as st
 import requests
-import json
 from PIL import Image
 from io import BytesIO
 import urllib3
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-st.set_page_config(page_title="PRTG Bandwidth + DEBUG", layout="wide")
+st.set_page_config(page_title="PRTG Bandwidth + Debug", layout="wide")
 
 USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-DIVISOR = 1000000       # ← change & reload to test different scalings
-TOTAL_CAPACITY = 40000  # Mbps
-
 # ────────────────────────────────────────────────
-# Session state for period selector
-if "period_key" not in st.session_state:
-    st.session_state.period_key = f"period_{id(st.session_state)}"  # unique per run
+# CONFIG – change these
+DIVISOR = 1000000          # ← Start here; try 100000 / 10000 if values too small
+TOTAL_CAPACITY = 40000     # Mbps
 
+SENSORS = {                # ← This was missing → defines your sensors
+    "Firstlight":          "12435",
+    "NNINIX":              "12506",
+    "Hurricane Electric": "12363",
+    "Cogent":              "12340",
+}
+# ────────────────────────────────────────────────
+
+# Period selector
 period = st.selectbox(
     "Time Period",
     ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
-    index=1,
-    key=st.session_state.period_key
+    index=1
 )
 
 graphid_map = {
@@ -37,7 +42,8 @@ graphid_map = {
 }
 graphid = graphid_map[period]
 
-# Time range calculation
+use_historic = period in ["Last 7 days", "Last 30 days", "Last 365 days"]
+
 delta_map = {
     "Live (2 hours)": timedelta(hours=2),
     "Last 48 hours":  timedelta(hours=48),
@@ -51,115 +57,142 @@ now = datetime.now()
 edate_str = now.strftime("%Y-%m-%d-%H-%M-%S")
 sdate_str = (now - delta).strftime("%Y-%m-%d-%H-%M-%S")
 
+avg_sec = 300 if use_historic else 0
+
 # ────────────────────────────────────────────────
-# DEBUG SECTION – show everything we can read from API
+# DEBUG SECTION – inspect raw API output
 # ────────────────────────────────────────────────
 
-with st.expander("🛠 DEBUG – Raw API Responses (click to expand)", expanded=True):
-
-    st.subheader("1. Channels (table.json) – current sensor state")
-
-    debug_sensor = st.selectbox("Pick sensor for detailed debug", list(SENSORS.values()), index=0, format_func=lambda x: [k for k,v in SENSORS.items() if v==x][0])
-
-    if st.button("Fetch & Show Raw Channel Data", type="primary"):
-        try:
-            url = f"{BASE}/api/table.json"
-            params = {
-                "content": "channels",
-                "id": debug_sensor,
-                "columns": "objid,name,minimum_raw,maximum_raw,average_raw,lastvalue_raw",
-                "username": USER,
-                "passhash": PH
-            }
-            r = requests.get(url, params=params, verify=False, timeout=15)
-            r.raise_for_status()
-            data = r.json()
-
-            st.success(f"Status: {r.status_code} – {len(data.get('channels', []))} channels found")
-
-            # Show full JSON
-            st.markdown("**Full raw JSON response:**")
-            st.json(data)
-
-            # Pretty table of channels
-            if "channels" in data:
-                st.markdown("**Channel breakdown:**")
-                for ch in data["channels"]:
-                    with st.container(border=True):
-                        st.write(f"**{ch.get('name', '—')}** (objid: {ch.get('objid')})")
-                        cols = st.columns(4)
-                        cols[0].write("Min raw")
-                        cols[0].code(ch.get("minimum_raw", "—"))
-                        cols[1].write("Max raw")
-                        cols[1].code(ch.get("maximum_raw", "—"))
-                        cols[2].write("Avg raw")
-                        cols[2].code(ch.get("average_raw", "—"))
-                        cols[3].write("Last raw")
-                        cols[3].code(ch.get("lastvalue_raw", "—"))
-
-        except Exception as e:
-            st.error(f"Channel fetch failed: {str(e)}")
+with st.expander("🛠 DEBUG: Raw API Responses", expanded=False):
+    st.subheader("Channels (table.json)")
+    if st.button("Fetch Channels for All Sensors"):
+        for name, sid in SENSORS.items():
+            try:
+                url = f"{BASE}/api/table.json"
+                params = {
+                    "content": "channels",
+                    "id": sid,
+                    "columns": "name,minimum_raw,maximum_raw,lastvalue_raw",
+                    "username": USER,
+                    "passhash": PH
+                }
+                r = requests.get(url, params=params, verify=False, timeout=15)
+                data = r.json()
+                st.write(f"**{name} (ID {sid})**")
+                st.json(data)
+            except Exception as e:
+                st.error(f"{name}: {str(e)}")
 
     st.divider()
-
-    st.subheader("2. Historic Data Sample (historicdata.json)")
-
-    if st.button("Fetch & Show Historic Data Sample", type="primary"):
+    st.subheader("Historic Data Sample")
+    sensor_for_hist = st.selectbox("Sensor for historic sample", list(SENSORS.keys()))
+    sid_hist = SENSORS[sensor_for_hist]
+    if st.button("Fetch Historic Sample"):
         try:
             params = {
-                "id": debug_sensor,
+                "id": sid_hist,
                 "sdate": sdate_str,
                 "edate": edate_str,
-                "avg": 300,  # 5 min – reasonable compromise
+                "avg": avg_sec,
                 "usecaption": 1,
                 "username": USER,
                 "passhash": PH
             }
             r = requests.get(f"{BASE}/api/historicdata.json", params=params, verify=False, timeout=30)
-            r.raise_for_status()
             data = r.json()
-
-            st.success(f"Status: {r.status_code} – {len(data.get('histdata', []))} intervals returned")
-
-            st.markdown("**Full raw JSON response (truncated if large):**")
             st.json(data)
-
             if "histdata" in data and data["histdata"]:
-                first = data["histdata"][0]
-                st.markdown("**Keys in first data point:**")
-                st.code(", ".join(sorted(first.keys())))
-
-                st.markdown("**First row sample:**")
-                for k, v in first.items():
-                    st.write(f"**{k}**: {v}")
-
+                st.write("First data point keys:", list(data["histdata"][0].keys()))
         except Exception as e:
-            st.error(f"Historic fetch failed: {str(e)}")
+            st.error(str(e))
 
 # ────────────────────────────────────────────────
-# SENSORS list (for reference)
-SENSORS = {
-    "Firstlight":          "12435",
-    "NNINIX":              "12506",
-    "Hurricane Electric": "12363",
-    "Cogent":              "12340",
-}
+# Dashboard
+# ────────────────────────────────────────────────
 
-st.markdown("---")
 st.title("PRTG Bandwidth Dashboard")
 st.caption(f"{period} • {sdate_str} → {edate_str} • Graph ID: {graphid}")
-st.caption(f"Current DIVISOR = {DIVISOR:,} – change at top if Mbps scale is wrong")
+st.caption(f"DIVISOR = {DIVISOR:,} – change at top if Mbps scale wrong")
 
-# ────────────────────────────────────────────────
-# Your normal dashboard code can go below here...
-# For now just showing debug – add your metrics when ready
-# ────────────────────────────────────────────────
+total_in_max = total_out_max = 0.0
 
-st.info("Use the debug expander above to see exactly what the API returns. "
-        "Once we know the raw values and units, we can fix the 0.00 Mbps problem.")
+for i in range(0, len(SENSORS), 2):
+    cols = st.columns(2)
+    pair = list(SENSORS.items())[i:i+2]
 
-# Example placeholder – replace with your logic after debug
-st.subheader("Next steps after debug")
-st.write("- Look at Raw max / lastvalue from channel data")
-st.write("- Check if historicdata returns actual numbers in _raw fields")
-st.write("- Tell me what raw numbers you see (e.g. 1234567890) and what Mbps you expect")
+    for col, (name, sid) in zip(cols, pair):
+        with col:
+            # Simple fallback fetch for max
+            try:
+                url = f"{BASE}/api/table.json"
+                params = {
+                    "content": "channels",
+                    "id": sid,
+                    "columns": "name,maximum_raw",
+                    "username": USER,
+                    "passhash": PH
+                }
+                data = requests.get(url, params=params, verify=False, timeout=15).json()
+                channels = data.get("channels", [])
+
+                in_max_raw = out_max_raw = 0
+                for ch in channels:
+                    name_ch = ch.get("name", "").strip()
+                    max_str = ch.get("maximum_raw", "0")
+                    if max_str and max_str.strip():
+                        try:
+                            val = float(max_str)
+                            if "Traffic In" in name_ch:
+                                in_max_raw = val
+                            elif "Traffic Out" in name_ch:
+                                out_max_raw = val
+                        except:
+                            pass
+
+                in_max_mbps = in_max_raw / DIVISOR if in_max_raw else 0.0
+                out_max_mbps = out_max_raw / DIVISOR if out_max_raw else 0.0
+
+                st.subheader(name)
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.metric("Download Max", f"{in_max_mbps:,.2f} Mbps")
+                with c2:
+                    st.metric("Upload Max", f"{out_max_mbps:,.2f} Mbps")
+
+                total_in_max += in_max_mbps
+                total_out_max += out_max_mbps
+
+                # Graph
+                try:
+                    img_url = f"{BASE}/chart.png?id={sid}&graphid={graphid}&width=1800&height=800&bgcolor=1e1e1e&fontcolor=ffffff&username={USER}&passhash={PH}"
+                    img_resp = requests.get(img_url, verify=False, timeout=15)
+                    if img_resp.status_code == 200:
+                        st.image(img_resp.content, use_container_width=True)
+                    else:
+                        st.caption("Graph unavailable")
+                except:
+                    st.caption("Graph fetch failed")
+
+            except Exception as e:
+                st.error(f"{name}: {str(e)}")
+
+# Combined
+st.markdown("## Combined Peak Max")
+col1, col2 = st.columns([3,1])
+with col1:
+    fig, ax = plt.subplots(figsize=(10,6))
+    ax.bar(["Download", "Upload"], [total_in_max, total_out_max], color=["#00ff9d", "#ff3366"])
+    ax.set_ylabel("Mbps")
+    ax.set_title(f"Total Peak – {period}")
+    st.pyplot(fig)
+
+with col2:
+    st.metric("Download Max", f"{total_in_max:,.0f} Mbps")
+    st.metric("Upload Max", f"{total_out_max:,.0f} Mbps")
+
+    pct_in = (total_in_max / TOTAL_CAPACITY) * 100 if TOTAL_CAPACITY > 0 else 0
+    pct_out = (total_out_max / TOTAL_CAPACITY) * 100 if TOTAL_CAPACITY > 0 else 0
+    st.progress(min(pct_in / 100, 1.0))
+    st.caption(f"Download {pct_in:.1f}%")
+    st.progress(min(pct_out / 100, 1.0))
+    st.caption(f"Upload {pct_out:.1f}%")
