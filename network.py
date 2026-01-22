@@ -5,6 +5,7 @@ from io import BytesIO
 import urllib3
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import re
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 st.set_page_config(page_title="PRTG Bandwidth Peaks", layout="wide", page_icon="Signal")
@@ -15,12 +16,11 @@ BASE = "https://prtg.pioneerbroadband.net"
 
 TOTAL_CAPACITY = 40000  # Mbps
 
-# Unique key for the period selector
 period = st.selectbox(
     "Time Period",
     ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
     index=1,
-    key="main_period_selector"   # ← this fixes the duplicate ID error
+    key="period_selector_unique"  # prevents duplicate ID error
 )
 
 graphid = {
@@ -31,7 +31,6 @@ graphid = {
     "Last 365 days":  "3"
 }[period]
 
-# Time range
 delta_map = {
     "Live (2 hours)": timedelta(hours=2),
     "Last 48 hours":  timedelta(hours=48),
@@ -52,6 +51,27 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
+def parse_speed_to_mbps(speed_str):
+    """Convert '1.23 Gbit/s', '456 Mbit/s', '89.7 kbit/s' → Mbps float"""
+    if not speed_str or speed_str == "N/A":
+        return 0.0
+    try:
+        # Extract number and unit
+        match = re.match(r'([\d\.]+)\s*([kMG]?bit/s)', speed_str.strip(), re.IGNORECASE)
+        if not match:
+            return 0.0
+        value = float(match.group(1))
+        unit = match.group(2).lower()
+        if 'gbit' in unit:
+            return value * 1000
+        elif 'mbit' in unit:
+            return value
+        elif 'kbit' in unit:
+            return value / 1000
+        return 0.0
+    except:
+        return 0.0
+
 @st.cache_data(ttl=300)
 def get_peak_speeds(sensor_id, sdate, edate):
     url = f"{BASE}/api/historicdata.json"
@@ -59,7 +79,7 @@ def get_peak_speeds(sensor_id, sdate, edate):
         "id": sensor_id,
         "sdate": sdate,
         "edate": edate,
-        "avg": 300,                 # 5 minutes – good balance
+        "avg": 300,  # 5 min - adjust if needed (60 for very short, 3600 for long)
         "usecaption": 1,
         "username": USER,
         "passhash": PH
@@ -69,37 +89,37 @@ def get_peak_speeds(sensor_id, sdate, edate):
         histdata = resp.get("histdata", [])
         
         if not histdata:
-            st.caption(f"No data returned for sensor {sensor_id}")
             return 0.0, 0.0
 
-        # Debug: show what keys we actually got
-        if histdata:
-            st.caption(f"Keys in data for {sensor_id}: {list(histdata[0].keys())}")
+        # Find exact keys from your response
+        in_key = "Traffic In (Speed)"
+        out_key = "Traffic Out (Speed)"
 
-        # Look for Traffic In_raw and Traffic Out_raw (or similar)
-        in_values = []
-        out_values = []
+        if in_key not in histdata[0] or out_key not in histdata[0]:
+            st.caption(f"Keys not found for {sensor_id} — available: {list(histdata[0].keys())}")
+            return 0.0, 0.0
+
+        in_peaks = []
+        out_peaks = []
 
         for item in histdata:
-            for k, v in item.items():
-                if "_raw" in k:
-                    try:
-                        val = float(v)
-                        if val > 0:
-                            if "in" in k.lower() or "down" in k.lower() or "rx" in k.lower():
-                                in_values.append(val)
-                            elif "out" in k.lower() or "up" in k.lower() or "tx" in k.lower():
-                                out_values.append(val)
-                    except:
-                        pass
+            in_str = item.get(in_key, "")
+            out_str = item.get(out_key, "")
+            if in_str:
+                in_peaks.append(parse_speed_to_mbps(in_str))
+            if out_str:
+                out_peaks.append(parse_speed_to_mbps(out_str))
 
-        peak_in  = max(in_values) / 1000000 if in_values else 0.0   # ← changed to 1e6
-        peak_out = max(out_values) / 1000000 if out_values else 0.0
+        peak_in = max(in_peaks) if in_peaks else 0.0
+        peak_out = max(out_peaks) if out_peaks else 0.0
+
+        # Debug line
+        st.caption(f"{sensor_id} → Peak In: {peak_in:,.2f} Mbps from {len(in_peaks)} points | Peak Out: {peak_out:,.2f} Mbps")
 
         return round(peak_in, 2), round(peak_out, 2)
 
     except Exception as e:
-        st.caption(f"Error fetching {sensor_id}: {str(e)}")
+        st.caption(f"Fetch error {sensor_id}: {str(e)}")
         return 0.0, 0.0
 
 @st.cache_data(ttl=300)
@@ -122,9 +142,7 @@ def get_graph_image(sensor_id, graphid):
     except:
         return None
 
-# ────────────────────────────────────────────────
-
-st.title("PRTG Bandwidth Dashboard – Period Peak")
+st.title("PRTG Bandwidth Dashboard – True Period Peak")
 st.caption(f"{period} • {sdate} → {edate} • Graph ID: {graphid}")
 
 total_peak_in = total_peak_out = 0.0
@@ -137,7 +155,7 @@ for i in range(0, len(SENSORS), 2):
         with col:
             peak_in, peak_out = get_peak_speeds(sid, sdate, edate)
 
-            total_peak_in  += peak_in
+            total_peak_in += peak_in
             total_peak_out += peak_out
 
             st.subheader(name)
@@ -145,7 +163,7 @@ for i in range(0, len(SENSORS), 2):
             with c1:
                 st.metric("Peak Download", f"{peak_in:,.2f} Mbps")
             with c2:
-                st.metric("Peak Upload",   f"{peak_out:,.2f} Mbps")
+                st.metric("Peak Upload", f"{peak_out:,.2f} Mbps")
 
             img = get_graph_image(sid, graphid)
             if img:
@@ -188,7 +206,7 @@ with col_left:
 
 with col_right:
     st.metric("**Total Peak Download**", f"{total_peak_in:,.0f} Mbps")
-    st.metric("**Total Peak Upload**",   f"{total_peak_out:,.0f} Mbps")
+    st.metric("**Total Peak Upload**", f"{total_peak_out:,.0f} Mbps")
 
     st.divider()
     st.markdown("### Utilization (based on peak)")
