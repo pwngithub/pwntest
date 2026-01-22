@@ -39,7 +39,7 @@ def handle_error(resp, label="Request"):
 def show_network_report(auvik_get):
     st.title("🌐 Network Report")
 
-    # Always load tenants so we can scope inventory calls
+    # Load tenants so we can scope inventory calls
     tenants_resp = auvik_get("tenants")
     if isinstance(tenants_resp, dict) and tenants_resp.get("_error"):
         handle_error(tenants_resp, "Load Tenants")
@@ -76,10 +76,16 @@ def show_network_report(auvik_get):
     # ────────────────
     with col1:
         st.subheader("Devices")
+        page_size = st.number_input("Page size (page[first])", min_value=1, max_value=100, value=100, step=10)
+
         if st.button("Load Devices", key="btn_load_devices"):
+            # Auvik uses page[first] (NOT page[limit]) :contentReference[oaicite:1]{index=1}
             devices = auvik_get(
                 "inventory/device/info",
-                params={"tenants": tenant_id, "page[limit]": 200}
+                params={
+                    "tenants": tenant_id,
+                    "page[first]": page_size,  # ✅ correct param
+                },
             )
 
             if isinstance(devices, dict) and devices.get("_error"):
@@ -99,14 +105,20 @@ def show_network_report(auvik_get):
                     "ID": d.get("id"),
                     "Name": attr.get("deviceName") or attr.get("name") or "N/A",
                     "Type": attr.get("deviceType", "N/A"),
-                    "Model": attr.get("model", "N/A"),
+                    "Model": attr.get("makeModel") or attr.get("model") or "N/A",
                     "IP": attr.get("ipAddress", "N/A"),
-                    "Status": attr.get("status", "N/A"),
+                    "Status": attr.get("onlineStatus") or attr.get("status") or "N/A",
                 })
 
             df = pd.DataFrame(rows)
             st.dataframe(df, use_container_width=True)
             st.success(f"Found {len(df)} devices")
+
+            # Helpful for paging
+            links = (devices or {}).get("links", {})
+            if links:
+                st.caption("Pagination links returned by API:")
+                st.json(links)
 
     # ────────────────
     # Interfaces
@@ -114,9 +126,13 @@ def show_network_report(auvik_get):
     with col2:
         st.subheader("Interfaces")
         device_id = st.text_input("Filter by Device ID (optional)", "", key="device_id_filter").strip()
+        page_size_i = st.number_input("Page size (page[first])", min_value=1, max_value=100, value=100, step=10, key="iface_page_size")
 
         if st.button("Load Interfaces", key="btn_load_interfaces"):
-            params = {"tenants": tenant_id, "page[limit]": 200}
+            params = {
+                "tenants": tenant_id,
+                "page[first]": page_size_i,  # ✅ correct param (same paging model) :contentReference[oaicite:2]{index=2}
+            }
             if device_id:
                 params["filter[deviceId]"] = device_id
 
@@ -148,6 +164,11 @@ def show_network_report(auvik_get):
             st.dataframe(df, use_container_width=True)
             st.success(f"Found {len(df)} interfaces")
 
+            links = (interfaces or {}).get("links", {})
+            if links:
+                st.caption("Pagination links returned by API:")
+                st.json(links)
+
 
 # ────────────────────────────────────────────────
 # Standalone mode (so this file can run independently)
@@ -156,13 +177,11 @@ def _load_auvik_creds_from_secrets():
     username = ""
     api_key = ""
 
-    # Option A: top-level
     if "auvik_api_username" in st.secrets:
         username = str(st.secrets.get("auvik_api_username", "")).strip()
     if "auvik_api_key" in st.secrets:
         api_key = str(st.secrets.get("auvik_api_key", "")).strip()
 
-    # Option B: section
     if (not username or not api_key) and "auvik" in st.secrets:
         block = st.secrets.get("auvik", {})
         if isinstance(block, dict):
@@ -191,12 +210,8 @@ def main():
         )
         st.stop()
 
-    # Your Auvik region base
     BASE_URL = "https://auvikapi.us6.my.auvik.com/v1"
-
-    # Auvik commonly uses JSON:API
-    HEADERS = {"Accept": "application/vnd.api+json"}
-
+    HEADERS = {"Accept": "application/vnd.api+json"}  # Auvik uses JSON:API
     auth = HTTPBasicAuth(API_USERNAME, API_KEY)
 
     def auvik_get(endpoint, params=None):
@@ -208,17 +223,15 @@ def main():
                 auth=auth,
                 params=params,
                 timeout=60,
-                allow_redirects=True
+                allow_redirects=True,
             )
 
-            # Always return details for debugging
             if r.status_code >= 400:
                 return {"_error": True, "status": r.status_code, "text": r.text, "url": url}
 
             return r.json()
 
         except Exception as e:
-            # This is what fixes your "Status: None" with no details
             return {"_error": True, "status": None, "text": repr(e), "url": url}
 
     show_network_report(auvik_get)
