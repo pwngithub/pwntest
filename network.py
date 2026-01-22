@@ -14,8 +14,9 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-# Tune this divisor based on "Raw max ..." captions below each provider
-# Start with 1000000; if peaks too low → try 100000 or 10000; too high → 10000000
+# Start with 1000000
+# If Mbps values are too small (e.g. 0.01–1) → try 100000 or 10000
+# If way too large → try 10000000 or 100000000
 DIVISOR = 1000000
 
 TOTAL_CAPACITY = 40000  # Mbps
@@ -67,6 +68,7 @@ def get_traffic_stats(sensor_id, use_hist, sdate, edate, avg):
     divisor = DIVISOR
 
     if not use_hist:
+        # Channel overview (short periods)
         url = f"{BASE}/api/table.json"
         params = {
             "content": "channels",
@@ -79,57 +81,49 @@ def get_traffic_stats(sensor_id, use_hist, sdate, edate, avg):
             data = requests.get(url, params=params, verify=False, timeout=20).json()
             channels = data.get("channels", [])
             if not channels:
-                st.caption(f"No channels returned for {sensor_id}")
+                st.caption(f"No channels for sensor {sensor_id}")
                 return 0.0, 0.0, 0.0, 0.0
 
             channel_names = [ch.get("name", "Unknown").strip() for ch in channels]
             st.caption(f"Channels {sensor_id}: {', '.join(channel_names)}")
 
-            in_min = in_max = out_min = out_max = 0.0
+            in_max = out_max = 0.0
             raw_max_in = raw_max_out = 0.0
 
             for ch in channels:
                 name = ch.get("name", "").strip()
-                name_lower = name.lower()
-                min_raw_str = ch.get("minimum_raw", "")
                 max_raw_str = ch.get("maximum_raw", "")
 
-                # Skip non-numeric or empty raw values (prevents conversion errors)
-                if not max_raw_str.strip().isdigit() and not max_raw_str.replace('.', '', 1).isdigit():
-                    continue
-                if not min_raw_str.strip().isdigit() and not min_raw_str.replace('.', '', 1).isdigit():
-                    continue
+                if not max_raw_str or max_raw_str.strip() == "":
+                    continue  # skip empty or missing
 
                 try:
-                    min_raw = float(min_raw_str)
                     max_raw = float(max_raw_str)
                 except ValueError:
-                    continue
+                    continue  # skip non-numeric
 
-                # Exact match on your channel names
-                if "Traffic In" in name:
-                    in_min = min(in_min, min_raw / divisor) if in_min > 0 else min_raw / divisor
-                    in_max = max(in_max, max_raw / divisor)
-                    raw_max_in = max(raw_max_in, max_raw)
-                elif "Traffic Out" in name:
-                    out_min = min(out_min, min_raw / divisor) if out_min > 0 else min_raw / divisor
-                    out_max = max(out_max, max_raw / divisor)
-                    raw_max_out = max(raw_max_out, max_raw)
+                if name == "Traffic In":
+                    in_max = max_raw / divisor
+                    raw_max_in = max_raw
+                elif name == "Traffic Out":
+                    out_max = max_raw / divisor
+                    raw_max_out = max_raw
 
             if raw_max_in > 0 or raw_max_out > 0:
                 st.caption(f"Raw max in/out {sensor_id}: {raw_max_in:,.0f} / {raw_max_out:,.0f} (÷ {divisor} → Mbps)")
 
-            if (in_max < 1 or out_max < 1) and (raw_max_in > 100000 or raw_max_out > 100000):
-                st.warning(f"Values suspiciously low for {sensor_id} – try smaller DIVISOR (current: {divisor})")
+            # Warning if values look suspiciously low
+            if in_max < 1 and raw_max_in > 100000:
+                st.warning(f"Download max very low ({in_max:.2f} Mbps) for {sensor_id} – try DIVISOR = 100000")
 
-            return round(in_min, 2), round(in_max, 2), round(out_min, 2), round(out_max, 2)
+            return 0.0, round(in_max, 2), 0.0, round(out_max, 2)
 
         except Exception as e:
             st.caption(f"Channel API error {sensor_id}: {str(e)}")
             return 0.0, 0.0, 0.0, 0.0
 
     else:
-        # Historic mode (kept simple; expand if needed)
+        # Historicdata (longer periods) - kept minimal
         url = f"{BASE}/api/historicdata.json"
         params = {
             "id": sensor_id,
@@ -148,8 +142,7 @@ def get_traffic_stats(sensor_id, use_hist, sdate, edate, avg):
                 return 0.0, 0.0, 0.0, 0.0
 
             raw_keys = [k for k in histdata[0] if k.lower().endswith("_raw")]
-            if raw_keys:
-                st.caption(f"Raw keys {sensor_id}: {', '.join(raw_keys[:4])}...")
+            st.caption(f"Raw keys {sensor_id}: {', '.join(raw_keys[:4])}...")
 
             in_raw_keys = [k for k in raw_keys if "traffic in" in k.lower()]
             out_raw_keys = [k for k in raw_keys if "traffic out" in k.lower()]
@@ -186,6 +179,7 @@ def get_traffic_stats(sensor_id, use_hist, sdate, edate, avg):
             st.caption(f"Historic error {sensor_id}: {str(e)}")
             return 0.0, 0.0, 0.0, 0.0
 
+
 @st.cache_data(ttl=300)
 def get_graph_image(sensor_id, graphid):
     url = f"{BASE}/chart.png"
@@ -205,9 +199,11 @@ def get_graph_image(sensor_id, graphid):
     except:
         return None
 
+# ────────────────────────────────────────────────
+
 st.title("PRTG Bandwidth Dashboard")
 st.caption(f"**{period}**  •  {sdate_str} → {edate_str}  •  Graph ID: {graphid}")
-st.caption(f"**DIVISOR = {DIVISOR}** – change & reload if Mbps values are wrong scale")
+st.caption(f"**DIVISOR = {DIVISOR}**  – change this number at the top and reload the page if Mbps values look wrong")
 
 total_in_max = total_out_max = 0.0
 
