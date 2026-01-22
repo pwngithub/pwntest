@@ -14,8 +14,8 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-# Update this to your actual total uplink capacity
-TOTAL_CAPACITY = 40000  # Mbps (40 Gbps example)
+# Update this to your actual total uplink capacity in Mbps
+TOTAL_CAPACITY = 40000  # e.g. 40 Gbps = 40000 Mbps
 
 if "period_key" not in st.session_state:
     st.session_state.period_key = f"period_{uuid.uuid4()}"
@@ -35,17 +35,16 @@ graphid = {
     "Last 365 days":  "3"
 }[period]
 
-# Define time deltas and avg intervals for historic data
+# Time range and averaging interval (seconds) per period
 period_deltas = {
-    "Live (2 hours)": (timedelta(hours=2), 60),      # 1 min avg
-    "Last 48 hours": (timedelta(hours=48), 300),     # 5 min
-    "Last 7 days": (timedelta(days=7), 900),         # 15 min
-    "Last 30 days": (timedelta(days=30), 1800),      # 30 min
-    "Last 365 days": (timedelta(days=365), 7200)     # 2 hours
+    "Live (2 hours)": (timedelta(hours=2), 60),      # 1 min
+    "Last 48 hours":  (timedelta(hours=48), 300),    # 5 min
+    "Last 7 days":    (timedelta(days=7), 900),      # 15 min
+    "Last 30 days":   (timedelta(days=30), 1800),    # 30 min
+    "Last 365 days":  (timedelta(days=365), 7200)    # 2 hours
 }
 delta, avg_interval = period_deltas[period]
 
-# Calculate sdate and edate
 now = datetime.now()
 edate = now.strftime("%Y-%m-%d-%H-%M-%S")
 sdate = (now - delta).strftime("%Y-%m-%d-%H-%M-%S")
@@ -59,10 +58,6 @@ SENSORS = {
 
 @st.cache_data(ttl=300)
 def get_traffic_stats(sensor_id, sdate, edate, avg):
-    """
-    Fetch historic data over the period and compute min/max for in/out in Mbps.
-    Uses value_raw from historicdata.json.
-    """
     url = f"{BASE}/api/historicdata.json"
     params = {
         "id": sensor_id,
@@ -77,54 +72,66 @@ def get_traffic_stats(sensor_id, sdate, edate, avg):
         resp = requests.get(url, params=params, verify=False, timeout=30).json()
         histdata = resp.get("histdata", [])
         if not histdata:
+            st.warning(f"No historic data for sensor {sensor_id} in this period.")
             return 0.0, 0.0, 0.0, 0.0
 
-        # Identify in/out channel names (case insensitive, flexible matching)
-        # Assume channels have names like "Traffic In (Speed)", "Traffic Out (Speed)"
-        # We look for keys ending with "_raw" that match patterns
+        # Debug: list all raw channel names
+        raw_keys = [k for k in histdata[0].keys() if k.lower().endswith("_raw")]
+        st.caption(f"Raw channels for {sensor_id}: {', '.join(raw_keys) if raw_keys else 'None found'}")
+
         in_raw_keys = []
         out_raw_keys = []
-        
-        # Use the first item to find channel raw keys
-        first_item = histdata[0]
-        for key in first_item:
-            if key.lower().endswith("_raw"):
-                base_name = key[:-4].strip().lower()  # remove _raw
-                if ("traffic in" in base_name or "down" in base_name) and "speed" in base_name:
-                    in_raw_keys.append(key)
-                elif ("traffic out" in base_name or "up" in base_name) and "speed" in base_name:
-                    out_raw_keys.append(key)
 
-        # If no matches, fallback to original logic or warn
+        for key in raw_keys:
+            base = key[:-4].strip().lower()  # remove _raw
+            # Inbound / Download patterns
+            if any(word in base for word in [
+                "traffic in", "in", "down", "download", "rx", "receive", "input", "ingress"
+            ]):
+                in_raw_keys.append(key)
+            # Outbound / Upload patterns
+            elif any(word in base for word in [
+                "traffic out", "out", "up", "upload", "tx", "send", "transmit", "output", "egress"
+            ]):
+                out_raw_keys.append(key)
+
         if not in_raw_keys or not out_raw_keys:
-            st.warning(f"Could not identify in/out speed channels for sensor {sensor_id}")
+            st.error(f"Cannot match in/out channels for sensor {sensor_id}. "
+                     f"Available raw: {raw_keys}")
             return 0.0, 0.0, 0.0, 0.0
 
-        # Collect values for in and out (ignore None or '')
         in_values = []
         out_values = []
+
         for item in histdata:
             for k in in_raw_keys:
                 val = item.get(k)
-                if val not in (None, '', 0):  # Exclude 0 for min if desired, but include for true min
-                    in_values.append(float(val))
+                if val and val not in ('', '0', 0, None):
+                    try:
+                        in_values.append(float(val))
+                    except:
+                        pass
             for k in out_raw_keys:
                 val = item.get(k)
-                if val not in (None, '', 0):
-                    out_values.append(float(val))
+                if val and val not in ('', '0', 0, None):
+                    try:
+                        out_values.append(float(val))
+                    except:
+                        pass
 
-        # Compute min/max, convert to Mbps using original divisor
-        divisor = 10_000_000  # As in your original script
+        divisor = 10_000_000  # Adjust if your PRTG units differ (common: 10M for bit/s → Mbps)
+
         in_min = min(in_values) / divisor if in_values else 0.0
         in_max = max(in_values) / divisor if in_values else 0.0
         out_min = min(out_values) / divisor if out_values else 0.0
         out_max = max(out_values) / divisor if out_values else 0.0
 
         return round(in_min, 2), round(in_max, 2), round(out_min, 2), round(out_max, 2)
-    
+
     except Exception as e:
-        st.error(f"Error fetching historic data for sensor {sensor_id}: {e}")
+        st.error(f"Error fetching data for sensor {sensor_id}: {str(e)}")
         return 0.0, 0.0, 0.0, 0.0
+
 
 @st.cache_data(ttl=300)
 def get_graph_image(sensor_id, graphid):
@@ -141,12 +148,18 @@ def get_graph_image(sensor_id, graphid):
     }
     try:
         resp = requests.get(url, params=params, verify=False, timeout=15)
-        return Image.open(BytesIO(resp.content))
+        if resp.status_code == 200:
+            return Image.open(BytesIO(resp.content))
+        else:
+            return None
     except:
         return None
 
+
+# ────────────────────────────────────────────────────────────────
+
 st.title("PRTG Bandwidth Dashboard – Period-Specific Min & Max")
-st.caption(f"Period: **{period}** (from {sdate} to {edate})   |   Graph ID: {graphid}")
+st.caption(f"Period: **{period}**  ({sdate} → {edate})  |  Graph ID: {graphid}")
 
 total_in_min = total_in_max = 0.0
 total_out_min = total_out_max = 0.0
@@ -159,8 +172,8 @@ for i in range(0, len(SENSORS), 2):
         with col:
             in_min, in_max, out_min, out_max = get_traffic_stats(sid, sdate, edate, avg_interval)
 
-            total_in_min  += in_min
-            total_in_max  += in_max
+            total_in_min += in_min
+            total_in_max += in_max
             total_out_min += out_min
             total_out_max += out_max
 
@@ -171,16 +184,16 @@ for i in range(0, len(SENSORS), 2):
                 st.metric("Download Min", f"{in_min:,.2f} Mbps")
                 st.metric("Download Max", f"{in_max:,.2f} Mbps")
             with c2:
-                st.metric("Upload Min",   f"{out_min:,.2f} Mbps")
-                st.metric("Upload Max",   f"{out_max:,.2f} Mbps")
+                st.metric("Upload Min", f"{out_min:,.2f} Mbps")
+                st.metric("Upload Max", f"{out_max:,.2f} Mbps")
 
             img = get_graph_image(sid, graphid)
             if img:
-                st.image(img, use_column_width=True)
+                st.image(img, use_container_width=True)
             else:
                 st.caption("Graph unavailable")
 
-# ────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────
 st.markdown("## Combined Across All Circuits")
 
 col_left, col_right = st.columns([3, 1])
@@ -189,14 +202,14 @@ with col_left:
     fig, ax = plt.subplots(figsize=(12, 7))
 
     groups = ["Download", "Upload"]
-    mins   = [total_in_min,  total_out_min]
-    maxs   = [total_in_max,  total_out_max]
+    mins = [total_in_min, total_out_min]
+    maxs = [total_in_max, total_out_max]
 
     x = range(len(groups))
     width = 0.35
 
     ax.bar([i - width/2 for i in x], mins, width, label="Minimum", color="#00d4ff", edgecolor="white")
-    ax.bar([i + width/2 for i in x], maxs, width, label="Maximum", color="#ff3366",  edgecolor="white")
+    ax.bar([i + width/2 for i in x], maxs, width, label="Maximum", color="#ff3366", edgecolor="white")
 
     ax.set_xticks(x)
     ax.set_xticklabels(groups, fontsize=16, fontweight="bold", color="white")
@@ -209,28 +222,29 @@ with col_left:
     ax.grid(axis="y", alpha=0.2, color="white", linestyle="--")
     ax.legend(fontsize=14)
 
-    current_max = max(maxs)
-    ax.set_ylim(0, current_max * 1.15 if current_max > 0 else 100)
+    current_max = max(maxs) if max(maxs) > 0 else 100
+    ax.set_ylim(0, current_max * 1.15)
 
     for i, v in enumerate(mins + maxs):
         if v > 0:
-            offset = -width/2 if i < 2 else width/2
-            ax.text(i % 2 + offset, v + current_max * 0.02, f"{v:,.0f}",
-                    ha="center", va="bottom", fontsize=16, fontweight="bold", color="white")
+            offset = -width/2 if i < len(groups) else width/2
+            ax.text((i % len(groups)) + offset, v + current_max * 0.015,
+                    f"{v:,.0f}", ha="center", va="bottom",
+                    fontsize=16, fontweight="bold", color="white")
 
-    st.pyplot(fig)
+    st.pyplot(fig, use_container_width=True)
 
 with col_right:
     st.metric("**Combined Download Min**", f"{total_in_min:,.0f} Mbps")
     st.metric("**Combined Download Max**", f"{total_in_max:,.0f} Mbps")
-    st.metric("**Combined Upload Min**",   f"{total_out_min:,.0f} Mbps")
-    st.metric("**Combined Upload Max**",   f"{total_out_max:,.0f} Mbps")
+    st.metric("**Combined Upload Min**", f"{total_out_min:,.0f} Mbps")
+    st.metric("**Combined Upload Max**", f"{total_out_max:,.0f} Mbps")
 
     st.divider()
     st.markdown("### Utilization (based on Max)")
     cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1
 
-    pct_in  = (total_in_max  / cap) * 100
+    pct_in = (total_in_max / cap) * 100
     pct_out = (total_out_max / cap) * 100
 
     st.caption(f"Download ({pct_in:.1f}%)")
