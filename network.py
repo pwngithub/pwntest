@@ -1,63 +1,81 @@
 import streamlit as st
+import pandas as pd
 
-st.set_page_config(page_title="Auvik Dashboard", layout="wide")
+def handle_error(resp, label):
+    st.error(f"{label} failed")
+    if isinstance(resp, dict):
+        st.write("Status:", resp.get("status"))
+        if resp.get("url"):
+            st.code(resp.get("url"))
+        if resp.get("text"):
+            st.write(resp.get("text")[:1000])
 
-# This ALWAYS renders — if you don't see this, Streamlit isn't running app.py
-st.title("Auvik Dashboard ✅")
-st.caption("If you can see this, the app is running. Any errors will appear below.")
+def show_network_report(auvik_get):
+    st.header("🌐 Network Report")
 
-import requests
-from requests.auth import HTTPBasicAuth
+    col1, col2 = st.columns(2)
 
-# ────────────────────────────────────────────────
-# Secrets loader (supports BOTH TOML styles)
-# ────────────────────────────────────────────────
-def load_auvik_creds():
-    username = ""
-    api_key = ""
+    with col1:
+        st.subheader("Tenants")
+        if st.button("Load Tenants"):
+            tenants = auvik_get("tenants")
+            if tenants.get("_error"):
+                handle_error(tenants, "Load Tenants")
+            else:
+                st.success(f"Returned {len(tenants.get('data', []))} tenants")
+                st.json(tenants)
 
-    # Option A: top-level
-    if "auvik_api_username" in st.secrets:
-        username = str(st.secrets.get("auvik_api_username", "")).strip()
-    if "auvik_api_key" in st.secrets:
-        api_key = str(st.secrets.get("auvik_api_key", "")).strip()
+    with col2:
+        st.subheader("Devices")
+        if st.button("Load Devices"):
+            devices = auvik_get("inventory/device/info", {"page[limit]": 200})
+            if devices.get("_error"):
+                handle_error(devices, "Load Devices")
+                return
+            data = devices.get("data", [])
+            if not data:
+                st.warning("No devices returned")
+                return
+            rows = []
+            for d in data:
+                attr = d.get("attributes", {}) or {}
+                rows.append({
+                    "ID": d.get("id"),
+                    "Name": attr.get("deviceName", "N/A"),
+                    "Type": attr.get("deviceType", "N/A"),
+                    "IP": attr.get("ipAddress", "N/A"),
+                    "Status": attr.get("status", "N/A"),
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
-    # Option B: section
-    if (not username or not api_key) and "auvik" in st.secrets:
-        block = st.secrets.get("auvik", {})
-        if isinstance(block, dict):
-            username = username or str(block.get("api_username", "")).strip()
-            api_key = api_key or str(block.get("api_key", "")).strip()
+    st.divider()
 
-    return username, api_key
+    st.subheader("Interfaces")
+    device_id = st.text_input("Filter by Device ID (optional)").strip()
 
+    if st.button("Load Interfaces"):
+        params = {"page[limit]": 200}
+        if device_id:
+            params["filter[deviceId]"] = device_id
 
-API_USERNAME, API_KEY = load_auvik_creds()
+        interfaces = auvik_get("inventory/interface/info", params)
+        if interfaces.get("_error"):
+            handle_error(interfaces, "Load Interfaces")
+            return
 
-# ────────────────────────────────────────────────
-# Sidebar Debug (safe)
-# ────────────────────────────────────────────────
-with st.sidebar:
-    st.header("🔧 Debug")
-    try:
-        keys = list(st.secrets.keys())
-    except Exception:
-        keys = []
-    st.write("Secrets keys found:", keys)
-    st.write("Username loaded:", bool(API_USERNAME))
-    st.write("API key loaded:", bool(API_KEY))
-    if API_KEY:
-        st.write("API key length:", len(API_KEY))
-        st.write("API key prefix:", API_KEY[:4] + "…" if len(API_KEY) >= 4 else "…")
+        data = interfaces.get("data", [])
+        if not data:
+            st.warning("No interfaces returned")
+            return
 
-# ────────────────────────────────────────────────
-# Stop if missing creds
-# ────────────────────────────────────────────────
-if not API_USERNAME or not API_KEY:
-    st.error("Auvik API credentials not found / not loaded.")
-    st.markdown("""
-Paste this into Streamlit Cloud → Settings → Secrets:
-
-```toml
-auvik_api_username = "api-user@yourdomain.com"
-auvik_api_key = "YOUR_AUVIK_API_KEY_HERE"
+        rows = []
+        for i in data:
+            attr = i.get("attributes", {}) or {}
+            rows.append({
+                "Interface ID": i.get("id"),
+                "Name": attr.get("interfaceName", "N/A"),
+                "Device": attr.get("deviceName", "N/A"),
+                "Speed": attr.get("speed", "N/A"),
+                "Status": attr.get("status", "N/A"),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
