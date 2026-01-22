@@ -1,9 +1,3 @@
-
----
-
-# 2️⃣ `reports/network.py` — **FULL FILE (NO TRIPLE QUOTES)**
-
-```python
 import streamlit as st
 import pandas as pd
 
