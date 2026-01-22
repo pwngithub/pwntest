@@ -80,7 +80,7 @@ def show_network_report(auvik_get):
 
     load_devices = st.button("Load Devices", key="btn_load_devices")
 
-    # Load devices when button pressed OR if we already loaded them earlier this session
+    # Load devices when button pressed OR reuse cached list for this tenant
     if load_devices or ("devices_df" in st.session_state and st.session_state.get("devices_tenant") == tenant_id):
         if load_devices or st.session_state.get("devices_tenant") != tenant_id:
             devices = auvik_get(
@@ -110,13 +110,12 @@ def show_network_report(auvik_get):
 
             devices_df = pd.DataFrame(rows)
 
-            # Store for reuse (so selecting device doesn't require reloading devices)
             st.session_state["devices_df"] = devices_df
             st.session_state["devices_tenant"] = tenant_id
+
             # Reset interface cache when tenant/device list refreshes
             st.session_state.pop("interfaces_df", None)
             st.session_state.pop("interfaces_device_id", None)
-
         else:
             devices_df = st.session_state["devices_df"]
 
@@ -127,13 +126,12 @@ def show_network_report(auvik_get):
         device_names = devices_df["device_name"].fillna("N/A").tolist()
         selected_device_name = st.selectbox("Select Device (by name)", options=device_names, key="selected_device_name")
 
-        # Find matching device_id (handle duplicates by name safely)
         matches = devices_df[devices_df["device_name"] == selected_device_name]
         if matches.empty:
             st.warning("Could not resolve selected device to an ID.")
             return
 
-        # If duplicate names exist, let user pick which ID
+        # If duplicate names exist, let user pick the correct ID
         if len(matches) > 1:
             st.warning("Multiple devices share this name. Select the correct device ID:")
             selected_device_id = st.selectbox(
@@ -157,16 +155,16 @@ def show_network_report(auvik_get):
             key="iface_page_size"
         )
 
-        # Auto-load interfaces when device changes, or user clicks button
         device_changed = st.session_state.get("interfaces_device_id") != selected_device_id
         load_ifaces = st.button("Load Interfaces for Selected Device", key="btn_load_ifaces")
 
         if load_ifaces or device_changed or "interfaces_df" not in st.session_state:
+            # ✅ IMPORTANT: Auvik uses filter[parentDevice] for interface->device filtering
             interfaces = auvik_get(
                 "inventory/interface/info",
                 params={
                     "tenants": tenant_id,
-                    "filter[deviceId]": selected_device_id,
+                    "filter[parentDevice]": selected_device_id,  # ✅ fixed
                     "page[first]": iface_page_size,
                 }
             )
@@ -187,16 +185,17 @@ def show_network_report(auvik_get):
                 rows_i.append({
                     "interface_id": i.get("id"),
                     "interface_name": attr.get("interfaceName") or attr.get("name") or "N/A",
-                    "status": attr.get("status", "N/A"),
+                    "interface_type": attr.get("interfaceType", "N/A"),
+                    "admin_status": attr.get("adminStatus", "N/A"),
+                    "oper_status": attr.get("operationalStatus", attr.get("status", "N/A")),
                     "speed": attr.get("speed", "N/A"),
                     "mac": attr.get("macAddress", "N/A"),
-                    "device_name": attr.get("deviceName", selected_device_name),
+                    "device_name": attr.get("parentDeviceName", selected_device_name),
                 })
 
             interfaces_df = pd.DataFrame(rows_i)
             st.session_state["interfaces_df"] = interfaces_df
             st.session_state["interfaces_device_id"] = selected_device_id
-
         else:
             interfaces_df = st.session_state["interfaces_df"]
 
@@ -214,13 +213,11 @@ def _load_auvik_creds_from_secrets():
     username = ""
     api_key = ""
 
-    # Option A: top-level
     if "auvik_api_username" in st.secrets:
         username = str(st.secrets.get("auvik_api_username", "")).strip()
     if "auvik_api_key" in st.secrets:
         api_key = str(st.secrets.get("auvik_api_key", "")).strip()
 
-    # Option B: section
     if (not username or not api_key) and "auvik" in st.secrets:
         block = st.secrets.get("auvik", {})
         if isinstance(block, dict):
