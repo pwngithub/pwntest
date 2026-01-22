@@ -2,12 +2,14 @@ import streamlit as st
 import requests
 from requests.auth import HTTPBasicAuth
 import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta, timezone
 
 st.set_page_config(page_title="Network Report", layout="wide")
 
 
 # ────────────────────────────────────────────────
-# Error display helpers
+# Helpers
 # ────────────────────────────────────────────────
 def handle_error(resp, label="Request"):
     st.error(f"{label} failed")
@@ -33,8 +35,44 @@ def handle_error(resp, label="Request"):
         st.json(resp)
 
 
+def iso_z(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def compute_mbps(df: pd.DataFrame, ts_col: str, in_col: str, out_col: str) -> pd.DataFrame:
+    """
+    Convert cumulative octet counters to Mbps time series using deltas.
+    Mbps = (Δoctets * 8) / Δseconds / 1_000_000
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+    df[ts_col] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
+    df = df.dropna(subset=[ts_col]).sort_values(ts_col)
+
+    df[in_col] = pd.to_numeric(df[in_col], errors="coerce")
+    df[out_col] = pd.to_numeric(df[out_col], errors="coerce")
+
+    df["dt_seconds"] = df[ts_col].diff().dt.total_seconds()
+    df["din"] = df[in_col].diff()
+    df["dout"] = df[out_col].diff()
+
+    # Handle counter reset / negative deltas
+    df.loc[df["din"] < 0, "din"] = None
+    df.loc[df["dout"] < 0, "dout"] = None
+    df.loc[df["dt_seconds"] <= 0, "dt_seconds"] = None
+
+    df["in_mbps"] = (df["din"] * 8) / df["dt_seconds"] / 1_000_000
+    df["out_mbps"] = (df["dout"] * 8) / df["dt_seconds"] / 1_000_000
+
+    return df
+
+
 # ────────────────────────────────────────────────
-# Report function (importable by your main dashboard)
+# Main report (importable by your dashboard)
 # ────────────────────────────────────────────────
 def show_network_report(auvik_get):
     st.title("🌐 Network Report")
@@ -69,7 +107,7 @@ def show_network_report(auvik_get):
 
     st.divider()
 
-    # 2) Devices (load + select by name)
+    # 2) Devices
     st.subheader("Devices")
 
     page_size = st.number_input(
@@ -80,7 +118,6 @@ def show_network_report(auvik_get):
 
     load_devices = st.button("Load Devices", key="btn_load_devices")
 
-    # Load devices when button pressed OR reuse cached list for this tenant
     if load_devices or ("devices_df" in st.session_state and st.session_state.get("devices_tenant") == tenant_id):
         if load_devices or st.session_state.get("devices_tenant") != tenant_id:
             devices = auvik_get(
@@ -109,7 +146,6 @@ def show_network_report(auvik_get):
                 })
 
             devices_df = pd.DataFrame(rows)
-
             st.session_state["devices_df"] = devices_df
             st.session_state["devices_tenant"] = tenant_id
 
@@ -131,7 +167,6 @@ def show_network_report(auvik_get):
             st.warning("Could not resolve selected device to an ID.")
             return
 
-        # If duplicate names exist, let user pick the correct ID
         if len(matches) > 1:
             st.warning("Multiple devices share this name. Select the correct device ID:")
             selected_device_id = st.selectbox(
@@ -159,12 +194,11 @@ def show_network_report(auvik_get):
         load_ifaces = st.button("Load Interfaces for Selected Device", key="btn_load_ifaces")
 
         if load_ifaces or device_changed or "interfaces_df" not in st.session_state:
-            # ✅ IMPORTANT: Auvik uses filter[parentDevice] for interface->device filtering
             interfaces = auvik_get(
                 "inventory/interface/info",
                 params={
                     "tenants": tenant_id,
-                    "filter[parentDevice]": selected_device_id,  # ✅ fixed
+                    "filter[parentDevice]": selected_device_id,  # ✅ correct filter
                     "page[first]": iface_page_size,
                 }
             )
@@ -201,6 +235,103 @@ def show_network_report(auvik_get):
 
         st.success(f"Loaded {len(interfaces_df)} interfaces for {selected_device_name}")
         st.dataframe(interfaces_df, use_container_width=True)
+
+        st.divider()
+
+        # 4) Interface Usage (Mbps In/Out)
+        st.subheader("📈 Interface Usage (Mbps)")
+
+        iface_choices = interfaces_df["interface_name"].tolist()
+        selected_iface_name = st.selectbox("Select Interface", iface_choices, key="usage_iface_name")
+
+        iface_row = interfaces_df[interfaces_df["interface_name"] == selected_iface_name]
+        if iface_row.empty:
+            st.warning("Could not resolve interface selection to an ID.")
+            return
+
+        # If duplicate interface names exist, disambiguate by ID
+        if len(iface_row) > 1:
+            selected_iface_id = st.selectbox(
+                "Interface ID",
+                options=iface_row["interface_id"].tolist(),
+                key="usage_iface_id_dupe"
+            )
+        else:
+            selected_iface_id = iface_row.iloc[0]["interface_id"]
+
+        colA, colB, colC = st.columns(3)
+        with colA:
+            hours = st.slider("Lookback (hours)", 1, 72, 24, 1, key="usage_hours")
+        with colB:
+            interval = st.selectbox("Interval", ["5m", "15m", "30m", "1h"], index=0, key="usage_interval")
+        with colC:
+            show_raw = st.checkbox("Show raw stats sample", value=False, key="usage_show_raw")
+
+        if st.button("Load Usage", key="btn_load_usage"):
+            end = datetime.now(timezone.utc)
+            start = end - timedelta(hours=hours)
+
+            params = {
+                "tenants": tenant_id,
+                "from": iso_z(start),
+                "to": iso_z(end),
+                "interval": interval,
+            }
+
+            stats = auvik_get(f"interface/statistics/{selected_iface_id}", params=params)
+            if isinstance(stats, dict) and stats.get("_error"):
+                handle_error(stats, "Interface Usage")
+                return
+
+            points = (stats or {}).get("data", [])
+            if not points:
+                st.warning("No stats returned for that interface/time range.")
+                st.json(stats)
+                return
+
+            if show_raw:
+                st.json(points[:5])
+
+            df = pd.DataFrame(points)
+
+            # Try to find timestamp + counters
+            ts_col = "timestamp" if "timestamp" in df.columns else ("time" if "time" in df.columns else None)
+            in_col = "inOctets" if "inOctets" in df.columns else None
+            out_col = "outOctets" if "outOctets" in df.columns else None
+
+            if ts_col is None or in_col is None or out_col is None:
+                st.warning("Unexpected stats format. Columns returned:")
+                st.write(list(df.columns))
+                st.json(points[:5])
+                return
+
+            df2 = compute_mbps(df, ts_col, in_col, out_col)
+            df2 = df2.dropna(subset=["in_mbps", "out_mbps"])
+
+            if df2.empty:
+                st.warning("Not enough valid datapoints to compute Mbps (counter resets or missing values).")
+                return
+
+            # “Current” = last computed point
+            current_in = float(df2["in_mbps"].iloc[-1])
+            current_out = float(df2["out_mbps"].iloc[-1])
+
+            st.metric("Current In (Mbps)", f"{current_in:.2f}")
+            st.metric("Current Out (Mbps)", f"{current_out:.2f}")
+            st.metric("Peak In (Mbps)", f"{df2['in_mbps'].max():.2f}")
+            st.metric("Peak Out (Mbps)", f"{df2['out_mbps'].max():.2f}")
+
+            st.write("Last 50 computed points:")
+            st.dataframe(df2[[ts_col, "in_mbps", "out_mbps"]].tail(50), use_container_width=True)
+
+            fig = plt.figure()
+            plt.plot(df2[ts_col], df2["in_mbps"], label="In Mbps")
+            plt.plot(df2[ts_col], df2["out_mbps"], label="Out Mbps")
+            plt.legend()
+            plt.xlabel("Time (UTC)")
+            plt.ylabel("Mbps")
+            plt.title(f"{selected_device_name} / {selected_iface_name}")
+            st.pyplot(fig)
 
     else:
         st.info("Click **Load Devices** to begin.")
