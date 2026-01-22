@@ -30,9 +30,6 @@ def handle_error(resp, label="Request"):
     txt = resp.get("text")
     if txt:
         st.write(txt[:2500])
-    else:
-        # For successful calls this will be empty; don't spam.
-        pass
 
 
 def iso_z(dt: datetime) -> str:
@@ -50,25 +47,13 @@ def unix_minutes_to_dt(v):
 
 def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
     """
-    Parses Auvik stat/interface/bandwidth response in YOUR observed format:
+    Parses Auvik stat/interface/bandwidth response shape:
 
-    {
-      "data": [
-        {
-          "attributes": {
-            "stats": [
-              {
-                "legend": ["Recorded At","Transmit","Receive","Bandwidth"],
-                "unit":   ["unix_mins","bits_per_sec","bits_per_sec","bits_per_sec"],
-                "data":   [[29483790, 1633..., 795, 1633...], ...]
-              }
-            ]
-          }
-        }
-      ]
-    }
+    data[0].attributes.stats[0].legend + data[0].attributes.stats[0].data
 
-    Returns DataFrame with: time, tx_bps, rx_bps, total_bps
+    legend = ["Recorded At","Transmit","Receive","Bandwidth"]
+    unit   = ["unix_mins","bits_per_sec","bits_per_sec","bits_per_sec"]
+    data   = [[unix_mins, tx_bps, rx_bps, total_bps], ...]
     """
     if not isinstance(stat_json, dict):
         return pd.DataFrame()
@@ -83,64 +68,54 @@ def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
         attrs = (item or {}).get("attributes", {}) or {}
         stats_blocks = attrs.get("stats")
 
-        # stats_blocks should be a list of dicts (your case)
-        if isinstance(stats_blocks, list) and stats_blocks and isinstance(stats_blocks[0], dict):
-            for block in stats_blocks:
-                legend = block.get("legend", [])
-                rows = block.get("data", [])
+        if not (isinstance(stats_blocks, list) and stats_blocks):
+            continue
 
-                if not isinstance(legend, list) or not isinstance(rows, list) or not legend:
+        for block in stats_blocks:
+            if not isinstance(block, dict):
+                continue
+
+            legend = block.get("legend", [])
+            rows = block.get("data", [])
+
+            if not (isinstance(legend, list) and isinstance(rows, list) and legend):
+                continue
+
+            legend_norm = [str(x).strip().lower() for x in legend]
+
+            def idx(name):
+                name = name.lower()
+                for i, c in enumerate(legend_norm):
+                    if c == name:
+                        return i
+                return None
+
+            t_i = idx("recorded at") or idx("time") or idx("timestamp")
+            tx_i = idx("transmit") or idx("tx") or idx("transmitted")
+            rx_i = idx("receive") or idx("rx") or idx("received")
+            bw_i = idx("bandwidth") or idx("total")
+
+            for r in rows:
+                if not isinstance(r, (list, tuple)):
                     continue
 
-                # map indices from legend
-                legend_norm = [str(x).strip().lower() for x in legend]
+                def g(i):
+                    if i is None:
+                        return None
+                    return r[i] if i < len(r) else None
 
-                def idx(name):
-                    name = name.lower()
-                    for i, c in enumerate(legend_norm):
-                        if c == name:
-                            return i
-                    return None
-
-                t_i = idx("recorded at")  # unix_mins
-                tx_i = idx("transmit")
-                rx_i = idx("receive")
-                bw_i = idx("bandwidth")
-
-                # Some tenants might label differently; be slightly forgiving
-                if t_i is None:
-                    t_i = idx("time") or idx("timestamp")
-                if tx_i is None:
-                    tx_i = idx("tx") or idx("transmitted")
-                if rx_i is None:
-                    rx_i = idx("rx") or idx("received")
-                if bw_i is None:
-                    bw_i = idx("total")
-
-                for r in rows:
-                    if not isinstance(r, (list, tuple)):
-                        continue
-
-                    def g(i):
-                        if i is None:
-                            return None
-                        return r[i] if i < len(r) else None
-
-                    all_rows.append({
-                        "time": g(t_i),
-                        "tx_bps": g(tx_i),
-                        "rx_bps": g(rx_i),
-                        "total_bps": g(bw_i),
-                    })
+                all_rows.append({
+                    "time": g(t_i),
+                    "tx_bps": g(tx_i),
+                    "rx_bps": g(rx_i),
+                    "total_bps": g(bw_i),
+                })
 
     df = pd.DataFrame(all_rows)
     if df.empty:
         return df
 
-    # Convert time from unix minutes -> datetime
     df["time"] = df["time"].apply(unix_minutes_to_dt)
-
-    # Convert numeric
     df["tx_bps"] = pd.to_numeric(df["tx_bps"], errors="coerce")
     df["rx_bps"] = pd.to_numeric(df["rx_bps"], errors="coerce")
     df["total_bps"] = pd.to_numeric(df["total_bps"], errors="coerce")
@@ -150,7 +125,7 @@ def extract_bandwidth_points(stat_json: dict) -> pd.DataFrame:
 
 
 # ────────────────────────────────────────────────
-# Report function (importable by your main dashboard)
+# Report function (importable)
 # ────────────────────────────────────────────────
 def show_network_report(auvik_get):
     st.title("🌐 Network Report")
@@ -237,7 +212,7 @@ def show_network_report(auvik_get):
 
         st.divider()
 
-        # Interfaces (filtered to selected device)
+        # Interfaces
         st.subheader("Interfaces (only for selected device)")
         iface_page_size = st.number_input("Interface page size (page[first])", 1, 100, 100, 10, key="iface_page_size")
         device_changed = st.session_state.get("interfaces_device_id") != selected_device_id
@@ -302,15 +277,32 @@ def show_network_report(auvik_get):
 
         c1, c2, c3 = st.columns(3)
         with c1:
-            lookback_hours = st.slider("Lookback (hours)", 1, 168, 24, 1, key="usage_hours")
+            lookback_preset = st.selectbox(
+                "Lookback preset",
+                ["2 hours", "24 hours", "48 hours", "1 year"],
+                index=1,
+                key="usage_lookback_preset"
+            )
         with c2:
-            interval = st.selectbox("Interval", ["minute", "hour", "day"], index=1, key="usage_interval")
+            # "1 year" needs bigger buckets; hour/day usually makes sense
+            default_interval_idx = 1 if lookback_preset == "1 year" else 1  # hour
+            interval = st.selectbox("Interval", ["minute", "hour", "day"], index=default_interval_idx, key="usage_interval")
         with c3:
             show_raw = st.checkbox("Show raw API response", value=False, key="usage_raw")
 
+        def preset_to_timedelta(preset: str) -> timedelta:
+            if preset == "2 hours":
+                return timedelta(hours=2)
+            if preset == "24 hours":
+                return timedelta(hours=24)
+            if preset == "48 hours":
+                return timedelta(hours=48)
+            # 1 year (approx) – Auvik stats should still handle this fine
+            return timedelta(days=365)
+
         if st.button("Load Usage", key="btn_load_usage"):
             end = datetime.now(timezone.utc)
-            start = end - timedelta(hours=lookback_hours)
+            start = end - preset_to_timedelta(lookback_preset)
 
             params = {
                 "tenants": tenant_id,
@@ -331,10 +323,10 @@ def show_network_report(auvik_get):
 
             df = extract_bandwidth_points(stats)
             if df.empty:
-                st.warning("Stats returned, but no datapoints parsed. Leave 'Show raw' on and paste the response.")
+                st.warning("Stats returned, but no datapoints parsed.")
                 return
 
-            # Convert bps -> Mbps
+            # bps -> Mbps
             df["tx_mbps"] = df["tx_bps"] / 1_000_000
             df["rx_mbps"] = df["rx_bps"] / 1_000_000
             df["total_mbps"] = df["total_bps"] / 1_000_000
@@ -356,7 +348,7 @@ def show_network_report(auvik_get):
             plt.legend()
             plt.xlabel("Time (UTC)")
             plt.ylabel("Mbps")
-            plt.title(f"{selected_device_name} / {selected_iface_name}")
+            plt.title(f"{selected_device_name} / {selected_iface_name} ({lookback_preset})")
             st.pyplot(fig)
 
     else:
