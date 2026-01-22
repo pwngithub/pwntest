@@ -5,7 +5,6 @@ from io import BytesIO
 import urllib3
 import matplotlib.pyplot as plt
 import uuid
-from datetime import datetime, timedelta
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 st.set_page_config(page_title="PRTG Bandwidth", layout="wide", page_icon="Signal")
@@ -14,8 +13,8 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-# Update this to your actual total uplink capacity in Mbps
-TOTAL_CAPACITY = 40000  # e.g. 40 Gbps = 40000 Mbps
+# Update to your actual total uplink capacity in Mbps
+TOTAL_CAPACITY = 40000  # e.g. 40 Gbps
 
 if "period_key" not in st.session_state:
     st.session_state.period_key = f"period_{uuid.uuid4()}"
@@ -35,20 +34,6 @@ graphid = {
     "Last 365 days":  "3"
 }[period]
 
-# Time range and averaging interval (seconds) per period
-period_deltas = {
-    "Live (2 hours)": (timedelta(hours=2), 60),      # 1 min
-    "Last 48 hours":  (timedelta(hours=48), 300),    # 5 min
-    "Last 7 days":    (timedelta(days=7), 900),      # 15 min
-    "Last 30 days":   (timedelta(days=30), 1800),    # 30 min
-    "Last 365 days":  (timedelta(days=365), 7200)    # 2 hours
-}
-delta, avg_interval = period_deltas[period]
-
-now = datetime.now()
-edate = now.strftime("%Y-%m-%d-%H-%M-%S")
-sdate = (now - delta).strftime("%Y-%m-%d-%H-%M-%S")
-
 SENSORS = {
     "Firstlight":          "12435",
     "NNINIX":              "12506",
@@ -57,79 +42,68 @@ SENSORS = {
 }
 
 @st.cache_data(ttl=300)
-def get_traffic_stats(sensor_id, sdate, edate, avg):
-    url = f"{BASE}/api/historicdata.json"
+def get_traffic_stats(sensor_id):
+    """
+    Fetch min/max from channel overview (table.json) for the sensor.
+    This gives the min/max over the current graph period in PRTG.
+    """
+    url = f"{BASE}/api/table.json"
     params = {
+        "content": "channels",
         "id": sensor_id,
-        "sdate": sdate,
-        "edate": edate,
-        "avg": avg,
-        "usecaption": 1,
+        "columns": "name,minimum_raw,maximum_raw,lastvalue_raw",
         "username": USER,
         "passhash": PH
     }
     try:
-        resp = requests.get(url, params=params, verify=False, timeout=30).json()
-        histdata = resp.get("histdata", [])
-        if not histdata:
-            st.warning(f"No historic data for sensor {sensor_id} in this period.")
+        data = requests.get(url, params=params, verify=False, timeout=20).json()
+        channels = data.get("channels", [])
+
+        if not channels:
+            st.info(f"No channels found for sensor {sensor_id}")
             return 0.0, 0.0, 0.0, 0.0
 
-        # Debug: list all raw channel names
-        raw_keys = [k for k in histdata[0].keys() if k.lower().endswith("_raw")]
-        st.caption(f"Raw channels for {sensor_id}: {', '.join(raw_keys) if raw_keys else 'None found'}")
+        # Debug: show actual channel names
+        channel_names = [ch.get("name", "Unknown") for ch in channels]
+        st.caption(f"Channels for {sensor_id}: {', '.join(channel_names)}")
 
-        in_raw_keys = []
-        out_raw_keys = []
+        in_min = in_max = out_min = out_max = 0.0
 
-        for key in raw_keys:
-            base = key[:-4].strip().lower()  # remove _raw
-            # Inbound / Download patterns
-            if any(word in base for word in [
-                "traffic in", "in", "down", "download", "rx", "receive", "input", "ingress"
-            ]):
-                in_raw_keys.append(key)
-            # Outbound / Upload patterns
-            elif any(word in base for word in [
-                "traffic out", "out", "up", "upload", "tx", "send", "transmit", "output", "egress"
-            ]):
-                out_raw_keys.append(key)
+        for ch in channels:
+            name = ch.get("name", "").strip().lower()
+            min_raw = ch.get("minimum_raw", "0")
+            max_raw = ch.get("maximum_raw", "0")
 
-        if not in_raw_keys or not out_raw_keys:
-            st.error(f"Cannot match in/out channels for sensor {sensor_id}. "
-                     f"Available raw: {raw_keys}")
-            return 0.0, 0.0, 0.0, 0.0
+            # Skip if no valid raw value
+            if not min_raw or not max_raw:
+                continue
 
-        in_values = []
-        out_values = []
+            try:
+                min_val = float(min_raw) / 10_000_000
+                max_val = float(max_raw) / 10_000_000
+            except:
+                continue
 
-        for item in histdata:
-            for k in in_raw_keys:
-                val = item.get(k)
-                if val and val not in ('', '0', 0, None):
-                    try:
-                        in_values.append(float(val))
-                    except:
-                        pass
-            for k in out_raw_keys:
-                val = item.get(k)
-                if val and val not in ('', '0', 0, None):
-                    try:
-                        out_values.append(float(val))
-                    except:
-                        pass
+            # Match common traffic channel names
+            if any(word in name for word in ["traffic in", "in", "down", "download", "rx", "receive", "input", "ingress"]):
+                in_min = min(in_min, min_val) if in_min else min_val
+                in_max = max(in_max, max_val)
+            elif any(word in name for word in ["traffic out", "out", "up", "upload", "tx", "send", "transmit", "output", "egress"]):
+                out_min = min(out_min, min_val) if out_min else min_val
+                out_max = max(out_max, max_val)
 
-        divisor = 10_000_000  # Adjust if your PRTG units differ (common: 10M for bit/s → Mbps)
+        if in_max == 0 and out_max == 0:
+            st.warning(f"No matching in/out traffic channels found for {sensor_id}")
 
-        in_min = min(in_values) / divisor if in_values else 0.0
-        in_max = max(in_values) / divisor if in_values else 0.0
-        out_min = min(out_values) / divisor if out_values else 0.0
-        out_max = max(out_values) / divisor if out_values else 0.0
-
-        return round(in_min, 2), round(in_max, 2), round(out_min, 2), round(out_max, 2)
+        return (
+            round(in_min, 2),
+            round(in_max, 2),
+            round(out_min, 2),
+            round(out_max, 2)
+        )
 
     except Exception as e:
-        st.error(f"Error fetching data for sensor {sensor_id}: {str(e)}")
+        st.error(f"Error fetching stats for sensor {sensor_id}: {str(e)}")
         return 0.0, 0.0, 0.0, 0.0
 
 
@@ -150,16 +124,14 @@ def get_graph_image(sensor_id, graphid):
         resp = requests.get(url, params=params, verify=False, timeout=15)
         if resp.status_code == 200:
             return Image.open(BytesIO(resp.content))
-        else:
-            return None
+        return None
     except:
         return None
 
 
-# ────────────────────────────────────────────────────────────────
-
-st.title("PRTG Bandwidth Dashboard – Period-Specific Min & Max")
-st.caption(f"Period: **{period}**  ({sdate} → {edate})  |  Graph ID: {graphid}")
+st.title("PRTG Bandwidth Dashboard – Min & Max per Period")
+st.caption(f"Period: **{period}**   |   Graph ID: {graphid}")
+st.info("Showing min/max from PRTG channel data (matches graph period). Check captions below each provider for actual channel names.")
 
 total_in_min = total_in_max = 0.0
 total_out_min = total_out_max = 0.0
@@ -170,7 +142,7 @@ for i in range(0, len(SENSORS), 2):
 
     for col, (name, sid) in zip(cols, pair):
         with col:
-            in_min, in_max, out_min, out_max = get_traffic_stats(sid, sdate, edate, avg_interval)
+            in_min, in_max, out_min, out_max = get_traffic_stats(sid)
 
             total_in_min += in_min
             total_in_max += in_max
@@ -181,11 +153,11 @@ for i in range(0, len(SENSORS), 2):
 
             c1, c2 = st.columns(2)
             with c1:
-                st.metric("Download Min", f"{in_min:,.2f} Mbps")
-                st.metric("Download Max", f"{in_max:,.2f} Mbps")
+                st.metric("Download Min", f"{in_min:,.2f} Mbps" if in_min > 0 else "N/A")
+                st.metric("Download Max", f"{in_max:,.2f} Mbps" if in_max > 0 else "N/A")
             with c2:
-                st.metric("Upload Min", f"{out_min:,.2f} Mbps")
-                st.metric("Upload Max", f"{out_max:,.2f} Mbps")
+                st.metric("Upload Min",   f"{out_min:,.2f} Mbps" if out_min > 0 else "N/A")
+                st.metric("Upload Max",   f"{out_max:,.2f} Mbps" if out_max > 0 else "N/A")
 
             img = get_graph_image(sid, graphid)
             if img:
@@ -193,7 +165,6 @@ for i in range(0, len(SENSORS), 2):
             else:
                 st.caption("Graph unavailable")
 
-# ────────────────────────────────────────────────────────────────
 st.markdown("## Combined Across All Circuits")
 
 col_left, col_right = st.columns([3, 1])
@@ -237,8 +208,8 @@ with col_left:
 with col_right:
     st.metric("**Combined Download Min**", f"{total_in_min:,.0f} Mbps")
     st.metric("**Combined Download Max**", f"{total_in_max:,.0f} Mbps")
-    st.metric("**Combined Upload Min**", f"{total_out_min:,.0f} Mbps")
-    st.metric("**Combined Upload Max**", f"{total_out_max:,.0f} Mbps")
+    st.metric("**Combined Upload Min**",   f"{total_out_min:,.0f} Mbps")
+    st.metric("**Combined Upload Max**",   f"{total_out_max:,.0f} Mbps")
 
     st.divider()
     st.markdown("### Utilization (based on Max)")
