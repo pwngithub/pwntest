@@ -13,9 +13,8 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-# --- NEW: Define your total network capacity in Mbps here ---
-# Example: 40000 Mbps = 40 Gbps. Update this to match Pioneer's actual total uplink.
-TOTAL_CAPACITY = 40000 
+# Update this to your actual total uplink capacity
+TOTAL_CAPACITY = 40000  # Mbps (40 Gbps example)
 
 if "period_key" not in st.session_state:
     st.session_state.period_key = f"period_{uuid.uuid4()}"
@@ -29,10 +28,10 @@ period = st.selectbox(
 
 graphid = {
     "Live (2 hours)": "0",
-    "Last 48 hours": "1",
-    "Last 7 days": "-7",
-    "Last 30 days": "2",
-    "Last 365 days": "3"
+    "Last 48 hours":  "1",
+    "Last 7 days":    "-7",
+    "Last 30 days":   "2",
+    "Last 365 days":  "3"
 }[period]
 
 SENSORS = {
@@ -43,31 +42,62 @@ SENSORS = {
 }
 
 @st.cache_data(ttl=300)
-def get_real_peaks(sensor_id):
+def get_traffic_stats(sensor_id):
+    """
+    Returns (in_min, in_max, out_min, out_max) in Mbps
+    Uses minimum_raw & maximum_raw, ignores zero values
+    """
     url = f"{BASE}/api/table.json"
     params = {
         "content": "channels",
         "id": sensor_id,
-        "columns": "name,maximum_raw",
+        "columns": "name,minimum_raw,maximum_raw",
         "username": USER,
         "passhash": PH
     }
     try:
         data = requests.get(url, params=params, verify=False, timeout=15).json()
-        in_peak = out_peak = 0.0
+        in_values  = []
+        out_values = []
+
         for ch in data.get("channels", []):
             name = ch.get("name", "").strip()
-            raw = ch.get("maximum_raw", "0")
-            if not raw or float(raw) == 0:
-                continue
-            mbps = float(raw) / 10_000_000
+            min_raw  = ch.get("minimum_raw",  "0")
+            max_raw  = ch.get("maximum_raw",  "0")
+
+            # PRTG speed values are in 1/10000th of Mbps → divide by 10_000_000
+            if min_raw and float(min_raw) > 0:
+                min_mbps = float(min_raw) / 10_000_000
+            else:
+                min_mbps = None
+
+            if max_raw and float(max_raw) > 0:
+                max_mbps = float(max_raw) / 10_000_000
+            else:
+                max_mbps = None
+
             if "Traffic In" in name or "Down" in name:
-                in_peak = max(in_peak, round(mbps, 2))
+                if min_mbps is not None: in_values.append(min_mbps)
+                if max_mbps is not None: in_values.append(max_mbps)
             elif "Traffic Out" in name or "Up" in name:
-                out_peak = max(out_peak, round(mbps, 2))
-        return in_peak, out_peak
-    except:
-        return 0.0, 0.0
+                if min_mbps is not None: out_values.append(min_mbps)
+                if max_mbps is not None: out_values.append(max_mbps)
+
+        in_min  = min(in_values)  if in_values  else 0.0
+        in_max  = max(in_values)  if in_values  else 0.0
+        out_min = min(out_values) if out_values else 0.0
+        out_max = max(out_values) if out_values else 0.0
+
+        return (
+            round(in_min,  2),
+            round(in_max,  2),
+            round(out_min, 2),
+            round(out_max, 2)
+        )
+    except Exception as e:
+        st.warning(f"Error fetching stats for sensor {sensor_id}: {e}")
+        return 0.0, 0.0, 0.0, 0.0
+
 
 @st.cache_data(ttl=300)
 def get_graph_image(sensor_id, graphid):
@@ -88,96 +118,96 @@ def get_graph_image(sensor_id, graphid):
     except:
         return None
 
-st.title("PRTG Bandwidth Dashboard")
-st.caption(f"Period: **{period}**")
 
-total_in = total_out = 0.0
+st.title("PRTG Bandwidth Dashboard – Min & Max")
+st.caption(f"Period: **{period}**   |   Graph ID: {graphid}")
+
+total_in_min = total_in_max = 0.0
+total_out_min = total_out_max = 0.0
 
 for i in range(0, len(SENSORS), 2):
     cols = st.columns(2)
     pair = list(SENSORS.items())[i:i+2]
+
     for col, (name, sid) in zip(cols, pair):
         with col:
-            in_peak, out_peak = get_real_peaks(sid)
-            total_in  += in_peak
-            total_out += out_peak
+            in_min, in_max, out_min, out_max = get_traffic_stats(sid)
+
+            total_in_min  += in_min
+            total_in_max  += in_max
+            total_out_min += out_min
+            total_out_max += out_max
+
             st.subheader(name)
-            st.metric("Peak In",  f"{in_peak:,.2f} Mbps")
-            st.metric("Peak Out", f"{out_peak:,.2f} Mbps")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("Download Min", f"{in_min:,.2f} Mbps")
+                st.metric("Download Max", f"{in_max:,.2f} Mbps")
+            with c2:
+                st.metric("Upload Min",   f"{out_min:,.2f} Mbps")
+                st.metric("Upload Max",   f"{out_max:,.2f} Mbps")
+
             img = get_graph_image(sid, graphid)
             if img:
                 st.image(img, use_container_width=True)
             else:
                 st.caption("Graph unavailable")
 
-st.markdown("## Combined Peak Bandwidth Across All Circuits")
+# ────────────────────────────────────────────────
+st.markdown("## Combined Across All Circuits")
 
-col1, col2 = st.columns([3, 1])
-with col1:
+col_left, col_right = st.columns([3, 1])
+
+with col_left:
     fig, ax = plt.subplots(figsize=(12, 7))
-    bars = ax.bar(
-        ["Peak In", "Peak Out"],
-        [total_in, total_out],
-        color=["#00ff9d", "#ff3366"],
-        width=0.5,
-        edgecolor="white",
-        linewidth=2.5
-    )
-    
-    current_max = max(total_in, total_out)
-    if current_max > 0:
-        ax.set_ylim(0, current_max * 1.15)
-    else:
-        ax.set_ylim(0, 100)
 
+    groups = ["Download", "Upload"]
+    mins   = [total_in_min,  total_out_min]
+    maxs   = [total_in_max,  total_out_max]
+
+    x = range(len(groups))
+    width = 0.35
+
+    ax.bar([i - width/2 for i in x], mins, width, label="Minimum", color="#00d4ff", edgecolor="white")
+    ax.bar([i + width/2 for i in x], maxs, width, label="Maximum", color="#ff3366",  edgecolor="white")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(groups, fontsize=16, fontweight="bold", color="white")
     ax.set_ylabel("Mbps", fontsize=16, fontweight="bold", color="white")
-    ax.set_title(f"Total Combined Peak – {period}", fontsize=24, fontweight="bold", color="white", pad=30)
+    ax.set_title(f"Total Min / Max – {period}", fontsize=24, fontweight="bold", color="white", pad=30)
+
     ax.set_facecolor("#0e1117")
     fig.patch.set_facecolor("#0e1117")
-    
-    for spine in ["top", "right", "left"]:
-        ax.spines[spine].set_visible(False)
-        
-    ax.tick_params(colors="white", labelsize=14, length=0)
+    ax.tick_params(colors="white", labelsize=14)
     ax.grid(axis="y", alpha=0.2, color="white", linestyle="--")
+    ax.legend(fontsize=14)
 
-    for bar in bars:
-        height = bar.get_height()
-        if height > 0:
-            ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                height + (current_max * 0.02),
-                f"{height:,.0f}",
-                ha="center",
-                va="bottom",
-                fontsize=28,
-                fontweight="bold",
-                color="white"
-            )
+    for i, v in enumerate(mins + maxs):
+        if v > 0:
+            ax.text(i % 2 * (len(groups)) + ( -width/2 if i < 2 else +width/2 ),
+                    v + max(maxs)*0.015, f"{v:,.0f}", ha="center", va="bottom",
+                    fontsize=16, fontweight="bold", color="white")
+
     st.pyplot(fig, use_container_width=True)
 
-with col2:
-    # --- NEW: Percentage Calculations ---
-    # Avoid division by zero if capacity is not set
-    cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1 
-    
-    pct_in = (total_in / cap) * 100
-    pct_out = (total_out / cap) * 100
-    
-    # Existing Metrics
-    st.metric("**Total In**",  f"{total_in:,.0f} Mbps")
-    st.metric("**Total Out**", f"{total_out:,.0f} Mbps")
-    
+with col_right:
+    st.metric("**Combined Download Min**", f"{total_in_min:,.0f} Mbps")
+    st.metric("**Combined Download Max**", f"{total_in_max:,.0f} Mbps")
+    st.metric("**Combined Upload Min**",   f"{total_out_min:,.0f} Mbps")
+    st.metric("**Combined Upload Max**",   f"{total_out_max:,.0f} Mbps")
+
     st.divider()
-    
-    # New Percentage Metrics
-    st.markdown("### Utilization")
-    
-    st.caption(f"Inbound ({pct_in:.1f}%)")
-    # Ensure progress bar doesn't crash if > 100%
+    st.markdown("### Utilization (based on Max)")
+    cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1
+
+    pct_in  = (total_in_max  / cap) * 100
+    pct_out = (total_out_max / cap) * 100
+
+    st.caption(f"Download ({pct_in:.1f}%)")
     st.progress(min(pct_in / 100, 1.0))
-    
-    st.caption(f"Outbound ({pct_out:.1f}%)")
+
+    st.caption(f"Upload ({pct_out:.1f}%)")
     st.progress(min(pct_out / 100, 1.0))
-    
-    st.caption(f"Capacity Goal: {TOTAL_CAPACITY:,.0f} Mbps")
+
+    st.caption(f"Total Capacity: {TOTAL_CAPACITY:,.0f} Mbps")
