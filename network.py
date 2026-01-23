@@ -1,165 +1,184 @@
+
 import streamlit as st
 import requests
-from requests.auth import HTTPBasicAuth
-import pandas as pd
+from PIL import Image
+from io import BytesIO
+import urllib3
+import matplotlib.pyplot as plt
+import uuid
 
-st.set_page_config(page_title="Network Report", layout="wide")
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+st.set_page_config(page_title="PRTG Bandwidth", layout="wide", page_icon="Signal")
 
+USER = st.secrets["prtg_username"]
+PH   = st.secrets["prtg_passhash"]
+BASE = "https://prtg.pioneerbroadband.net"
 
-# ────────────────────────────────────────────────
-# Shared UI helpers
-# ────────────────────────────────────────────────
-def handle_error(resp, label="Request"):
-    st.error(f"{label} failed")
-    if isinstance(resp, dict):
-        st.write("Status:", resp.get("status"))
-        if resp.get("url"):
-            st.code(resp.get("url"))
-        if resp.get("text"):
-            st.write(resp.get("text")[:1200])
+# --- NEW: Define your total network capacity in Mbps here ---
+# Example: 40000 Mbps = 40 Gbps. Update this to match Pioneer's actual total uplink.
+TOTAL_CAPACITY = 40000 
 
+if "period_key" not in st.session_state:
+    st.session_state.period_key = f"period_{uuid.uuid4()}"
 
-# ────────────────────────────────────────────────
-# Report entrypoint used by your main dashboard
-# ────────────────────────────────────────────────
-def show_network_report(auvik_get):
-    st.title("🌐 Network Report")
+period = st.selectbox(
+    "Time Period",
+    ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
+    index=1,
+    key=st.session_state.period_key
+)
 
-    col1, col2 = st.columns(2)
+graphid = {
+    "Live (2 hours)": "0",
+    "Last 48 hours": "1",
+    "Last 7 days": "-7",
+    "Last 30 days": "2",
+    "Last 365 days": "3"
+}[period]
 
-    with col1:
-        st.subheader("Tenants")
-        if st.button("Load Tenants", key="net_load_tenants"):
-            tenants = auvik_get("tenants")
-            if isinstance(tenants, dict) and tenants.get("_error"):
-                handle_error(tenants, "Load Tenants")
+SENSORS = {
+    "Firstlight":          "12435",
+    "NNINIX":              "12506",
+    "Hurricane Electric": "12363",
+    "Cogent":              "12340",
+}
+
+@st.cache_data(ttl=300)
+def get_real_peaks(sensor_id):
+    url = f"{BASE}/api/table.json"
+    params = {
+        "content": "channels",
+        "id": sensor_id,
+        "columns": "name,maximum_raw",
+        "username": USER,
+        "passhash": PH
+    }
+    try:
+        data = requests.get(url, params=params, verify=False, timeout=15).json()
+        in_peak = out_peak = 0.0
+        for ch in data.get("channels", []):
+            name = ch.get("name", "").strip()
+            raw = ch.get("maximum_raw", "0")
+            if not raw or float(raw) == 0:
+                continue
+            mbps = float(raw) / 10_000_000
+            if "Traffic In" in name or "Down" in name:
+                in_peak = max(in_peak, round(mbps, 2))
+            elif "Traffic Out" in name or "Up" in name:
+                out_peak = max(out_peak, round(mbps, 2))
+        return in_peak, out_peak
+    except:
+        return 0.0, 0.0
+
+@st.cache_data(ttl=300)
+def get_graph_image(sensor_id, graphid):
+    url = f"{BASE}/chart.png"
+    params = {
+        "id": sensor_id,
+        "graphid": graphid,
+        "width": 1800,
+        "height": 800,
+        "bgcolor": "1e1e1e",
+        "fontcolor": "ffffff",
+        "username": USER,
+        "passhash": PH
+    }
+    try:
+        resp = requests.get(url, params=params, verify=False, timeout=15)
+        return Image.open(BytesIO(resp.content))
+    except:
+        return None
+
+st.title("PRTG Bandwidth Dashboard")
+st.caption(f"Period: **{period}**")
+
+total_in = total_out = 0.0
+
+for i in range(0, len(SENSORS), 2):
+    cols = st.columns(2)
+    pair = list(SENSORS.items())[i:i+2]
+    for col, (name, sid) in zip(cols, pair):
+        with col:
+            in_peak, out_peak = get_real_peaks(sid)
+            total_in  += in_peak
+            total_out += out_peak
+            st.subheader(name)
+            st.metric("Peak In",  f"{in_peak:,.2f} Mbps")
+            st.metric("Peak Out", f"{out_peak:,.2f} Mbps")
+            img = get_graph_image(sid, graphid)
+            if img:
+                st.image(img, use_container_width=True)
             else:
-                st.success(f"Returned {len(tenants.get('data', []))} tenants")
-                st.json(tenants)
+                st.caption("Graph unavailable")
 
-    with col2:
-        st.subheader("Devices")
-        if st.button("Load Devices", key="net_load_devices"):
-            devices = auvik_get("inventory/device/info", {"page[limit]": 200})
-            if isinstance(devices, dict) and devices.get("_error"):
-                handle_error(devices, "Load Devices")
-                return
+st.markdown("## Combined Peak Bandwidth Across All Circuits")
 
-            data = devices.get("data", [])
-            if not data:
-                st.warning("No devices returned")
-                return
+col1, col2 = st.columns([3, 1])
+with col1:
+    fig, ax = plt.subplots(figsize=(12, 7))
+    bars = ax.bar(
+        ["Peak In", "Peak Out"],
+        [total_in, total_out],
+        color=["#00ff9d", "#ff3366"],
+        width=0.5,
+        edgecolor="white",
+        linewidth=2.5
+    )
+    
+    current_max = max(total_in, total_out)
+    if current_max > 0:
+        ax.set_ylim(0, current_max * 1.15)
+    else:
+        ax.set_ylim(0, 100)
 
-            rows = []
-            for d in data:
-                attr = d.get("attributes", {}) or {}
-                rows.append({
-                    "ID": d.get("id"),
-                    "Name": attr.get("deviceName", "N/A"),
-                    "Type": attr.get("deviceType", "N/A"),
-                    "IP": attr.get("ipAddress", "N/A"),
-                    "Status": attr.get("status", "N/A"),
-                })
+    ax.set_ylabel("Mbps", fontsize=16, fontweight="bold", color="white")
+    ax.set_title(f"Total Combined Peak – {period}", fontsize=24, fontweight="bold", color="white", pad=30)
+    ax.set_facecolor("#0e1117")
+    fig.patch.set_facecolor("#0e1117")
+    
+    for spine in ["top", "right", "left"]:
+        ax.spines[spine].set_visible(False)
+        
+    ax.tick_params(colors="white", labelsize=14, length=0)
+    ax.grid(axis="y", alpha=0.2, color="white", linestyle="--")
 
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    for bar in bars:
+        height = bar.get_height()
+        if height > 0:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                height + (current_max * 0.02),
+                f"{height:,.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=28,
+                fontweight="bold",
+                color="white"
+            )
+    st.pyplot(fig, use_container_width=True)
 
+with col2:
+    # --- NEW: Percentage Calculations ---
+    # Avoid division by zero if capacity is not set
+    cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1 
+    
+    pct_in = (total_in / cap) * 100
+    pct_out = (total_out / cap) * 100
+    
+    # Existing Metrics
+    st.metric("**Total In**",  f"{total_in:,.0f} Mbps")
+    st.metric("**Total Out**", f"{total_out:,.0f} Mbps")
+    
     st.divider()
-
-    st.subheader("Interfaces")
-    device_id = st.text_input("Filter by Device ID (optional)", key="net_device_filter").strip()
-
-    if st.button("Load Interfaces", key="net_load_interfaces"):
-        params = {"page[limit]": 200}
-        if device_id:
-            params["filter[deviceId]"] = device_id
-
-        interfaces = auvik_get("inventory/interface/info", params)
-        if isinstance(interfaces, dict) and interfaces.get("_error"):
-            handle_error(interfaces, "Load Interfaces")
-            return
-
-        data = interfaces.get("data", [])
-        if not data:
-            st.warning("No interfaces returned")
-            return
-
-        rows = []
-        for i in data:
-            attr = i.get("attributes", {}) or {}
-            rows.append({
-                "Interface ID": i.get("id"),
-                "Name": attr.get("interfaceName", "N/A"),
-                "Device": attr.get("deviceName", "N/A"),
-                "Speed": attr.get("speed", "N/A"),
-                "Status": attr.get("status", "N/A"),
-            })
-
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
-
-
-# ────────────────────────────────────────────────
-# Standalone mode wiring (secrets + auvik_get)
-# ────────────────────────────────────────────────
-def _load_auvik_creds_from_secrets():
-    # Supports both:
-    # A) auvik_api_username / auvik_api_key
-    # B) [auvik] api_username / api_key
-    username = ""
-    api_key = ""
-
-    if "auvik_api_username" in st.secrets:
-        username = str(st.secrets.get("auvik_api_username", "")).strip()
-    if "auvik_api_key" in st.secrets:
-        api_key = str(st.secrets.get("auvik_api_key", "")).strip()
-
-    if (not username or not api_key) and "auvik" in st.secrets:
-        block = st.secrets.get("auvik", {})
-        if isinstance(block, dict):
-            username = username or str(block.get("api_username", "")).strip()
-            api_key = api_key or str(block.get("api_key", "")).strip()
-
-    return username, api_key
-
-
-def main():
-    # If you want region selectable later, we can add a dropdown.
-    BASE_URL = "https://auvikapi.us6.my.auvik.com/v1"
-    HEADERS = {"Accept": "application/json"}
-
-    API_USERNAME, API_KEY = _load_auvik_creds_from_secrets()
-
-    with st.sidebar:
-        st.header("🔧 Standalone Debug")
-        st.write("Secrets keys:", list(st.secrets.keys()))
-        st.write("Username loaded:", bool(API_USERNAME))
-        st.write("API key loaded:", bool(API_KEY))
-        if API_KEY:
-            st.write("API key length:", len(API_KEY))
-
-    if not API_USERNAME or not API_KEY:
-        st.error("Missing Auvik credentials in Streamlit Secrets.")
-        st.code(
-            'auvik_api_username = "api-user@yourdomain.com"\n'
-            'auvik_api_key = "YOUR_AUVIK_API_KEY_HERE"'
-        )
-        st.stop()
-
-    auth = HTTPBasicAuth(API_USERNAME, API_KEY)
-
-    def auvik_get(endpoint, params=None):
-        url = f"{BASE_URL}/{endpoint.lstrip('/')}"
-        try:
-            r = requests.get(url, headers=HEADERS, auth=auth, params=params, timeout=30)
-            if r.status_code in (401, 403):
-                return {"_error": True, "status": r.status_code, "text": r.text, "url": url}
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            return {"_error": True, "status": None, "text": str(e), "url": url}
-
-    show_network_report(auvik_get)
-
-
-# When Streamlit runs a file as the entry script, __name__ is "__main__"
-if __name__ == "__main__":
-    main()
+    
+    # New Percentage Metrics
+    st.markdown("### Utilization")
+    
+    st.caption(f"Inbound ({pct_in:.1f}%)")
+    # Ensure progress bar doesn't crash if > 100%
+    st.progress(min(pct_in / 100, 1.0))
+    
+    st.caption(f"Outbound ({pct_out:.1f}%)")
+    st.progress(min(pct_out / 100, 1.0))
+    
+    st.caption(f"Capacity Goal: {TOTAL_CAPACITY:,.0f} Mbps")
