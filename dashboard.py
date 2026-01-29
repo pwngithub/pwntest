@@ -695,5 +695,37 @@ def run_dashboard():
     else:
         tmp = true_churn_in.copy()
         tmp["Competitor"] = tmp["Reason"].apply(detect_competitor)
+
+        # Filter for rows where a competitor was actually found
         comp_df = (
             tmp[tmp["Competitor"].astype(str).str.strip().ne("")]
+            .groupby("Competitor")
+            .agg(Count=("Customer Name", "nunique"), MRC_Lost=("MRC", "sum"))
+            .reset_index()
+            .sort_values("MRC_Lost", ascending=False)
+        )
+
+        if comp_df.empty:
+            st.info("No specific competitor keywords detected in churn reasons this period.")
+        else:
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.dataframe(
+                    comp_df.style.format({"MRC_Lost": "${:,.0f}"}),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            with c2:
+                fig_comp = px.bar(
+                    comp_df,
+                    x="Count",
+                    y="Competitor",
+                    orientation="h",
+                    color="MRC_Lost",
+                    text="MRC_Lost"
+                )
+                fig_comp.update_traces(texttemplate='$%{text:,.0f}', textposition='outside')
+                st.plotly_chart(fig_comp, use_container_width=True)
+
+if __name__ == "__main__":
+    run_dashboard()
