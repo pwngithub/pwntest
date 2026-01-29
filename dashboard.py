@@ -1,4 +1,4 @@
-# dashboard.py — UPDATED (Category at Disconnect + Churn tables)
+# dashboard.py — UPDATED (Category at Disconnect + Churned Customers Detail)
 import streamlit as st
 import pandas as pd
 import requests
@@ -68,6 +68,7 @@ def get_data():
     df = load_from_jotform()
     if df.empty:
         return df
+
     rename_map = {
         "customerName": "Customer Name",
         "date": "Date",
@@ -81,22 +82,31 @@ def get_data():
         "disconnectReason": "Disconnect Reason Detail",
     }
     df.rename(columns=rename_map, inplace=True)
+
     df["Submission Date"] = pd.to_datetime(df["Submission Date"], errors="coerce")
     df = df.dropna(subset=["Submission Date"]).copy()
+
+    if "Status" not in df.columns:
+        df["Status"] = ""
     df["Status"] = df["Status"].astype(str).str.upper().str.strip()
+
+    if "MRC" not in df.columns:
+        df["MRC"] = 0
     df["MRC"] = pd.to_numeric(df["MRC"], errors="coerce").fillna(0)
+
+    if "Customer Name" not in df.columns:
+        df["Customer Name"] = ""
     df["Customer Name"] = df["Customer Name"].astype(str).str.strip()
+
+    # Keep these columns if missing to avoid KeyErrors later
+    for col in ["Category", "Reason", "Location"]:
+        if col not in df.columns:
+            df[col] = pd.NA
+
     return df
 
 def add_category_at_disconnect(df: pd.DataFrame) -> pd.DataFrame:
-    """Add a computed 'Category at Disconnect' column.
-
-    Logic:
-      - Normalize Category (empty -> NA)
-      - Sort by Customer + Submission Date
-      - Forward-fill the last known Category per customer
-      - Use that value for 'Category at Disconnect' (fallback: 'Unknown')
-    """
+    """Add a computed 'Category at Disconnect' column based on last known category per customer."""
     if df is None or df.empty:
         return df
 
@@ -105,19 +115,43 @@ def add_category_at_disconnect(df: pd.DataFrame) -> pd.DataFrame:
     if "Category" not in work.columns:
         work["Category"] = pd.NA
 
-    # Normalize category values
     work["Category"] = work["Category"].astype(str).str.strip()
     work.loc[work["Category"].isin(["", "None", "nan", "NaN", "<NA>"]), "Category"] = pd.NA
 
-    # Sort then forward-fill per customer
     work = work.sort_values(["Customer Name", "Submission Date"], kind="mergesort")
     work["_last_known_category"] = work.groupby("Customer Name")["Category"].ffill()
-
-    # Category at Disconnect = last known category as-of that row
     work["Category at Disconnect"] = work["_last_known_category"].fillna("Unknown")
     work.drop(columns=["_last_known_category"], inplace=True)
 
     return work
+
+def build_churn_detail(churn_df: pd.DataFrame) -> pd.DataFrame:
+    """One row per churned customer for the selected period (latest disconnect in period)."""
+    if churn_df is None or churn_df.empty:
+        return pd.DataFrame(columns=[
+            "Customer Name", "Disconnect Date", "Category at Disconnect", "Reason",
+            "MRC Lost", "Location"
+        ])
+
+    # Latest DISCONNECT per customer within the period
+    x = churn_df.sort_values(["Customer Name", "Submission Date"], kind="mergesort").copy()
+    x = x.drop_duplicates(subset=["Customer Name"], keep="last")
+
+    # Clean/standardize
+    x["Disconnect Date"] = x["Submission Date"].dt.date
+    x["MRC Lost"] = pd.to_numeric(x.get("MRC", 0), errors="coerce").fillna(0)
+
+    # Pick columns safely
+    cols = []
+    for c in ["Customer Name", "Disconnect Date", "Category at Disconnect", "Reason", "MRC Lost", "Location"]:
+        if c in x.columns:
+            cols.append(c)
+        else:
+            x[c] = pd.NA
+            cols.append(c)
+
+    x = x[cols].sort_values(["Disconnect Date", "MRC Lost"], ascending=[False, False]).reset_index(drop=True)
+    return x
 
 def run_dashboard():
     # Header
@@ -298,7 +332,6 @@ def run_dashboard():
     with col_a:
         st.subheader("Churn by Reason")
         if not churn_in.empty:
-            # Category at Disconnect is derived from the customer's last known category
             reason_df = (
                 churn_in.groupby(["Reason", "Category at Disconnect"], dropna=False)
                 .agg(Count=("Customer Name", "nunique"), MRC_Lost=("MRC", "sum"))
@@ -375,7 +408,33 @@ def run_dashboard():
 
     st.divider()
 
-    # NEW SECTION: CHURN BY COMPETITION — STANDS ALONE
+    # ✅ NEW: CHURNED CUSTOMERS DETAIL
+    st.markdown("### Churned Customers Detail")
+    st.caption("One row per churned customer (latest disconnect in the selected period).")
+
+    churn_detail_df = build_churn_detail(churn_in)
+
+    if churn_detail_df.empty:
+        st.info("No churned customers in this period.")
+    else:
+        st.dataframe(
+            churn_detail_df.style.format({"MRC Lost": "${:,.2f}"}),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # Quick totals for the detail view
+        d1, d2, d3 = st.columns(3)
+        with d1:
+            st.metric("Customers (unique)", int(churn_detail_df["Customer Name"].nunique()))
+        with d2:
+            st.metric("Total MRC Lost", f"${churn_detail_df['MRC Lost'].sum():,.2f}")
+        with d3:
+            st.metric("Avg MRC Lost", f"${churn_detail_df['MRC Lost'].mean():,.2f}")
+
+    st.divider()
+
+    # CHURN BY COMPETITION — STANDS ALONE
     st.markdown("### Churn by Competition")
     st.caption("Customers lost to named competitors this period")
 
@@ -399,9 +458,7 @@ def run_dashboard():
         if comp_data:
             comp_df = pd.DataFrame(comp_data)
 
-            # Pie chart + total box side-by-side
             pie_col, total_col = st.columns([1.8, 1])
-
             with pie_col:
                 fig_pie = px.pie(
                     comp_df,
@@ -434,12 +491,26 @@ def run_dashboard():
 
     st.divider()
 
-    # Export
+    # Export (now includes churn detail too)
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        pd.DataFrame([{"Period": f"{start_date} to {end_date}", "Net MRC": net_mrr_movement}]).to_excel(
-            writer, sheet_name="Summary", index=False
-        )
+        pd.DataFrame([{
+            "Period": f"{start_date} to {end_date}",
+            "Beginning Customers": beginning_customers,
+            "Beginning MRC": beginning_mrc,
+            "New Customers": new_count,
+            "New MRC": new_mrc,
+            "Churned Customers": churn_count,
+            "Churned MRC": churn_mrc,
+            "Net MRC": net_mrr_movement,
+            "Net Customers": net_customer_movement,
+        }]).to_excel(writer, sheet_name="Summary", index=False)
+
+        churn_detail_df.to_excel(writer, sheet_name="Churned Customers Detail", index=False)
+
+        # Optional: export raw filtered activity if you want it
+        period_df.to_excel(writer, sheet_name="Period Activity (Raw)", index=False)
+
     st.download_button(
         "Download Report (Excel)",
         data=buffer.getvalue(),
