@@ -1,4 +1,4 @@
-# dashboard.py — UPDATED (Category at Disconnect + Churned Customers Detail)
+# dashboard.py — UPDATED with Streamlit Secrets
 import streamlit as st
 import pandas as pd
 import requests
@@ -24,8 +24,15 @@ st.markdown("""
 
 # ——————————————— DATA LOADER ———————————————
 def load_from_jotform():
-    api_key = "22179825a79dba61013e4fc3b9d30fa4"
-    form_id = "240073839937062"
+    # ——— SECURE SECRETS LOADING ———
+    try:
+        api_key = st.secrets["jotform"]["api_key"]
+        form_id = st.secrets["jotform"]["form_id"]
+    except Exception as e:
+        st.error("🚨 API Secrets missing! Please set [jotform] api_key and form_id in Streamlit Cloud settings or .streamlit/secrets.toml")
+        return pd.DataFrame()
+    # ——————————————————————————————
+
     url = f"https://api.jotform.com/form/{form_id}/submissions"
     submissions = []
     offset = 0
@@ -167,7 +174,7 @@ def run_dashboard():
 
     df = get_data()
     if df.empty:
-        st.error("No data.")
+        st.warning("No data found or API keys missing.")
         st.stop()
 
     # Add computed churn attribute
