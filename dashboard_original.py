@@ -1,4 +1,4 @@
-# dashboard.py — FINAL VERSION (Deploy Now!)
+# dashboard.py — FINAL & PERFECT (Deploy Now!)
 import streamlit as st
 import pandas as pd
 import requests
@@ -74,6 +74,7 @@ def get_data():
     return df
 
 def run_dashboard():
+    # Header
     col_logo, col_title = st.columns([1, 8])
     with col_logo:
         st.image("https://via.placeholder.com/140x90/1E3A8A/FFFFFF?text=TALLEY", width=140)
@@ -123,7 +124,7 @@ def run_dashboard():
 
     st.divider()
 
-    # QUICK INSIGHTS — BOXES BACK
+    # Quick Insights
     st.markdown("### Quick Insights This Period")
     cards = []
     if not churn_in.empty and "Reason" in churn_in.columns and churn_in["Reason"].str.strip().ne("").any():
@@ -156,112 +157,126 @@ def run_dashboard():
 
     st.divider()
 
-    # TRUE CHURN — ONLY ABSOLUTE NUMBERS (NO % RATES)
+    # True Churn & Growth
     st.markdown("### True Churn Metrics")
     st.caption("Loss from existing base only")
-
-    def red_metric(label, value, delta):
-        st.markdown(f"""
-        <div style="background:#1E293B; padding:20px; border-radius:12px; border-left:6px solid #DC2626; margin:12px 0;">
-            <p style="margin:0; color:#94A3B8; font-size:15px;">{label}</p>
-            <p style="margin:10px 0 6px 0; color:white; font-size:42px; font-weight:bold;">{value}</p>
-            <p style="margin:0; color:#DC2626; font-size:24px; font-weight:bold;">{delta}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
     c1, c2 = st.columns(2)
     with c1:
-        red_metric("Churned Customers", f"{churn_count:,}", f"Down -{churn_count}")
+        st.markdown(f"<div style='background:#1E293B;padding:20px;border-radius:12px;border-left:6px solid #DC2626;'><p style='margin:0;color:#94A3B8;font-size:15px;'>Churned Customers</p><p style='margin:10px 0 6px 0;color:white;font-size:42px;font-weight:bold;'>{churn_count:,}</p><p style='margin:0;color:#DC2626;font-size:24px;font-weight:bold;'>Down -{churn_count}</p></div>", unsafe_allow_html=True)
     with c2:
-        red_metric("Lost MRC", f"${churn_mrc:,.0f}", f"Down -${churn_mrc:,.0f}")
+        st.markdown(f"<div style='background:#1E293B;padding:20px;border-radius:12px;border-left:6px solid #DC2626;'><p style='margin:0;color:#94A3B8;font-size:15px;'>Lost MRC</p><p style='margin:10px 0 6px 0;color:white;font-size:42px;font-weight:bold;'>${churn_mrc:,.0f}</p><p style='margin:0;color:#DC2626;font-size:24px;font-weight:bold;'>Down -${churn_mrc:,.0f}</p></div>", unsafe_allow_html=True)
 
     st.divider()
 
-    # TRUE GROWTH — GREEN
     st.markdown("### True Growth Metrics")
     st.caption("New wins only")
-
-    def green_metric(label, value, delta):
-        st.markdown(f"""
-        <div style="background:#1E293B; padding:20px; border-radius:12px; border-left:6px solid #16A34A; margin:12px 0;">
-            <p style="margin:0; color:#94A3B8; font-size:15px;">{label}</p>
-            <p style="margin:10px 0 6px 0; color:white; font-size:42px; font-weight:bold;">{value}</p>
-            <p style="margin:0; color:#16A34A; font-size:24px; font-weight:bold;">{delta}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
     g1, g2 = st.columns(2)
     with g1:
-        green_metric("New Customers", f"{new_count:,}", f"Up +{new_count}")
+        st.markdown(f"<div style='background:#1E293B;padding:20px;border-radius:12px;border-left:6px solid #16A34A;'><p style='margin:0;color:#94A3B8;font-size:15px;'>New Customers</p><p style='margin:10px 0 6px 0;color:white;font-size:42px;font-weight:bold;'>{new_count:,}</p><p style='margin:0;color:#16A34A;font-size:24px;font-weight:bold;'>Up +{new_count}</p></div>", unsafe_allow_html=True)
     with g2:
-        green_metric("New MRC Added", f"${new_mrc:,.0f}", f"Up +${new_mrc:,.0f}")
+        st.markdown(f"<div style='background:#1E293B;padding:20px;border-radius:12px;border-left:6px solid #16A34A;'><p style='margin:0;color:#94A3B8;font-size:15px;'>New MRC Added</p><p style='margin:10px 0 6px 0;color:white;font-size:42px;font-weight:bold;'>${new_mrc:,.0f}</p><p style='margin:0;color:#16A34A;font-size:24px;font-weight:bold;'>Up +${new_mrc:,.0f}</p></div>", unsafe_allow_html=True)
 
     st.divider()
 
-    # NET RESULTS — 3 BIG HERO METRICS
+    # Net Results
     st.markdown("### Net Results")
     st.caption("True performance after churn & growth")
     net_cust_growth = ((new_count - churn_count) / beginning_customers * 100) if beginning_customers > 0 else 0
 
     col1, col2, col3 = st.columns(3)
-
     with col1:
         color = "#16A34A" if net_customer_movement >= 0 else "#DC2626"
-        arrow = "Up" if net_customer_movement >= 0 else "Down"
         sign = "+" if net_customer_movement >= 0 else "-"
-        st.markdown(f"""
-        <div style="background:#1E293B; padding:28px; border-radius:16px; text-align:center; border-left:10px solid {color}; box-shadow: 0 8px 25px rgba(0,0,0,0.5);">
-            <p style="margin:0; color:#94A3B8; font-size:18px; font-weight:600;">Net Customers</p>
-            <p style="margin:16px 0 10px 0; color:white; font-size:56px; font-weight:bold;">{sign}{abs(net_customer_movement):,}</p>
-            <p style="margin:0; color:{color}; font-size:28px; font-weight:bold;">{arrow} {sign}{abs(net_customer_movement):,}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
+        st.markdown(f"<div style='background:#1E293B;padding:28px;border-radius:16px;text-align:center;border-left:10px solid {color};box-shadow: 0 8px 25px rgba(0,0,0,0.5);'><p style='margin:0;color:#94A3B8;font-size:18px;font-weight:600;'>Net Customers</p><p style='margin:16px 0 10px 0;color:white;font-size:56px;font-weight:bold;'>{sign}{abs(net_customer_movement):,}</p><p style='margin:0;color:{color};font-size:28px;font-weight:bold;'>{sign}{abs(net_customer_movement):,}</p></div>", unsafe_allow_html=True)
     with col2:
         color = "#16A34A" if net_mrr_movement >= 0 else "#DC2626"
-        arrow = "Up" if net_mrr_movement >= 0 else "Down"
         sign = "+" if net_mrr_movement >= 0 else "-"
-        st.markdown(f"""
-        <div style="background:#1E293B; padding:28px; border-radius:16px; text-align:center; border-left:10px solid {color}; box-shadow: 0 8px 25px rgba(0,0,0,0.5);">
-            <p style="margin:0; color:#94A3B8; font-size:18px; font-weight:600;">Net MRC</p>
-            <p style="margin:16px 0 10px 0; color:white; font-size:56px; font-weight:bold;">{sign}${abs(net_mrr_movement):,.0f}</p>
-            <p style="margin:0; color:{color}; font-size:28px; font-weight:bold;">{arrow} {sign}${abs(net_mrr_movement):,.0f}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
+        st.markdown(f"<div style='background:#1E293B;padding:28px;border-radius:16px;text-align:center;border-left:10px solid {color};box-shadow: 0 8px 25px rgba(0,0,0,0.5);'><p style='margin:0;color:#94A3B8;font-size:18px;font-weight:600;'>Net MRC</p><p style='margin:16px 0 10px 0;color:white;font-size:56px;font-weight:bold;'>{sign}${abs(net_mrr_movement):,.0f}</p><p style='margin:0;color:{color};font-size:28px;font-weight:bold;'>{sign}${abs(net_mrr_movement):,.0f}</p></div>", unsafe_allow_html=True)
     with col3:
         color = "#16A34A" if net_cust_growth >= 0 else "#DC2626"
-        arrow = "Up" if net_cust_growth >= 0 else "Down"
-        st.markdown(f"""
-        <div style="background:#1E293B; padding:28px; border-radius:16px; text-align:center; border-left:10px solid {color}; box-shadow: 0 8px 25px rgba(0,0,0,0.5);">
-            <p style="margin:0; color:#94A3B8; font-size:18px; font-weight:600;">Net Customer Growth Rate</p>
-            <p style="margin:16px 0 10px 0; color:white; font-size:56px; font-weight:bold;">{net_cust_growth:+.2f}%</p>
-            <p style="margin:0; color:{color}; font-size:28px; font-weight:bold;">{arrow} {net_cust_growth:+.2f}%</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"<div style='background:#1E293B;padding:28px;border-radius:16px;text-align:center;border-left:10px solid {color};box-shadow: 0 8px 25px rgba(0,0,0,0.5);'><p style='margin:0;color:#94A3B8;font-size:18px;font-weight:600;'>Net Customer Growth Rate</p><p style='margin:16px 0 10px 0;color:white;font-size:56px;font-weight:bold;'>{net_cust_growth:+.2f}%</p><p style='margin:0;color:{color};font-size:28px;font-weight:bold;'>{net_cust_growth:+.2f}%</p></div>", unsafe_allow_html=True)
 
     st.divider()
 
-    # Charts & Export (unchanged)
+    # CHURN BY REASON + NEW CUSTOMER ACQUISITION (side by side)
     col_a, col_b = st.columns(2)
+
     with col_a:
+        st.subheader("Churn by Reason")
         if not churn_in.empty:
-            st.subheader("Churn by Reason")
             reason_df = churn_in.groupby("Reason").agg(Count=("Customer Name","nunique"), MRC_Lost=("MRC","sum")).reset_index().sort_values("Count", ascending=False)
             st.dataframe(reason_df.style.format({"MRC_Lost": "${:,.0f}"}), use_container_width=True)
             fig = px.bar(reason_df, x="Count", y="Reason", orientation="h", color="MRC_Lost", color_continuous_scale="Reds")
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No churn this period")
 
     with col_b:
+        st.subheader("New Customer Acquisition")
         if not new_in.empty:
-            st.subheader("New Customer Acquisition")
-            pie = px.pie(new_in["Category"].value_counts().reset_index(), names="Category", values="count")
+            pie = px.pie(new_in["Category"].value_counts().reset_index(), names="Category", values="count", color_discrete_sequence=px.colors.sequential.Greens)
             st.plotly_chart(pie, use_container_width=True)
-            bar = px.bar(new_in["Location"].value_counts().head(10).reset_index(), x="Location", y="count")
+            bar = px.bar(new_in["Location"].value_counts().head(10).reset_index(), x="Location", y="count", color="count", color_continuous_scale="Greens")
             st.plotly_chart(bar, use_container_width=True)
             st.success(f"Added {new_count:,} new customers — +${new_mrc:,.0f} MRC")
+        else:
+            st.info("No new customers this period")
 
     st.divider()
+
+    # NEW SECTION: CHURN BY COMPETITION — STANDS ALONE
+    st.markdown("### Churn by Competition")
+    st.caption("Customers lost to named competitors this period")
+
+    if not churn_in.empty:
+        competitors = {
+            "Fidium": "New Provider Fidium",
+            "Spectrum": "New Provider Spectrum",
+            "Starlink": "New Provider Starlink",
+            "CCI": "New Provider CCI",
+            "GWI": "New Provider GWI",
+            "Other Provider": "New Provider Other"
+        }
+        comp_data = []
+        for label, keyword in competitors.items():
+            mask = churn_in["Reason"].str.contains(keyword, case=False, na=False)
+            count = mask.sum()
+            mrc = churn_in[mask]["MRC"].sum()
+            if count > 0:
+                comp_data.append({"Competitor": label, "Customers Lost": count, "MRC Lost": mrc})
+
+        if comp_data:
+            comp_df = pd.DataFrame(comp_data)
+
+            # Pie chart + total box side-by-side
+            pie_col, total_col = st.columns([1.8, 1])
+
+            with pie_col:
+                fig_pie = px.pie(comp_df, names="Competitor", values="Customers Lost",
+                                 color_discrete_sequence=px.colors.sequential.Reds_r,
+                                 hole=0.45)
+                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                fig_pie.update_layout(showlegend=False, margin=dict(t=40, b=40, l=10, r=10))
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            with total_col:
+                total_cust = comp_df["Customers Lost"].sum()
+                total_mrc = comp_df["MRC Lost"].sum()
+                st.markdown(f"""
+                <div style="background:#1E293B; padding:30px; border-radius:16px; border-left:10px solid #DC2626; text-align:center; height:100%;">
+                    <p style="margin:0; color:#94A3B8; font-size:18px; font-weight:600;">Total Lost to Competitors</p>
+                    <p style="margin:20px 0 10px 0; color:white; font-size:58px; font-weight:bold;">{total_cust:,}</p>
+                    <p style="margin:0; color:#DC2626; font-size:32px; font-weight:bold;">-${total_mrc:,.0f} MRC</p>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.success("No customers lost to named competitors this period!")
+    else:
+        st.info("No churn data available")
+
+    st.divider()
+
+    # Export
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
         pd.DataFrame([{"Period": f"{start_date} to {end_date}", "Net MRC": net_mrr_movement}]).to_excel(writer, sheet_name="Summary", index=False)
