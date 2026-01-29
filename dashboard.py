@@ -1,4 +1,4 @@
-# dashboard.py — UPDATED with Filters & Trends
+# dashboard.py — FINAL (v3: ARPU, Goals, & Trends)
 import streamlit as st
 import pandas as pd
 import requests
@@ -6,7 +6,7 @@ import plotly.express as px
 from datetime import timedelta
 from io import BytesIO
 
-st.set_page_config(page_title="Talley Customer Dashboard", layout="wide")
+st.set_page_config(page_title="Talley Customer Dashboard", layout="wide", page_icon="📊")
 
 st.markdown("""
 <style>
@@ -18,18 +18,18 @@ st.markdown("""
            border-left: 6px solid; height: 170px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);}
     .win {border-left-color: #16A34A;}
     .flag {border-left-color: #DC2626;}
+    .metric-box {background-color: #1E293B; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #334155;}
     .stApp {background-color: #0F172A;}
 </style>
 """, unsafe_allow_html=True)
 
 # ——————————————— DATA LOADER ———————————————
 def load_from_jotform():
-    # ——— SECURE SECRETS LOADING ———
     try:
         api_key = st.secrets["jotform"]["api_key"]
         form_id = st.secrets["jotform"]["form_id"]
     except Exception as e:
-        st.error("🚨 API Secrets missing! Please set [jotform] api_key and form_id in Streamlit Cloud settings or .streamlit/secrets.toml")
+        st.error("🚨 API Secrets missing! Please set [jotform] api_key and form_id in Streamlit Cloud settings.")
         return pd.DataFrame()
 
     url = f"https://api.jotform.com/form/{form_id}/submissions"
@@ -142,7 +142,7 @@ def run_dashboard():
         st.image("https://via.placeholder.com/140x90/1E3A8A/FFFFFF?text=TALLEY", width=140)
     with col_title:
         st.markdown('<p class="big-title">Customer Dashboard</p>', unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center; color:#94A3B8; margin-top:-15px;'>True Churn • Growth • Real-time Insights</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center; color:#94A3B8; margin-top:-15px;'>True Churn • Growth • Unit Economics</p>", unsafe_allow_html=True)
 
     df = get_data()
     if df.empty:
@@ -152,8 +152,13 @@ def run_dashboard():
     # 1. Add attributes BEFORE filtering
     df = add_category_at_disconnect(df)
 
-    # ——————————————— SIDEBAR FILTERS ———————————————
-    st.sidebar.header("Filter Data")
+    # ——————————————— SIDEBAR CONTROLS ———————————————
+    st.sidebar.header("🎯 Goals & Filters")
+    
+    # NEW: Goal Setting
+    mrr_goal = st.sidebar.number_input("Monthly Net MRR Goal ($)", min_value=0, value=2000, step=100)
+    
+    st.sidebar.divider()
     
     # Location Filter
     all_locations = sorted(list(df["Location"].unique()))
@@ -192,11 +197,6 @@ def run_dashboard():
     period_df = df_filtered[(df_filtered["Submission Date"].dt.date >= start_date) & (df_filtered["Submission Date"].dt.date <= end_date)].copy()
 
     # Calculate Metrics
-    new_before = df_filtered[(df_filtered["Status"] == "NEW") & (df_filtered["Submission Date"] <= period_start)]
-    disc_before = df_filtered[(df_filtered["Status"] == "DISCONNECT") & (df_filtered["Submission Date"] <= period_start)]
-    active_start = set(new_before["Customer Name"]) - set(disc_before["Customer Name"])
-    beginning_customers = len(active_start)
-
     new_in = period_df[period_df["Status"] == "NEW"]
     churn_in = period_df[period_df["Status"] == "DISCONNECT"]
 
@@ -207,6 +207,12 @@ def run_dashboard():
     net_mrr_movement = new_mrc - churn_mrc
     net_customer_movement = new_count - churn_count
     
+    # ——————————————— NEW: ARPU CALCULATIONS ———————————————
+    avg_new_mrc = new_mrc / new_count if new_count > 0 else 0
+    avg_lost_mrc = churn_mrc / churn_count if churn_count > 0 else 0
+    arpu_diff = avg_new_mrc - avg_lost_mrc
+    # ——————————————————————————————————————————————————————
+
     # Big Net MRR Display
     st.markdown(
         f"""
@@ -216,19 +222,27 @@ def run_dashboard():
     <p style="text-align:center; font-size:22px; color:#E2E8F0;">Net MRR Movement • {start_date} to {end_date}</p>
     """, unsafe_allow_html=True)
 
+    # ——————————————— NEW: GOAL PROGRESS ———————————————
+    if mrr_goal > 0:
+        progress = min(max(net_mrr_movement / mrr_goal, 0.0), 1.0)
+        st.markdown(f"**Pacing to ${mrr_goal:,} Goal:**")
+        st.progress(progress)
+        if net_mrr_movement >= mrr_goal:
+            st.caption("🚀 Goal Exceeded! Great work.")
+        elif net_mrr_movement > 0:
+            st.caption(f"{progress*100:.1f}% of goal achieved")
+        else:
+            st.caption("Net movement is negative — currently off track.")
     st.divider()
+    # ——————————————————————————————————————————————————
 
-    # ——————————————— NEW: MONTHLY TREND CHART ———————————————
+    # Monthly Trend Chart
     st.markdown("### 📈 Monthly Net MRR Trend")
-    
-    # Aggregate by month
     monthly_new = df_filtered[df_filtered["Status"]=="NEW"].set_index("Submission Date").resample("ME")["MRC"].sum()
     monthly_churn = df_filtered[df_filtered["Status"]=="DISCONNECT"].set_index("Submission Date").resample("ME")["MRC"].sum()
     
     trend_df = pd.DataFrame({"New MRC": monthly_new, "Lost MRC": monthly_churn}).fillna(0)
     trend_df["Net Change"] = trend_df["New MRC"] - trend_df["Lost MRC"]
-    
-    # Filter trend chart to show roughly last 12 months for readability
     trend_df = trend_df.tail(12)
 
     fig_trend = px.bar(
@@ -242,9 +256,34 @@ def run_dashboard():
     fig_trend.update_layout(xaxis_title="Month", yaxis_title="Net MRC ($)", showlegend=False)
     st.plotly_chart(fig_trend, use_container_width=True)
     st.divider()
-    # ——————————————————————————————————————————————————————
 
-    # Quick Insights Cards
+    # ——————————————— QUALITY OF REVENUE (ARPU) ———————————————
+    st.markdown("### 💎 Quality of Revenue (Unit Economics)")
+    st.caption("Are we replacing low-value churn with high-value new customers?")
+    
+    q1, q2, q3 = st.columns(3)
+    with q1:
+        st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+        st.metric("Avg New Customer Value", f"${avg_new_mrc:,.0f}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with q2:
+        st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+        st.metric("Avg Lost Customer Value", f"${avg_lost_mrc:,.0f}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with q3:
+        st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+        color = "normal"
+        if arpu_diff > 0: color = "normal" # Streamlit handles green automatically for + delta
+        st.metric("Value Swap (Delta)", f"${abs(arpu_diff):,.0f}", 
+                 delta=f"{arpu_diff:,.0f}", 
+                 delta_color="normal" if arpu_diff >= 0 else "inverse",
+                 help="Positive means new customers are worth more than the ones leaving.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.divider()
+    # —————————————————————————————————————————————————————————
+
+    # Quick Insights
     st.markdown("### Quick Insights This Period")
     cards = []
     if not churn_in.empty:
@@ -286,7 +325,7 @@ def run_dashboard():
 
     st.divider()
 
-    # CHURN BY REASON + NEW CUSTOMER ACQUISITION
+    # Charts
     col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("Churn by Reason")
@@ -309,13 +348,24 @@ def run_dashboard():
 
     st.divider()
 
-    # Churned Customers Detail
+    # ——————————————— NEW: INTERACTIVE DATA EDITOR ———————————————
     st.markdown("### Churned Customers Detail")
     churn_detail_df = build_churn_detail(churn_in)
     if not churn_detail_df.empty:
-        st.dataframe(churn_detail_df.style.format({"MRC Lost": "${:,.2f}"}), use_container_width=True, hide_index=True)
+        # Use st.data_editor instead of dataframe for better sorting/interaction
+        st.data_editor(
+            churn_detail_df, 
+            column_config={
+                "MRC Lost": st.column_config.NumberColumn(format="$%.2f"),
+                "Disconnect Date": st.column_config.DateColumn(),
+            },
+            use_container_width=True, 
+            hide_index=True,
+            disabled=True # Read-only, but allows sorting/copying
+        )
     else:
         st.info("No churned customers in this period.")
+    # ————————————————————————————————————————————————————————————
 
     st.divider()
 
