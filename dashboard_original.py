@@ -1,4 +1,5 @@
-# dashboard.py — UPDATED with Streamlit Secrets
+
+# dashboard.py — FINAL (v3: ARPU, Goals, & Trends)
 import streamlit as st
 import pandas as pd
 import requests
@@ -6,7 +7,7 @@ import plotly.express as px
 from datetime import timedelta
 from io import BytesIO
 
-st.set_page_config(page_title="Talley Customer Dashboard", layout="wide")
+st.set_page_config(page_title="Talley Customer Dashboard", layout="wide", page_icon="📊")
 
 st.markdown("""
 <style>
@@ -18,20 +19,19 @@ st.markdown("""
            border-left: 6px solid; height: 170px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);}
     .win {border-left-color: #16A34A;}
     .flag {border-left-color: #DC2626;}
+    .metric-box {background-color: #1E293B; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #334155;}
     .stApp {background-color: #0F172A;}
 </style>
 """, unsafe_allow_html=True)
 
 # ——————————————— DATA LOADER ———————————————
 def load_from_jotform():
-    # ——— SECURE SECRETS LOADING ———
     try:
         api_key = st.secrets["jotform"]["api_key"]
         form_id = st.secrets["jotform"]["form_id"]
     except Exception as e:
-        st.error("🚨 API Secrets missing! Please set [jotform] api_key and form_id in Streamlit Cloud settings or .streamlit/secrets.toml")
+        st.error("🚨 API Secrets missing! Please set [jotform] api_key and form_id in Streamlit Cloud settings.")
         return pd.DataFrame()
-    # ——————————————————————————————
 
     url = f"https://api.jotform.com/form/{form_id}/submissions"
     submissions = []
@@ -105,58 +105,34 @@ def get_data():
         df["Customer Name"] = ""
     df["Customer Name"] = df["Customer Name"].astype(str).str.strip()
 
-    # Keep these columns if missing to avoid KeyErrors later
+    # Fill missing critical columns
     for col in ["Category", "Reason", "Location"]:
         if col not in df.columns:
             df[col] = pd.NA
+        df[col] = df[col].astype(str).replace(["nan", "None", "<NA>"], "Unknown")
 
     return df
 
 def add_category_at_disconnect(df: pd.DataFrame) -> pd.DataFrame:
-    """Add a computed 'Category at Disconnect' column based on last known category per customer."""
     if df is None or df.empty:
         return df
-
     work = df.copy()
-
-    if "Category" not in work.columns:
-        work["Category"] = pd.NA
-
-    work["Category"] = work["Category"].astype(str).str.strip()
-    work.loc[work["Category"].isin(["", "None", "nan", "NaN", "<NA>"]), "Category"] = pd.NA
-
     work = work.sort_values(["Customer Name", "Submission Date"], kind="mergesort")
     work["_last_known_category"] = work.groupby("Customer Name")["Category"].ffill()
     work["Category at Disconnect"] = work["_last_known_category"].fillna("Unknown")
     work.drop(columns=["_last_known_category"], inplace=True)
-
     return work
 
 def build_churn_detail(churn_df: pd.DataFrame) -> pd.DataFrame:
-    """One row per churned customer for the selected period (latest disconnect in period)."""
     if churn_df is None or churn_df.empty:
-        return pd.DataFrame(columns=[
-            "Customer Name", "Disconnect Date", "Category at Disconnect", "Reason",
-            "MRC Lost", "Location"
-        ])
+        return pd.DataFrame(columns=["Customer Name", "Disconnect Date", "Category at Disconnect", "Reason", "MRC Lost", "Location"])
 
-    # Latest DISCONNECT per customer within the period
     x = churn_df.sort_values(["Customer Name", "Submission Date"], kind="mergesort").copy()
     x = x.drop_duplicates(subset=["Customer Name"], keep="last")
-
-    # Clean/standardize
     x["Disconnect Date"] = x["Submission Date"].dt.date
     x["MRC Lost"] = pd.to_numeric(x.get("MRC", 0), errors="coerce").fillna(0)
 
-    # Pick columns safely
-    cols = []
-    for c in ["Customer Name", "Disconnect Date", "Category at Disconnect", "Reason", "MRC Lost", "Location"]:
-        if c in x.columns:
-            cols.append(c)
-        else:
-            x[c] = pd.NA
-            cols.append(c)
-
+    cols = ["Customer Name", "Disconnect Date", "Category at Disconnect", "Reason", "MRC Lost", "Location"]
     x = x[cols].sort_values(["Disconnect Date", "MRC Lost"], ascending=[False, False]).reset_index(drop=True)
     return x
 
@@ -167,21 +143,42 @@ def run_dashboard():
         st.image("https://via.placeholder.com/140x90/1E3A8A/FFFFFF?text=TALLEY", width=140)
     with col_title:
         st.markdown('<p class="big-title">Customer Dashboard</p>', unsafe_allow_html=True)
-        st.markdown(
-            "<p style='text-align:center; color:#94A3B8; margin-top:-15px;'>True Churn • Growth • Real-time Insights</p>",
-            unsafe_allow_html=True,
-        )
+        st.markdown("<p style='text-align:center; color:#94A3B8; margin-top:-15px;'>True Churn • Growth • Unit Economics</p>", unsafe_allow_html=True)
 
     df = get_data()
     if df.empty:
         st.warning("No data found or API keys missing.")
         st.stop()
-
-    # Add computed churn attribute
+    
+    # 1. Add attributes BEFORE filtering
     df = add_category_at_disconnect(df)
 
-    min_date = df["Submission Date"].min().date()
-    max_date = df["Submission Date"].max().date()
+    # ——————————————— SIDEBAR CONTROLS ———————————————
+    st.sidebar.header("🎯 Goals & Filters")
+    
+    # NEW: Goal Setting
+    mrr_goal = st.sidebar.number_input("Monthly Net MRR Goal ($)", min_value=0, value=2000, step=100)
+    
+    st.sidebar.divider()
+    
+    # Location Filter
+    all_locations = sorted(list(df["Location"].unique()))
+    selected_loc = st.sidebar.multiselect("Select Locations", all_locations, default=all_locations)
+    
+    # Category Filter
+    all_cats = sorted(list(df["Category"].unique()))
+    selected_cats = st.sidebar.multiselect("Select Categories", all_cats, default=all_cats)
+    
+    # Apply Filters
+    df_filtered = df[df["Location"].isin(selected_loc) & df["Category"].isin(selected_cats)].copy()
+    
+    if df_filtered.empty:
+        st.info("No data matches these filters.")
+        st.stop()
+    # ———————————————————————————————————————————————
+
+    min_date = df_filtered["Submission Date"].min().date()
+    max_date = df_filtered["Submission Date"].max().date()
     default_start = max_date - timedelta(days=89)
 
     col1, col2 = st.columns([3, 1])
@@ -198,14 +195,9 @@ def run_dashboard():
             st.rerun()
 
     period_start = pd.Timestamp(start_date)
-    period_df = df[(df["Submission Date"].dt.date >= start_date) & (df["Submission Date"].dt.date <= end_date)].copy()
+    period_df = df_filtered[(df_filtered["Submission Date"].dt.date >= start_date) & (df_filtered["Submission Date"].dt.date <= end_date)].copy()
 
-    new_before = df[(df["Status"] == "NEW") & (df["Submission Date"] <= period_start)]
-    disc_before = df[(df["Status"] == "DISCONNECT") & (df["Submission Date"] <= period_start)]
-    active_start = set(new_before["Customer Name"]) - set(disc_before["Customer Name"])
-    beginning_customers = len(active_start)
-    beginning_mrc = new_before[new_before["Customer Name"].isin(active_start)]["MRC"].sum()
-
+    # Calculate Metrics
     new_in = period_df[period_df["Status"] == "NEW"]
     churn_in = period_df[period_df["Status"] == "DISCONNECT"]
 
@@ -215,51 +207,105 @@ def run_dashboard():
     churn_mrc = churn_in["MRC"].sum()
     net_mrr_movement = new_mrc - churn_mrc
     net_customer_movement = new_count - churn_count
+    
+    # ——————————————— NEW: ARPU CALCULATIONS ———————————————
+    avg_new_mrc = new_mrc / new_count if new_count > 0 else 0
+    avg_lost_mrc = churn_mrc / churn_count if churn_count > 0 else 0
+    arpu_diff = avg_new_mrc - avg_lost_mrc
+    # ——————————————————————————————————————————————————————
 
-    # Big Net MRR
+    # Big Net MRR Display
     st.markdown(
         f"""
     <div class="net-mrr {'positive' if net_mrr_movement >= 0 else 'negative'}">
         {'+$' if net_mrr_movement >= 0 else '-$'}{abs(net_mrr_movement):,.0f}
     </div>
     <p style="text-align:center; font-size:22px; color:#E2E8F0;">Net MRR Movement • {start_date} to {end_date}</p>
-    """,
-        unsafe_allow_html=True,
-    )
+    """, unsafe_allow_html=True)
 
+    # ——————————————— NEW: GOAL PROGRESS ———————————————
+    if mrr_goal > 0:
+        progress = min(max(net_mrr_movement / mrr_goal, 0.0), 1.0)
+        st.markdown(f"**Pacing to ${mrr_goal:,} Goal:**")
+        st.progress(progress)
+        if net_mrr_movement >= mrr_goal:
+            st.caption("🚀 Goal Exceeded! Great work.")
+        elif net_mrr_movement > 0:
+            st.caption(f"{progress*100:.1f}% of goal achieved")
+        else:
+            st.caption("Net movement is negative — currently off track.")
     st.divider()
+    # ——————————————————————————————————————————————————
+
+    # Monthly Trend Chart
+    st.markdown("### 📈 Monthly Net MRR Trend")
+    monthly_new = df_filtered[df_filtered["Status"]=="NEW"].set_index("Submission Date").resample("ME")["MRC"].sum()
+    monthly_churn = df_filtered[df_filtered["Status"]=="DISCONNECT"].set_index("Submission Date").resample("ME")["MRC"].sum()
+    
+    trend_df = pd.DataFrame({"New MRC": monthly_new, "Lost MRC": monthly_churn}).fillna(0)
+    trend_df["Net Change"] = trend_df["New MRC"] - trend_df["Lost MRC"]
+    trend_df = trend_df.tail(12)
+
+    fig_trend = px.bar(
+        trend_df, 
+        y="Net Change", 
+        x=trend_df.index,
+        color="Net Change",
+        color_continuous_scale=["#DC2626", "#16A34A"],
+        text_auto='.2s'
+    )
+    fig_trend.update_layout(xaxis_title="Month", yaxis_title="Net MRC ($)", showlegend=False)
+    st.plotly_chart(fig_trend, use_container_width=True)
+    st.divider()
+
+    # ——————————————— QUALITY OF REVENUE (ARPU) ———————————————
+    st.markdown("### 💎 Quality of Revenue (Unit Economics)")
+    st.caption("Are we replacing low-value churn with high-value new customers?")
+    
+    q1, q2, q3 = st.columns(3)
+    with q1:
+        st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+        st.metric("Avg New Customer Value", f"${avg_new_mrc:,.0f}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with q2:
+        st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+        st.metric("Avg Lost Customer Value", f"${avg_lost_mrc:,.0f}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with q3:
+        st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+        color = "normal"
+        if arpu_diff > 0: color = "normal" # Streamlit handles green automatically for + delta
+        st.metric("Value Swap (Delta)", f"${abs(arpu_diff):,.0f}", 
+                 delta=f"{arpu_diff:,.0f}", 
+                 delta_color="normal" if arpu_diff >= 0 else "inverse",
+                 help="Positive means new customers are worth more than the ones leaving.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.divider()
+    # —————————————————————————————————————————————————————————
 
     # Quick Insights
     st.markdown("### Quick Insights This Period")
     cards = []
-    if not churn_in.empty and "Reason" in churn_in.columns and churn_in["Reason"].astype(str).str.strip().ne("").any():
+    if not churn_in.empty:
         top_reason = churn_in["Reason"].value_counts().idxmax()
         top_count = churn_in["Reason"].value_counts().max()
         top_mrc = churn_in[churn_in["Reason"] == top_reason]["MRC"].sum()
-        cards.append(
-            f'<div class="card flag"><h4>Most Common Churn Reason</h4><b>{top_reason}</b><br>{top_count} customers · ${top_mrc:,.0f} lost</div>'
-        )
-    if not churn_in.empty:
+        cards.append(f'<div class="card flag"><h4>Most Common Churn Reason</h4><b>{top_reason}</b><br>{top_count} customers · ${top_mrc:,.0f} lost</div>')
+        
         biggest = churn_in.loc[churn_in["MRC"].idxmax()]
         name = str(biggest.get("Customer Name", "Unknown"))[:35]
-        reason = str(biggest.get("Reason", "—"))
-        cards.append(
-            f'<div class="card flag"><h4>Largest Single Loss</h4><b>{name}</b><br>${biggest["MRC"]:,.0f} MRC<br><small>{reason}</small></div>'
-        )
+        cards.append(f'<div class="card flag"><h4>Largest Single Loss</h4><b>{name}</b><br>${biggest["MRC"]:,.0f} MRC<br><small>{biggest.get("Reason", "")}</small></div>')
+
     if not new_in.empty:
         best = new_in.loc[new_in["MRC"].idxmax()]
         name = str(best.get("Customer Name", "New Customer"))[:35]
-        loc = str(best.get("Location", "—"))
-        cards.append(
-            f'<div class="card win"><h4>Biggest New Win</h4><b>{name}</b><br>+${best["MRC"]:,.0f} MRC<br><small>{loc}</small></div>'
-        )
-    if not new_in.empty and "Location" in new_in.columns and new_in["Location"].astype(str).str.strip().ne("").any():
+        cards.append(f'<div class="card win"><h4>Biggest New Win</h4><b>{name}</b><br>+${best["MRC"]:,.0f} MRC<br><small>{best.get("Location", "")}</small></div>')
+        
         top_loc = new_in["Location"].value_counts().idxmax()
         count = new_in["Location"].value_counts().max()
         mrc = new_in[new_in["Location"] == top_loc]["MRC"].sum()
-        cards.append(
-            f'<div class="card win"><h4>Fastest Growing Location</h4><b>{top_loc}</b><br>+{count} customers<br>+${mrc:,.0f} MRC</div>'
-        )
+        cards.append(f'<div class="card win"><h4>Fastest Growing Location</h4><b>{top_loc}</b><br>+{count} customers<br>+${mrc:,.0f} MRC</div>')
 
     if cards:
         cols = st.columns(len(cards))
@@ -267,264 +313,88 @@ def run_dashboard():
             with col:
                 st.markdown(card, unsafe_allow_html=True)
     else:
-        st.success("All quiet — no activity this period!")
+        st.success("All quiet — no significant activity this period!")
 
     st.divider()
 
-    # True Churn & Growth
-    st.markdown("### True Churn Metrics")
-    st.caption("Loss from existing base only")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(
-            f"<div style='background:#1E293B;padding:20px;border-radius:12px;border-left:6px solid #DC2626;'><p style='margin:0;color:#94A3B8;font-size:15px;'>Churned Customers</p><p style='margin:10px 0 6px 0;color:white;font-size:42px;font-weight:bold;'>{churn_count:,}</p><p style='margin:0;color:#DC2626;font-size:24px;font-weight:bold;'>Down -{churn_count}</p></div>",
-            unsafe_allow_html=True,
-        )
-    with c2:
-        st.markdown(
-            f"<div style='background:#1E293B;padding:20px;border-radius:12px;border-left:6px solid #DC2626;'><p style='margin:0;color:#94A3B8;font-size:15px;'>Lost MRC</p><p style='margin:10px 0 6px 0;color:white;font-size:42px;font-weight:bold;'>${churn_mrc:,.0f}</p><p style='margin:0;color:#DC2626;font-size:24px;font-weight:bold;'>Down -${churn_mrc:,.0f}</p></div>",
-            unsafe_allow_html=True,
-        )
+    # True Churn & Growth Metrics
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Churned Customers", f"{churn_count}", delta=f"-{churn_count}", delta_color="inverse")
+    c2.metric("Lost MRC", f"${churn_mrc:,.0f}", delta=f"-${churn_mrc:,.0f}", delta_color="inverse")
+    c3.metric("New Customers", f"{new_count}", delta=f"+{new_count}")
+    c4.metric("New MRC", f"${new_mrc:,.0f}", delta=f"+${new_mrc:,.0f}")
 
     st.divider()
 
-    st.markdown("### True Growth Metrics")
-    st.caption("New wins only")
-    g1, g2 = st.columns(2)
-    with g1:
-        st.markdown(
-            f"<div style='background:#1E293B;padding:20px;border-radius:12px;border-left:6px solid #16A34A;'><p style='margin:0;color:#94A3B8;font-size:15px;'>New Customers</p><p style='margin:10px 0 6px 0;color:white;font-size:42px;font-weight:bold;'>{new_count:,}</p><p style='margin:0;color:#16A34A;font-size:24px;font-weight:bold;'>Up +{new_count}</p></div>",
-            unsafe_allow_html=True,
-        )
-    with g2:
-        st.markdown(
-            f"<div style='background:#1E293B;padding:20px;border-radius:12px;border-left:6px solid #16A34A;'><p style='margin:0;color:#94A3B8;font-size:15px;'>New MRC Added</p><p style='margin:10px 0 6px 0;color:white;font-size:42px;font-weight:bold;'>${new_mrc:,.0f}</p><p style='margin:0;color:#16A34A;font-size:24px;font-weight:bold;'>Up +${new_mrc:,.0f}</p></div>",
-            unsafe_allow_html=True,
-        )
-
-    st.divider()
-
-    # Net Results
-    st.markdown("### Net Results")
-    st.caption("True performance after churn & growth")
-    net_cust_growth = ((new_count - churn_count) / beginning_customers * 100) if beginning_customers > 0 else 0
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        color = "#16A34A" if net_customer_movement >= 0 else "#DC2626"
-        sign = "+" if net_customer_movement >= 0 else "-"
-        st.markdown(
-            f"<div style='background:#1E293B;padding:28px;border-radius:16px;text-align:center;border-left:10px solid {color};box-shadow: 0 8px 25px rgba(0,0,0,0.5);'><p style='margin:0;color:#94A3B8;font-size:18px;font-weight:600;'>Net Customers</p><p style='margin:16px 0 10px 0;color:white;font-size:56px;font-weight:bold;'>{sign}{abs(net_customer_movement):,}</p><p style='margin:0;color:{color};font-size:28px;font-weight:bold;'>{sign}{abs(net_customer_movement):,}</p></div>",
-            unsafe_allow_html=True,
-        )
-    with col2:
-        color = "#16A34A" if net_mrr_movement >= 0 else "#DC2626"
-        sign = "+" if net_mrr_movement >= 0 else "-"
-        st.markdown(
-            f"<div style='background:#1E293B;padding:28px;border-radius:16px;text-align:center;border-left:10px solid {color};box-shadow: 0 8px 25px rgba(0,0,0,0.5);'><p style='margin:0;color:#94A3B8;font-size:18px;font-weight:600;'>Net MRC</p><p style='margin:16px 0 10px 0;color:white;font-size:56px;font-weight:bold;'>{sign}${abs(net_mrr_movement):,.0f}</p><p style='margin:0;color:{color};font-size:28px;font-weight:bold;'>{sign}${abs(net_mrr_movement):,.0f}</p></div>",
-            unsafe_allow_html=True,
-        )
-    with col3:
-        color = "#16A34A" if net_cust_growth >= 0 else "#DC2626"
-        st.markdown(
-            f"<div style='background:#1E293B;padding:28px;border-radius:16px;text-align:center;border-left:10px solid {color};box-shadow: 0 8px 25px rgba(0,0,0,0.5);'><p style='margin:0;color:#94A3B8;font-size:18px;font-weight:600;'>Net Customer Growth Rate</p><p style='margin:16px 0 10px 0;color:white;font-size:56px;font-weight:bold;'>{net_cust_growth:+.2f}%</p><p style='margin:0;color:{color};font-size:28px;font-weight:bold;'>{net_cust_growth:+.2f}%</p></div>",
-            unsafe_allow_html=True,
-        )
-
-    st.divider()
-
-    # CHURN BY REASON + NEW CUSTOMER ACQUISITION (side by side)
+    # Charts
     col_a, col_b = st.columns(2)
-
     with col_a:
         st.subheader("Churn by Reason")
         if not churn_in.empty:
-            reason_df = (
-                churn_in.groupby(["Reason", "Category at Disconnect"], dropna=False)
-                .agg(Count=("Customer Name", "nunique"), MRC_Lost=("MRC", "sum"))
-                .reset_index()
-                .sort_values(["Count", "MRC_Lost"], ascending=False)
-            )
-
-            st.dataframe(reason_df.style.format({"MRC_Lost": "${:,.0f}"}), use_container_width=True)
-
-            fig = px.bar(
-                reason_df,
-                x="Count",
-                y="Reason",
-                orientation="h",
-                color="MRC_Lost",
-                hover_data=["Category at Disconnect", "MRC_Lost", "Count"],
-                color_continuous_scale="Reds",
-            )
+            reason_df = churn_in.groupby(["Reason", "Category at Disconnect"], dropna=False).agg(Count=("Customer Name", "nunique"), MRC_Lost=("MRC", "sum")).reset_index().sort_values("MRC_Lost", ascending=False)
+            fig = px.bar(reason_df, x="Count", y="Reason", orientation="h", color="MRC_Lost", color_continuous_scale="Reds")
             st.plotly_chart(fig, use_container_width=True)
-
-            st.markdown("#### Churn by Category (at Disconnect)")
-            cat_df = (
-                churn_in.groupby("Category at Disconnect", dropna=False)
-                .agg(Customers_Lost=("Customer Name", "nunique"), MRC_Lost=("MRC", "sum"))
-                .reset_index()
-                .sort_values(["Customers_Lost", "MRC_Lost"], ascending=False)
-            )
-            st.dataframe(cat_df.style.format({"MRC_Lost": "${:,.0f}"}), use_container_width=True)
-            fig_cat = px.bar(
-                cat_df,
-                x="Customers_Lost",
-                y="Category at Disconnect",
-                orientation="h",
-                color="MRC_Lost",
-                color_continuous_scale="Reds",
-            )
-            st.plotly_chart(fig_cat, use_container_width=True)
         else:
             st.info("No churn this period")
 
     with col_b:
         st.subheader("New Customer Acquisition")
         if not new_in.empty:
-            cat_vc = (
-                new_in["Category"]
-                .fillna("Unknown")
-                .astype(str)
-                .str.strip()
-                .replace({"": "Unknown"})
-                .value_counts()
-                .reset_index()
-            )
+            cat_vc = new_in["Category"].value_counts().reset_index()
             cat_vc.columns = ["Category", "count"]
             pie = px.pie(cat_vc, names="Category", values="count", color_discrete_sequence=px.colors.sequential.Greens)
             st.plotly_chart(pie, use_container_width=True)
-
-            loc_vc = (
-                new_in["Location"]
-                .fillna("Unknown")
-                .astype(str)
-                .str.strip()
-                .replace({"": "Unknown"})
-                .value_counts()
-                .head(10)
-                .reset_index()
-            )
-            loc_vc.columns = ["Location", "count"]
-            bar = px.bar(loc_vc, x="Location", y="count", color="count", color_continuous_scale="Greens")
-            st.plotly_chart(bar, use_container_width=True)
-
-            st.success(f"Added {new_count:,} new customers — +${new_mrc:,.0f} MRC")
         else:
             st.info("No new customers this period")
 
     st.divider()
 
-    # ✅ NEW: CHURNED CUSTOMERS DETAIL
+    # ——————————————— NEW: INTERACTIVE DATA EDITOR ———————————————
     st.markdown("### Churned Customers Detail")
-    st.caption("One row per churned customer (latest disconnect in the selected period).")
-
     churn_detail_df = build_churn_detail(churn_in)
-
-    if churn_detail_df.empty:
-        st.info("No churned customers in this period.")
-    else:
-        st.dataframe(
-            churn_detail_df.style.format({"MRC Lost": "${:,.2f}"}),
-            use_container_width=True,
+    if not churn_detail_df.empty:
+        # Use st.data_editor instead of dataframe for better sorting/interaction
+        st.data_editor(
+            churn_detail_df, 
+            column_config={
+                "MRC Lost": st.column_config.NumberColumn(format="$%.2f"),
+                "Disconnect Date": st.column_config.DateColumn(),
+            },
+            use_container_width=True, 
             hide_index=True,
+            disabled=True # Read-only, but allows sorting/copying
         )
-
-        # Quick totals for the detail view
-        d1, d2, d3 = st.columns(3)
-        with d1:
-            st.metric("Customers (unique)", int(churn_detail_df["Customer Name"].nunique()))
-        with d2:
-            st.metric("Total MRC Lost", f"${churn_detail_df['MRC Lost'].sum():,.2f}")
-        with d3:
-            st.metric("Avg MRC Lost", f"${churn_detail_df['MRC Lost'].mean():,.2f}")
+    else:
+        st.info("No churned customers in this period.")
+    # ————————————————————————————————————————————————————————————
 
     st.divider()
 
-    # CHURN BY COMPETITION — STANDS ALONE
+    # Churn by Competition
     st.markdown("### Churn by Competition")
-    st.caption("Customers lost to named competitors this period")
-
     if not churn_in.empty:
-        competitors = {
-            "Fidium": "New Provider Fidium",
-            "Spectrum": "New Provider Spectrum",
-            "Starlink": "New Provider Starlink",
-            "CCI": "New Provider CCI",
-            "GWI": "New Provider GWI",
-            "Other Provider": "New Provider Other",
-        }
+        competitors = {"Fidium": "Fidium", "Spectrum": "Spectrum", "Starlink": "Starlink", "CCI": "CCI", "GWI": "GWI", "Other": "Other"}
         comp_data = []
         for label, keyword in competitors.items():
             mask = churn_in["Reason"].astype(str).str.contains(keyword, case=False, na=False)
-            count = int(mask.sum())
-            mrc = churn_in.loc[mask, "MRC"].sum()
-            if count > 0:
-                comp_data.append({"Competitor": label, "Customers Lost": count, "MRC Lost": mrc})
-
+            if mask.sum() > 0:
+                comp_data.append({"Competitor": label, "Customers Lost": int(mask.sum()), "MRC Lost": churn_in.loc[mask, "MRC"].sum()})
+        
         if comp_data:
             comp_df = pd.DataFrame(comp_data)
-
-            pie_col, total_col = st.columns([1.8, 1])
-            with pie_col:
-                fig_pie = px.pie(
-                    comp_df,
-                    names="Competitor",
-                    values="Customers Lost",
-                    color_discrete_sequence=px.colors.sequential.Reds_r,
-                    hole=0.45,
-                )
-                fig_pie.update_traces(textposition="inside", textinfo="percent+label")
-                fig_pie.update_layout(showlegend=False, margin=dict(t=40, b=40, l=10, r=10))
-                st.plotly_chart(fig_pie, use_container_width=True)
-
-            with total_col:
-                total_cust = int(comp_df["Customers Lost"].sum())
-                total_mrc = comp_df["MRC Lost"].sum()
-                st.markdown(
-                    f"""
-                <div style="background:#1E293B; padding:30px; border-radius:16px; border-left:10px solid #DC2626; text-align:center; height:100%;">
-                    <p style="margin:0; color:#94A3B8; font-size:18px; font-weight:600;">Total Lost to Competitors</p>
-                    <p style="margin:20px 0 10px 0; color:white; font-size:58px; font-weight:bold;">{total_cust:,}</p>
-                    <p style="margin:0; color:#DC2626; font-size:32px; font-weight:bold;">-${total_mrc:,.0f} MRC</p>
-                </div>
-                """,
-                    unsafe_allow_html=True,
-                )
+            fig_pie = px.pie(comp_df, names="Competitor", values="Customers Lost", color_discrete_sequence=px.colors.sequential.Reds_r, hole=0.45)
+            st.plotly_chart(fig_pie, use_container_width=True)
         else:
             st.success("No customers lost to named competitors this period!")
     else:
         st.info("No churn data available")
 
-    st.divider()
-
-    # Export (now includes churn detail too)
+    # Export
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        pd.DataFrame([{
-            "Period": f"{start_date} to {end_date}",
-            "Beginning Customers": beginning_customers,
-            "Beginning MRC": beginning_mrc,
-            "New Customers": new_count,
-            "New MRC": new_mrc,
-            "Churned Customers": churn_count,
-            "Churned MRC": churn_mrc,
-            "Net MRC": net_mrr_movement,
-            "Net Customers": net_customer_movement,
-        }]).to_excel(writer, sheet_name="Summary", index=False)
-
         churn_detail_df.to_excel(writer, sheet_name="Churned Customers Detail", index=False)
-
-        # Optional: export raw filtered activity if you want it
-        period_df.to_excel(writer, sheet_name="Period Activity (Raw)", index=False)
-
-    st.download_button(
-        "Download Report (Excel)",
-        data=buffer.getvalue(),
-        file_name=f"Talley_Report_{start_date}_to_{end_date}.xlsx",
-    )
-
-    st.caption("Auto-refreshes every 5 minutes • Real-time from JotForm")
+        period_df.to_excel(writer, sheet_name="Raw Data", index=False)
+    st.download_button("Download Excel Report", data=buffer.getvalue(), file_name=f"Talley_Report_{start_date}.xlsx")
 
 if __name__ == "__main__":
     run_dashboard()
