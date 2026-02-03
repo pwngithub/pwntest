@@ -1,4 +1,4 @@
-# dashboard.py — FINAL (v3: ARPU, Goals, & Trends)
+# dashboard.py — UPDATED (v4: Added 'Category at Disconnect' Filter)
 import streamlit as st
 import pandas as pd
 import requests
@@ -149,27 +149,40 @@ def run_dashboard():
         st.warning("No data found or API keys missing.")
         st.stop()
     
-    # 1. Add attributes BEFORE filtering
+    # 1. Add attributes BEFORE filtering so 'Category at Disconnect' exists
     df = add_category_at_disconnect(df)
 
     # ——————————————— SIDEBAR CONTROLS ———————————————
     st.sidebar.header("🎯 Goals & Filters")
     
-    # NEW: Goal Setting
+    # Goal Setting
     mrr_goal = st.sidebar.number_input("Monthly Net MRR Goal ($)", min_value=0, value=2000, step=100)
     
     st.sidebar.divider()
     
-    # Location Filter
+    # Filter 1: Location
     all_locations = sorted(list(df["Location"].unique()))
-    selected_loc = st.sidebar.multiselect("Select Locations", all_locations, default=all_locations)
+    selected_loc = st.sidebar.multiselect("Location", all_locations, default=all_locations)
     
-    # Category Filter
+    # Filter 2: Category (Current/New)
     all_cats = sorted(list(df["Category"].unique()))
-    selected_cats = st.sidebar.multiselect("Select Categories", all_cats, default=all_cats)
+    selected_cats = st.sidebar.multiselect("Category (Current/New)", all_cats, default=all_cats)
+
+    # Filter 3: Category at Disconnect (NEW)
+    all_disc_cats = sorted(list(df["Category at Disconnect"].unique()))
+    selected_disc_cats = st.sidebar.multiselect(
+        "Category at Disconnect", 
+        all_disc_cats, 
+        default=all_disc_cats,
+        help="Filter by the category the customer belonged to BEFORE they disconnected."
+    )
     
     # Apply Filters
-    df_filtered = df[df["Location"].isin(selected_loc) & df["Category"].isin(selected_cats)].copy()
+    df_filtered = df[
+        df["Location"].isin(selected_loc) & 
+        df["Category"].isin(selected_cats) &
+        df["Category at Disconnect"].isin(selected_disc_cats)
+    ].copy()
     
     if df_filtered.empty:
         st.info("No data matches these filters.")
@@ -207,11 +220,10 @@ def run_dashboard():
     net_mrr_movement = new_mrc - churn_mrc
     net_customer_movement = new_count - churn_count
     
-    # ——————————————— NEW: ARPU CALCULATIONS ———————————————
+    # ARPU CALCULATIONS
     avg_new_mrc = new_mrc / new_count if new_count > 0 else 0
     avg_lost_mrc = churn_mrc / churn_count if churn_count > 0 else 0
     arpu_diff = avg_new_mrc - avg_lost_mrc
-    # ——————————————————————————————————————————————————————
 
     # Big Net MRR Display
     st.markdown(
@@ -222,7 +234,7 @@ def run_dashboard():
     <p style="text-align:center; font-size:22px; color:#E2E8F0;">Net MRR Movement • {start_date} to {end_date}</p>
     """, unsafe_allow_html=True)
 
-    # ——————————————— NEW: GOAL PROGRESS ———————————————
+    # GOAL PROGRESS
     if mrr_goal > 0:
         progress = min(max(net_mrr_movement / mrr_goal, 0.0), 1.0)
         st.markdown(f"**Pacing to ${mrr_goal:,} Goal:**")
@@ -234,7 +246,6 @@ def run_dashboard():
         else:
             st.caption("Net movement is negative — currently off track.")
     st.divider()
-    # ——————————————————————————————————————————————————
 
     # Monthly Trend Chart
     st.markdown("### 📈 Monthly Net MRR Trend")
@@ -257,7 +268,7 @@ def run_dashboard():
     st.plotly_chart(fig_trend, use_container_width=True)
     st.divider()
 
-    # ——————————————— QUALITY OF REVENUE (ARPU) ———————————————
+    # QUALITY OF REVENUE (ARPU)
     st.markdown("### 💎 Quality of Revenue (Unit Economics)")
     st.caption("Are we replacing low-value churn with high-value new customers?")
     
@@ -272,16 +283,12 @@ def run_dashboard():
         st.markdown('</div>', unsafe_allow_html=True)
     with q3:
         st.markdown('<div class="metric-box">', unsafe_allow_html=True)
-        color = "normal"
-        if arpu_diff > 0: color = "normal" # Streamlit handles green automatically for + delta
         st.metric("Value Swap (Delta)", f"${abs(arpu_diff):,.0f}", 
                  delta=f"{arpu_diff:,.0f}", 
-                 delta_color="normal" if arpu_diff >= 0 else "inverse",
-                 help="Positive means new customers are worth more than the ones leaving.")
+                 delta_color="normal" if arpu_diff >= 0 else "inverse")
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider()
-    # —————————————————————————————————————————————————————————
 
     # Quick Insights
     st.markdown("### Quick Insights This Period")
@@ -348,11 +355,10 @@ def run_dashboard():
 
     st.divider()
 
-    # ——————————————— NEW: INTERACTIVE DATA EDITOR ———————————————
+    # INTERACTIVE DATA EDITOR
     st.markdown("### Churned Customers Detail")
     churn_detail_df = build_churn_detail(churn_in)
     if not churn_detail_df.empty:
-        # Use st.data_editor instead of dataframe for better sorting/interaction
         st.data_editor(
             churn_detail_df, 
             column_config={
@@ -361,11 +367,10 @@ def run_dashboard():
             },
             use_container_width=True, 
             hide_index=True,
-            disabled=True # Read-only, but allows sorting/copying
+            disabled=True 
         )
     else:
         st.info("No churned customers in this period.")
-    # ————————————————————————————————————————————————————————————
 
     st.divider()
 
