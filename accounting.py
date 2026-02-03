@@ -72,126 +72,73 @@ except Exception:
 # -------------------------------
 # FETCH SHEET NAMES
 # -------------------------------
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_sheet_tabs(sheet_id, api_key):
     meta_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}?key={api_key}"
     r = requests.get(meta_url)
     if r.status_code != 200:
-        raise Exception(f"Metadata error: {r.status_code} – {r.text}")
+        raise Exception(f"Metadata error: {r.text}")
     sheets = r.json().get("sheets", [])
     return [s["properties"]["title"] for s in sheets]
 
-# -------------------------------
-# SIDEBAR – MONTH SELECTION + REFRESH
-# -------------------------------
-st.sidebar.markdown("### Controls")
-
-if st.sidebar.button("🔄 Refresh sheet list"):
-    get_sheet_tabs.clear()
-    st.rerun()
-
 try:
     sheet_names = get_sheet_tabs(SHEET_ID, API_KEY)
-    
-    month_tabs = [
-        n for n in sheet_names
-        if re.match(r'^\d{2}\.\d{2}$', n.strip())
-    ]
-    
-    month_tabs.sort(reverse=True)
-    
+    month_tabs = [n for n in sheet_names if n.startswith("25.")]
     if not month_tabs:
-        month_tabs = sorted(sheet_names, reverse=True)
-    
+        month_tabs = sheet_names
+        
+    # 👇 FIXED: Changed key to be unique for this v4 file
     selected_tab = st.sidebar.selectbox(
         "📅 Select Month",
         month_tabs,
-        index=0,
-        key="accounting_month_selectbox_v6",
+        index=len(month_tabs) - 1,
+        key="accounting_month_selectbox_v4",
     )
 except Exception as e:
-    st.sidebar.error(f"❌ Could not fetch sheet tabs: {e}")
+    st.error(f"❌ Could not fetch sheet tabs: {e}")
     st.stop()
 
 # -------------------------------
-# LOAD SHEET DATA – IMPROVED VERSION
+# LOAD SHEET DATA
 # -------------------------------
 @st.cache_data(ttl=300)
 def load_sheet(sheet_id, tab, api_key):
-    # Use unquoted tab name for simple names like 26.01
-    url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{tab}!A1:Z200?key={api_key}"
+    url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/'{tab}'!A1:Z200?key={api_key}"
     r = requests.get(url)
     if r.status_code != 200:
-        raise Exception(f"Failed to load '{tab}': {r.status_code} – {r.text}")
-    
+        raise Exception(f"Failed to load '{tab}': {r.text}")
     vals = r.json().get("values", [])
     if not vals:
-        raise Exception("No data returned from sheet.")
-    
-    # Find header row
-    header_row_idx = next(
-        (i for i, row in enumerate(vals) if sum(1 for c in row if str(c).strip()) >= 3),
-        None
-    )
-    if header_row_idx is None:
-        raise Exception("Could not find a valid header row.")
-    
-    header = [str(c).strip() for c in vals[header_row_idx]]
-    
-    # Look at header + next ~50 rows to find true max columns
-    sample_rows = vals[header_row_idx : header_row_idx + 51]
-    max_cols = max(len(row) for row in sample_rows if row)
-    
-    # Prepare header (extend if needed)
-    header_clean = []
-    for i in range(max_cols):
-        if i < len(header):
-            cleaned = header[i]
-            header_clean.append(cleaned if cleaned else f"Col_{i+1}")
-        else:
-            header_clean.append(f"Col_{i+1}")
-    
-    # Build data – pad short rows, truncate extra-long ones (rare)
-    data = []
-    for row in vals[header_row_idx + 1:]:
-        padded = row[:max_cols] + [''] * (max_cols - len(row))
-        data.append(padded)
-    
-    df = pd.DataFrame(data, columns=header_clean)
-    
-    # Handle duplicate column names
+        raise Exception("No data returned.")
+    header_row = next((i for i, row in enumerate(vals) if sum(1 for c in row if c.strip()) >= 3), None)
+    if header_row is None:
+        raise Exception("Header not found.")
+    df = pd.DataFrame(vals[header_row + 1:], columns=vals[header_row])
+    df.columns = [c.strip() if c else f"Column_{i}" for i, c in enumerate(df.columns)]
     if df.columns.duplicated().any():
-        seen = {}
-        new_cols = []
-        for col in df.columns:
-            if col in seen:
-                seen[col] += 1
-                new_cols.append(f"{col}_{seen[col]}")
-            else:
-                seen[col] = 0
-                new_cols.append(col)
-        df.columns = new_cols
-    
+        df.columns = [f"{c}_{i}" if df.columns.tolist().count(c) > 1 else c for i, c in enumerate(df.columns)]
     return df
 
 try:
     df = load_sheet(SHEET_ID, selected_tab, API_KEY)
 except Exception as e:
-    st.error(f"❌ Load error for tab **{selected_tab}**: {e}")
+    st.error(f"❌ Load error for {selected_tab}: {e}")
     st.stop()
 
 # -------------------------------
 # HELPERS
 # -------------------------------
 def find_row(df, keys):
+    """Find first row where column A CONTAINS any of the keys (case-insensitive)."""
     col = df.iloc[:, 0].astype(str).str.lower()
     for k in keys:
-        m = col[col.str.contains(k.lower(), na=False)]
+        m = col[col.str.contains(k.lower())]
         if not m.empty:
             return m.index[0]
     return None
 
 def find_exact_row(df, key):
+    """Find first row where column A EQUALS the key (case-insensitive, trimmed)."""
     col = df.iloc[:, 0].astype(str).str.strip().str.lower()
     m = col[col == key.lower()]
     if not m.empty:
@@ -200,7 +147,7 @@ def find_exact_row(df, key):
 
 def find_col(df, key):
     for i, c in enumerate(df.columns):
-        if re.search(key, str(c), re.IGNORECASE):
+        if re.search(key, c, re.IGNORECASE):
             return i
     return None
 
@@ -210,32 +157,41 @@ def num(df, r, c):
         if "%" in v:
             return float(v.replace("%", "").replace(",", "").replace("$", ""))
         return pd.to_numeric(v.replace(",", "").replace("$", ""), errors="coerce")
-    except:
+    except Exception:
         return 0
 
 # -------------------------------
 # KPI LOGIC
 # -------------------------------
 col_idx = find_col(df, "month") or 1
-ebitda_r   = find_row(df, ["ebitda"])
-subs_r     = find_row(df, ["users months", "user months", "subscribers"])
-mrr_r      = find_row(df, ["broadhub rev", "broadhub", "mrr"])
+ebitda_r = find_row(df, ["ebitda"])
+subs_r = find_row(df, ["users months", "user months"])
+mrr_r = find_row(df, ["broadhub rev", "broadhub"])
 
 ebitda = num(df, ebitda_r, col_idx) if ebitda_r is not None else 0
-subs   = num(df, subs_r, col_idx)   if subs_r is not None else 0
-mrr    = num(df, mrr_r, col_idx)    if mrr_r is not None else 0
-arpu   = (mrr / subs) if subs > 0 else 0
+subs = num(df, subs_r, col_idx) if subs_r is not None else 0
+mrr = num(df, mrr_r, col_idx) if mrr_r is not None else 0
+arpu = (mrr / subs) if subs > 0 else 0
 
+# --- ROI values (auto-detected by exact 'ROI' label in column A) ---
 roi_row = find_exact_row(df, "roi")
+
 roi_monthly = 0
 roi_ytd = 0
 
 if roi_row is not None:
-    roi_monthly_col = next((i for i, c in enumerate(df.columns) if re.search(r"month", str(c), re.IGNORECASE)), None)
-    roi_ytd_col     = next((i for i, c in enumerate(df.columns) if re.search(r"ytd",   str(c), re.IGNORECASE)), None)
+    roi_monthly_col = next(
+        (i for i, c in enumerate(df.columns) if re.search(r"month", c, re.IGNORECASE)),
+        None,
+    )
+    roi_ytd_col = next(
+        (i for i, c in enumerate(df.columns) if re.search(r"ytd", c, re.IGNORECASE)),
+        None,
+    )
 
     if roi_monthly_col is not None:
         roi_monthly = num(df, roi_row, roi_monthly_col)
+
     if roi_ytd_col is not None:
         roi_ytd = num(df, roi_row, roi_ytd_col)
 
@@ -246,7 +202,6 @@ st.markdown(
     f"<h2 style='color:{border_color};text-shadow:0px 0px 8px rgba(30,144,255,0.45);'>💼 Financial Performance – {selected_tab}</h2>",
     unsafe_allow_html=True,
 )
-
 c1, c2, c3, c4 = st.columns(4)
 
 def kpi_box(label, value, is_percent=False, is_number=False):
@@ -277,65 +232,70 @@ def kpi_box(label, value, is_percent=False, is_number=False):
     </div>
     """
 
-c1.markdown(kpi_box("Monthly Recurring Revenue", mrr), unsafe_allow_html=True)
-c2.markdown(kpi_box("Subscriber Count", subs, is_number=True), unsafe_allow_html=True)
-c3.markdown(kpi_box("Average Revenue Per User", arpu), unsafe_allow_html=True)
-c4.markdown(kpi_box("EBITDA", ebitda), unsafe_allow_html=True)
+# Row 1
+c1.markdown(kpi_box("Monthly Recurring Revenue", f"{mrr}"), unsafe_allow_html=True)
+c2.markdown(kpi_box("Subscriber Count", f"{subs}", is_number=True), unsafe_allow_html=True)
+c3.markdown(kpi_box("Average Revenue Per User", f"{arpu}"), unsafe_allow_html=True)
+c4.markdown(kpi_box("EBITDA", f"{ebitda}"), unsafe_allow_html=True)
 
+# Row 2 – ROI
 r1, r2 = st.columns(2)
-r1.markdown(kpi_box("ROI Monthly", roi_monthly, is_percent=True), unsafe_allow_html=True)
-r2.markdown(kpi_box("ROI Year To Date", roi_ytd, is_percent=True), unsafe_allow_html=True)
+r1.markdown(kpi_box("ROI Monthly", f"{roi_monthly}", is_percent=True), unsafe_allow_html=True)
+r2.markdown(kpi_box("ROI Year To Date", f"{roi_ytd}", is_percent=True), unsafe_allow_html=True)
 
 # -------------------------------
-# SIDEBAR OPTIONS + DOWNLOAD + PREVIEW
+# SIDEBAR OPTIONS + DOWNLOAD
 # -------------------------------
 st.sidebar.markdown("---")
+# 👇 FIXED: Changed key to be unique here as well
 show_df = st.sidebar.checkbox(
     "📋 Show Profit & Loss Sheet Preview",
     False,
-    key="accounting_show_pl_preview_v6",
+    key="accounting_show_pl_preview_v4",
 )
-
 if show_df:
     st.subheader(f"📋 Profit & Loss Sheet Preview – {selected_tab}")
-    st.caption(f"Columns detected: {len(df.columns)}")
     st.dataframe(df, use_container_width=True)
 
 st.subheader("⬇️ Download Data")
 csv = df.to_csv(index=False).encode("utf-8")
-st.download_button(
-    f"Download {selected_tab} CSV",
-    csv,
-    f"{selected_tab}_profit_loss.csv",
-    "text/csv"
-)
+st.download_button(f"Download {selected_tab} CSV", csv, f"{selected_tab}_profit_loss.csv", "text/csv")
 
 # -------------------------------
-# GLOBAL CSS
+# GLOBAL CSS FOR HOVER EFFECT
 # -------------------------------
 st.markdown(
-    f"""
+    """
     <style>
-    .kpi-card:hover {{
+    .kpi-card:hover {
         box-shadow: 0px 0px 18px rgba(30,144,255,0.45);
         transform: scale(1.01);
         cursor: pointer;
-    }}
-    section[data-testid="stSidebar"] {{
-        background-color: {bg_color} !important;
-        color: {text_color} !important;
-    }}
-    div[data-testid="stDownloadButton"] button {{
-        background-color: {border_color} !important;
-        color: #ffffff !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-        border: none !important;
-    }}
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+# -------------------------------
+# FIXED BUTTON COLORS
+# -------------------------------
+extra_css = f"""
+<style>
+section[data-testid="stSidebar"] {{
+    background-color: {bg_color} !important;
+    color: {text_color} !important;
+}}
+div[data-testid="stDownloadButton"] button {{
+    background-color: {border_color} !important;
+    color: #ffffff !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    border: none !important;
+}}
+</style>
+"""
+st.markdown(extra_css, unsafe_allow_html=True)
 
 st.markdown("---")
 st.caption("© 2025 Pioneer Broadband")
