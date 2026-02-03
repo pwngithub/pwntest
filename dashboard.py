@@ -1,4 +1,4 @@
-# dashboard.py — UPDATED (v4: Added 'Category at Disconnect' Filter)
+# dashboard.py — UPDATED (v5: Added 'Reason' Filter)
 import streamlit as st
 import pandas as pd
 import requests
@@ -168,7 +168,7 @@ def run_dashboard():
     all_cats = sorted(list(df["Category"].unique()))
     selected_cats = st.sidebar.multiselect("Category (Current/New)", all_cats, default=all_cats)
 
-    # Filter 3: Category at Disconnect (NEW)
+    # Filter 3: Category at Disconnect
     all_disc_cats = sorted(list(df["Category at Disconnect"].unique()))
     selected_disc_cats = st.sidebar.multiselect(
         "Category at Disconnect", 
@@ -176,12 +176,22 @@ def run_dashboard():
         default=all_disc_cats,
         help="Filter by the category the customer belonged to BEFORE they disconnected."
     )
+
+    # Filter 4: Reason (NEW)
+    all_reasons = sorted(list(df["Reason"].unique()))
+    selected_reasons = st.sidebar.multiselect(
+        "Reason (Churn)", 
+        all_reasons, 
+        default=all_reasons,
+        help="Filter by churn reason. Note: New customers usually have 'Unknown' reasons."
+    )
     
     # Apply Filters
     df_filtered = df[
         df["Location"].isin(selected_loc) & 
         df["Category"].isin(selected_cats) &
-        df["Category at Disconnect"].isin(selected_disc_cats)
+        df["Category at Disconnect"].isin(selected_disc_cats) &
+        df["Reason"].isin(selected_reasons)
     ].copy()
     
     if df_filtered.empty:
