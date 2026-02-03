@@ -72,7 +72,7 @@ except Exception:
 # -------------------------------
 # FETCH SHEET NAMES
 # -------------------------------
-@st.cache_data(ttl=60)  # shorter cache during dev – can increase later
+@st.cache_data(ttl=60)
 def get_sheet_tabs(sheet_id, api_key):
     meta_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}?key={api_key}"
     r = requests.get(meta_url)
@@ -93,57 +93,85 @@ if st.sidebar.button("🔄 Refresh sheet list"):
 try:
     sheet_names = get_sheet_tabs(SHEET_ID, API_KEY)
     
-    # Select tabs that look like monthly sheets (e.g. 25.12, 26.01, 26.02...)
     month_tabs = [
         n for n in sheet_names
         if re.match(r'^\d{2}\.\d{2}$', n.strip())
     ]
     
-    # Sort newest first (26.01 > 25.12 > 25.11 ...)
     month_tabs.sort(reverse=True)
     
     if not month_tabs:
-        # Fallback: show all tabs if no month-like names found
         month_tabs = sorted(sheet_names, reverse=True)
     
     selected_tab = st.sidebar.selectbox(
         "📅 Select Month",
         month_tabs,
-        index=0,  # newest tab selected by default
-        key="accounting_month_selectbox_v5",
+        index=0,
+        key="accounting_month_selectbox_v6",
     )
 except Exception as e:
     st.sidebar.error(f"❌ Could not fetch sheet tabs: {e}")
     st.stop()
 
 # -------------------------------
-# LOAD SHEET DATA
+# LOAD SHEET DATA – IMPROVED VERSION
 # -------------------------------
 @st.cache_data(ttl=300)
 def load_sheet(sheet_id, tab, api_key):
-    # URL-encode single quotes if needed, but Google usually handles ' fine
+    # Use unquoted tab name for simple names like 26.01
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{tab}!A1:Z200?key={api_key}"
     r = requests.get(url)
     if r.status_code != 200:
         raise Exception(f"Failed to load '{tab}': {r.status_code} – {r.text}")
+    
     vals = r.json().get("values", [])
     if not vals:
         raise Exception("No data returned from sheet.")
     
-    # Try to find header row with enough non-empty cells
-    header_row = next((i for i, row in enumerate(vals) if sum(1 for c in row if str(c).strip()) >= 3), None)
-    if header_row is None:
+    # Find header row
+    header_row_idx = next(
+        (i for i, row in enumerate(vals) if sum(1 for c in row if str(c).strip()) >= 3),
+        None
+    )
+    if header_row_idx is None:
         raise Exception("Could not find a valid header row.")
     
-    df = pd.DataFrame(vals[header_row + 1:], columns=vals[header_row])
-    df.columns = [str(c).strip() if c else f"Column_{i}" for i, c in enumerate(df.columns)]
+    header = [str(c).strip() for c in vals[header_row_idx]]
     
-    # Handle duplicate columns
+    # Look at header + next ~50 rows to find true max columns
+    sample_rows = vals[header_row_idx : header_row_idx + 51]
+    max_cols = max(len(row) for row in sample_rows if row)
+    
+    # Prepare header (extend if needed)
+    header_clean = []
+    for i in range(max_cols):
+        if i < len(header):
+            cleaned = header[i]
+            header_clean.append(cleaned if cleaned else f"Col_{i+1}")
+        else:
+            header_clean.append(f"Col_{i+1}")
+    
+    # Build data – pad short rows, truncate extra-long ones (rare)
+    data = []
+    for row in vals[header_row_idx + 1:]:
+        padded = row[:max_cols] + [''] * (max_cols - len(row))
+        data.append(padded)
+    
+    df = pd.DataFrame(data, columns=header_clean)
+    
+    # Handle duplicate column names
     if df.columns.duplicated().any():
-        df.columns = [
-            f"{c}_{i}" if df.columns.tolist().count(c) > 1 else c
-            for i, c in enumerate(df.columns)
-        ]
+        seen = {}
+        new_cols = []
+        for col in df.columns:
+            if col in seen:
+                seen[col] += 1
+                new_cols.append(f"{col}_{seen[col]}")
+            else:
+                seen[col] = 0
+                new_cols.append(col)
+        df.columns = new_cols
+    
     return df
 
 try:
@@ -156,7 +184,6 @@ except Exception as e:
 # HELPERS
 # -------------------------------
 def find_row(df, keys):
-    """Find first row where column A CONTAINS any of the keys (case-insensitive)."""
     col = df.iloc[:, 0].astype(str).str.lower()
     for k in keys:
         m = col[col.str.contains(k.lower(), na=False)]
@@ -165,7 +192,6 @@ def find_row(df, keys):
     return None
 
 def find_exact_row(df, key):
-    """Find first row where column A EQUALS the key (case-insensitive, trimmed)."""
     col = df.iloc[:, 0].astype(str).str.strip().str.lower()
     m = col[col == key.lower()]
     if not m.empty:
@@ -192,15 +218,14 @@ def num(df, r, c):
 # -------------------------------
 col_idx = find_col(df, "month") or 1
 ebitda_r   = find_row(df, ["ebitda"])
-subs_r     = find_row(df, ["users months", "user months"])
-mrr_r      = find_row(df, ["broadhub rev", "broadhub"])
+subs_r     = find_row(df, ["users months", "user months", "subscribers"])
+mrr_r      = find_row(df, ["broadhub rev", "broadhub", "mrr"])
 
 ebitda = num(df, ebitda_r, col_idx) if ebitda_r is not None else 0
 subs   = num(df, subs_r, col_idx)   if subs_r is not None else 0
 mrr    = num(df, mrr_r, col_idx)    if mrr_r is not None else 0
 arpu   = (mrr / subs) if subs > 0 else 0
 
-# ROI
 roi_row = find_exact_row(df, "roi")
 roi_monthly = 0
 roi_ytd = 0
@@ -262,16 +287,18 @@ r1.markdown(kpi_box("ROI Monthly", roi_monthly, is_percent=True), unsafe_allow_h
 r2.markdown(kpi_box("ROI Year To Date", roi_ytd, is_percent=True), unsafe_allow_html=True)
 
 # -------------------------------
-# SIDEBAR OPTIONS + DOWNLOAD
+# SIDEBAR OPTIONS + DOWNLOAD + PREVIEW
 # -------------------------------
 st.sidebar.markdown("---")
 show_df = st.sidebar.checkbox(
     "📋 Show Profit & Loss Sheet Preview",
     False,
-    key="accounting_show_pl_preview_v5",
+    key="accounting_show_pl_preview_v6",
 )
+
 if show_df:
     st.subheader(f"📋 Profit & Loss Sheet Preview – {selected_tab}")
+    st.caption(f"Columns detected: {len(df.columns)}")
     st.dataframe(df, use_container_width=True)
 
 st.subheader("⬇️ Download Data")
@@ -284,7 +311,7 @@ st.download_button(
 )
 
 # -------------------------------
-# GLOBAL CSS FOR HOVER + BUTTONS
+# GLOBAL CSS
 # -------------------------------
 st.markdown(
     f"""
