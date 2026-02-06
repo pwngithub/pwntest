@@ -1,51 +1,40 @@
+
 import streamlit as st
 import requests
-import pandas as pd
-import plotly.express as px
-from datetime import datetime, timedelta
+from PIL import Image
+from io import BytesIO
 import urllib3
 import matplotlib.pyplot as plt
 import uuid
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 st.set_page_config(page_title="PRTG Bandwidth", layout="wide", page_icon="Signal")
 
 USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-TOTAL_CAPACITY = 40000  # Mbps – change this to match your actual total uplink
-
-# ── Period configuration ─────────────────────────────────────────────────────
-PERIODS = {
-    "Live (2 hours)":    {"hours": 2,   "avg": 0,     "name": "Live (2 hours)"},
-    "Last 48 hours":     {"hours": 48,  "avg": 300,   "name": "Last 48 hours"},
-    "Last 7 days":       {"days":  7,   "avg": 900,   "name": "Last 7 days"},
-    "Last 30 days":      {"days":  30,  "avg": 3600,  "name": "Last 30 days"},
-    "Last 365 days":     {"days":  365, "avg": 86400, "name": "Last 365 days"},
-}
+# --- NEW: Define your total network capacity in Mbps here ---
+# Example: 40000 Mbps = 40 Gbps. Update this to match Pioneer's actual total uplink.
+TOTAL_CAPACITY = 40000 
 
 if "period_key" not in st.session_state:
     st.session_state.period_key = f"period_{uuid.uuid4()}"
 
-period_label = st.selectbox(
+period = st.selectbox(
     "Time Period",
-    list(PERIODS.keys()),
+    ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
     index=1,
     key=st.session_state.period_key
 )
 
-period = PERIODS[period_label]
-avg_sec = period["avg"]
-
-now = datetime.utcnow()
-if "hours" in period:
-    start = now - timedelta(hours=period["hours"])
-else:
-    start = now - timedelta(days=period["days"])
-sdate = start.strftime("%Y-%m-%d-%H-%M-%S")
-edate = now.strftime("%Y-%m-%d-%H-%M-%S")
+graphid = {
+    "Live (2 hours)": "0",
+    "Last 48 hours": "1",
+    "Last 7 days": "-7",
+    "Last 30 days": "2",
+    "Last 365 days": "3"
+}[period]
 
 SENSORS = {
     "Firstlight":          "12435",
@@ -54,210 +43,143 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
-@st.cache_data(ttl=240)
-def fetch_historic_data(sensor_id):
-    url = f"{BASE}/api/historicdata.json"
+@st.cache_data(ttl=300)
+def get_real_peaks(sensor_id):
+    url = f"{BASE}/api/table.json"
     params = {
+        "content": "channels",
         "id": sensor_id,
-        "avg": avg_sec,
-        "sdate": sdate,
-        "edate": edate,
-        "usecaption": 1,
+        "columns": "name,maximum_raw",
         "username": USER,
         "passhash": PH
     }
     try:
-        r = requests.get(url, params=params, verify=False, timeout=30)
-        r.raise_for_status()
-        data = r.json()
+        data = requests.get(url, params=params, verify=False, timeout=15).json()
+        in_peak = out_peak = 0.0
+        for ch in data.get("channels", []):
+            name = ch.get("name", "").strip()
+            raw = ch.get("maximum_raw", "0")
+            if not raw or float(raw) == 0:
+                continue
+            mbps = float(raw) / 10_000_000
+            if "Traffic In" in name or "Down" in name:
+                in_peak = max(in_peak, round(mbps, 2))
+            elif "Traffic Out" in name or "Up" in name:
+                out_peak = max(out_peak, round(mbps, 2))
+        return in_peak, out_peak
+    except:
+        return 0.0, 0.0
 
-        if "histdata" not in data or not data.get("histdata"):
-            return pd.DataFrame(), 0.0, 0.0, "No historic data rows for this period"
+@st.cache_data(ttl=300)
+def get_graph_image(sensor_id, graphid):
+    url = f"{BASE}/chart.png"
+    params = {
+        "id": sensor_id,
+        "graphid": graphid,
+        "width": 1800,
+        "height": 800,
+        "bgcolor": "1e1e1e",
+        "fontcolor": "ffffff",
+        "username": USER,
+        "passhash": PH
+    }
+    try:
+        resp = requests.get(url, params=params, verify=False, timeout=15)
+        return Image.open(BytesIO(resp.content))
+    except:
+        return None
 
-        hist_list = data["histdata"]
-        if not hist_list or not isinstance(hist_list[0], dict):
-            return pd.DataFrame(), 0.0, 0.0, "Invalid historic data format"
-
-        df = pd.DataFrame(hist_list)
-
-        # Datetime handling
-        if "datetime_raw" in df.columns:
-            df["datetime"] = pd.to_datetime(df["datetime_raw"], unit='D', origin='1899-12-30', utc=True)
-        elif "datetime" in df.columns:
-            df["datetime"] = pd.to_datetime(df["datetime"], errors='coerce', utc=True)
-        else:
-            df["datetime"] = pd.NaT
-
-        # Channel metadata
-        channels = {}
-        for k in data:
-            if k.startswith("item") and isinstance(data[k], dict) and "name" in data[k]:
-                ch_name = data[k]["name"].strip().lower()
-                ch_id = k.replace("item", "")
-                channels[ch_id] = ch_name
-
-        if not channels:
-            return df, 0.0, 0.0, "No channel metadata found (most likely no data was recorded)"
-
-        # Match In / Out
-        in_col = out_col = None
-        for ch_id, name in channels.items():
-            col_name = f"value{ch_id}"
-            if col_name in df.columns:
-                if any(kw in name for kw in [
-                    "in", "down", "traffic in", "download", "receive", "ingress",
-                    "bandwidth in", "downstream", "rx", "input", "incoming", "rxbytes"
-                ]):
-                    in_col = col_name
-                elif any(kw in name for kw in [
-                    "out", "up", "traffic out", "upload", "send", "egress",
-                    "bandwidth out", "upstream", "tx", "output", "outgoing", "txbytes"
-                ]):
-                    out_col = col_name
-
-        if not in_col and not out_col:
-            return df, 0.0, 0.0, f"No matching In/Out channels. Found channels: {', '.join(channels.values()) or 'none'}"
-
-        divisor = 125000.0  # bytes/sec → Mbps   ← change to 1.0 if already Mbps
-
-        df_mbps = df[["datetime"]].copy() if "datetime" in df.columns else pd.DataFrame()
-
-        peak_in = peak_out = 0.0
-
-        if in_col:
-            series = pd.to_numeric(df[in_col], errors='coerce') / divisor
-            df_mbps["In (Mbps)"] = series
-            if not series.empty and pd.notna(series.max()):
-                peak_in = round(float(series.max()), 2)
-
-        if out_col:
-            series = pd.to_numeric(df[out_col], errors='coerce') / divisor
-            df_mbps["Out (Mbps)"] = series
-            if not series.empty and pd.notna(series.max()):
-                peak_out = round(float(series.max()), 2)
-
-        return df_mbps, peak_in, peak_out, None
-
-    except requests.exceptions.RequestException as e:
-        return pd.DataFrame(), 0.0, 0.0, f"API request failed: {str(e)}"
-    except Exception as e:
-        return pd.DataFrame(), 0.0, 0.0, f"Error: {str(e)}"
-
-
-# ────────────────────────────────────────────────────────────────
 st.title("PRTG Bandwidth Dashboard")
-st.caption(f"Period: **{period_label}**  |  Averaging: **{avg_sec if avg_sec > 0 else 'raw'} seconds**")
+st.caption(f"Period: **{period}**")
 
 total_in = total_out = 0.0
 
 for i in range(0, len(SENSORS), 2):
     cols = st.columns(2)
     pair = list(SENSORS.items())[i:i+2]
-
     for col, (name, sid) in zip(cols, pair):
         with col:
+            in_peak, out_peak = get_real_peaks(sid)
+            total_in  += in_peak
+            total_out += out_peak
             st.subheader(name)
-
-            df, peak_in, peak_out, msg = fetch_historic_data(sid)
-            total_in += peak_in
-            total_out += peak_out
-
-            st.metric("Peak In",  f"{peak_in:,.1f} Mbps")
-            st.metric("Peak Out", f"{peak_out:,.1f} Mbps")
-
-            if msg:
-                st.info(f"{msg}\n\n**Tip**: Check this sensor in PRTG → Historic Data tab for the same period. If empty there too, likely no traffic / scans failed / paused / down during that time.")
-            elif not df.empty and ("In (Mbps)" in df.columns or "Out (Mbps)" in df.columns):
-                df_long = df.melt(
-                    id_vars=["datetime"],
-                    var_name="Direction",
-                    value_name="Mbps"
-                ).dropna(subset=["Mbps"])
-
-                if not df_long.empty:
-                    fig = px.line(
-                        df_long,
-                        x="datetime",
-                        y="Mbps",
-                        color="Direction",
-                        title=f"{name} Traffic",
-                        color_discrete_map={"In (Mbps)": "#00c853", "Out (Mbps)": "#d81b60"},
-                        labels={"datetime": "Time", "Mbps": "Mbps"}
-                    )
-                    fig.update_layout(
-                        height=550,
-                        hovermode="x unified",
-                        legend_title_text="",
-                        xaxis_title="",
-                        yaxis_title="Mbps",
-                        template="plotly_dark",
-                        plot_bgcolor="rgba(0,0,0,0)",
-                        paper_bgcolor="rgba(0,0,0,0)",
-                    )
-                    fig.update_traces(line=dict(width=2.2))
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No numeric values to plot (all NaN or zero)")
+            st.metric("Peak In",  f"{in_peak:,.2f} Mbps")
+            st.metric("Peak Out", f"{out_peak:,.2f} Mbps")
+            img = get_graph_image(sid, graphid)
+            if img:
+                st.image(img, use_container_width=True)
             else:
-                st.info("No plottable data after processing")
+                st.caption("Graph unavailable")
 
 st.markdown("## Combined Peak Bandwidth Across All Circuits")
-st.markdown("")
 
-col1, col2 = st.columns([3.2, 1])
-
+col1, col2 = st.columns([3, 1])
 with col1:
     fig, ax = plt.subplots(figsize=(12, 7))
     bars = ax.bar(
         ["Peak In", "Peak Out"],
         [total_in, total_out],
-        color=["#00c853", "#d81b60"],
-        width=0.48,
+        color=["#00ff9d", "#ff3366"],
+        width=0.5,
         edgecolor="white",
-        linewidth=2.2
+        linewidth=2.5
     )
+    
+    current_max = max(total_in, total_out)
+    if current_max > 0:
+        ax.set_ylim(0, current_max * 1.15)
+    else:
+        ax.set_ylim(0, 100)
 
-    current_max = max(total_in, total_out, 1)
-    ax.set_ylim(0, current_max * 1.18)
-
-    ax.set_ylabel("Mbps", fontsize=15, fontweight="bold")
-    ax.set_title(f"Total Combined Peak – {period_label}", fontsize=22, fontweight="bold", pad=25)
+    ax.set_ylabel("Mbps", fontsize=16, fontweight="bold", color="white")
+    ax.set_title(f"Total Combined Peak – {period}", fontsize=24, fontweight="bold", color="white", pad=30)
     ax.set_facecolor("#0e1117")
     fig.patch.set_facecolor("#0e1117")
-
+    
     for spine in ["top", "right", "left"]:
         ax.spines[spine].set_visible(False)
-
-    ax.tick_params(colors="white", labelsize=13)
-    ax.grid(axis="y", alpha=0.18, color="white", linestyle="--")
+        
+    ax.tick_params(colors="white", labelsize=14, length=0)
+    ax.grid(axis="y", alpha=0.2, color="white", linestyle="--")
 
     for bar in bars:
         height = bar.get_height()
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            height + (current_max * 0.025),
-            f"{height:,.0f}",
-            ha="center", va="bottom",
-            fontsize=26, fontweight="bold", color="white"
-        )
-
+        if height > 0:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                height + (current_max * 0.02),
+                f"{height:,.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=28,
+                fontweight="bold",
+                color="white"
+            )
     st.pyplot(fig, use_container_width=True)
 
 with col2:
-    cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1
-    pct_in  = (total_in  / cap) * 100
+    # --- NEW: Percentage Calculations ---
+    # Avoid division by zero if capacity is not set
+    cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1 
+    
+    pct_in = (total_in / cap) * 100
     pct_out = (total_out / cap) * 100
-
-    st.metric("**Total Inbound Peak**",  f"{total_in:,.0f} Mbps")
-    st.metric("**Total Outbound Peak**", f"{total_out:,.0f} Mbps")
-
+    
+    # Existing Metrics
+    st.metric("**Total In**",  f"{total_in:,.0f} Mbps")
+    st.metric("**Total Out**", f"{total_out:,.0f} Mbps")
+    
     st.divider()
-    st.markdown("### Circuit Utilization")
-
+    
+    # New Percentage Metrics
+    st.markdown("### Utilization")
+    
     st.caption(f"Inbound ({pct_in:.1f}%)")
+    # Ensure progress bar doesn't crash if > 100%
     st.progress(min(pct_in / 100, 1.0))
-
+    
     st.caption(f"Outbound ({pct_out:.1f}%)")
     st.progress(min(pct_out / 100, 1.0))
-
-    st.caption(f"Design Capacity: {TOTAL_CAPACITY:,.0f} Mbps")
+    
+    st.caption(f"Capacity Goal: {TOTAL_CAPACITY:,.0f} Mbps")
+    
