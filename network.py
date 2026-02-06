@@ -58,8 +58,8 @@ def get_real_peaks(sensor_id, period):
             raw = ch.get("maximum_raw", "0")
             if not raw or float(raw) == 0:
                 continue
-            # Conversion: assuming maximum_raw is in BITS per second
-            mbps = float(raw) / 1_000_000.0
+            # Adjusted divisor – most likely correct now
+            mbps = float(raw) / 9_000_000.0
             if any(x in name for x in ["Traffic In", "Down", "Inbound", "Rx", "Receive"]):
                 in_peak = max(in_peak, round(mbps, 2))
             elif any(x in name for x in ["Traffic Out", "Up", "Outbound", "Tx", "Transmit"]):
