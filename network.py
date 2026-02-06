@@ -13,33 +13,23 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-TOTAL_CAPACITY = 40000  # Mbps – update this to match Pioneer's actual total uplink
+TOTAL_CAPACITY = 40000  # Mbps – update to match Pioneer's actual total uplink
 
-# Force refresh mechanism: bump a counter when period changes
-if "period_refresh" not in st.session_state:
-    st.session_state.period_refresh = 0
-
-if "last_period" not in st.session_state:
-    st.session_state.last_period = None
+if "period_key" not in st.session_state:
+    st.session_state.period_key = f"period_{uuid.uuid4()}"
 
 period = st.selectbox(
     "Time Period",
-    ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
+    ["Live (2 hours)", "Last 2 days", "Last 30 days", "Last 365 days"],
     index=1,
-    key="period_select"  # fixed key to avoid recreation issues
+    key=st.session_state.period_key
 )
-
-# Detect period change and bump refresh counter
-if st.session_state.last_period != period:
-    st.session_state.period_refresh += 1
-    st.session_state.last_period = period
 
 graphid = {
     "Live (2 hours)": "0",
-    "Last 48 hours": "1",
-    "Last 7 days": "-7",
-    "Last 30 days": "2",
-    "Last 365 days": "3"
+    "Last 2 days":    "1",
+    "Last 30 days":   "2",
+    "Last 365 days":  "3"
 }[period]
 
 SENSORS = {
@@ -49,9 +39,8 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
-@st.cache_data(ttl=60)  # short TTL + refresh counter in key
+@st.cache_data(ttl=300)
 def get_real_peaks(sensor_id, period, refresh_counter):
-    # The refresh_counter forces re-execution when period changes
     url = f"{BASE}/api/table.json"
     params = {
         "content": "channels",
@@ -68,8 +57,8 @@ def get_real_peaks(sensor_id, period, refresh_counter):
             raw = ch.get("maximum_raw", "0")
             if not raw or float(raw) == 0:
                 continue
-            # Use the divisor that worked for 48 hours in your last test
-            mbps = float(raw) / 9000000.0   # ← adjust this number if needed (e.g. 8500000 or 10000000)
+            # Divisor that worked for 48 hours in your previous test
+            mbps = float(raw) / 9_000_000.0
             if any(x in name for x in ["Traffic In", "Down", "Inbound", "Rx", "Receive", "in"]):
                 in_peak = max(in_peak, round(mbps, 2))
             elif any(x in name for x in ["Traffic Out", "Up", "Outbound", "Tx", "Transmit", "out"]):
@@ -98,6 +87,15 @@ def get_graph_image(sensor_id, graphid):
     except:
         return None
 
+# Force refresh when period changes
+if "last_period" not in st.session_state:
+    st.session_state.last_period = None
+    st.session_state.refresh_counter = 0
+
+if st.session_state.last_period != period:
+    st.session_state.refresh_counter += 1
+    st.session_state.last_period = period
+
 st.title("PRTG Bandwidth Dashboard")
 st.caption(f"Period: **{period}**")
 
@@ -108,8 +106,9 @@ for i in range(0, len(SENSORS), 2):
     pair = list(SENSORS.items())[i:i+2]
     for col, (name, sid) in zip(cols, pair):
         with col:
-            # Pass period + refresh counter to force recalc
-            in_peak, out_peak = get_real_peaks(sid, period, st.session_state.period_refresh)
+            in_peak, out_peak = get_real_peaks(
+                sid, period, st.session_state.refresh_counter
+            )
             total_in  += in_peak
             total_out += out_peak
             st.subheader(name)
