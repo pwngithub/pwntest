@@ -13,8 +13,7 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-# Total network capacity in Mbps
-TOTAL_CAPACITY = 40000 
+TOTAL_CAPACITY = 40000  # Mbps – update this to match Pioneer's actual total uplink
 
 if "period_key" not in st.session_state:
     st.session_state.period_key = f"period_{uuid.uuid4()}"
@@ -42,7 +41,7 @@ SENSORS = {
 }
 
 @st.cache_data(ttl=300)
-def get_real_peaks(sensor_id, period):  # period added so cache invalidates on time change
+def get_real_peaks(sensor_id, period):
     url = f"{BASE}/api/table.json"
     params = {
         "content": "channels",
@@ -59,8 +58,8 @@ def get_real_peaks(sensor_id, period):  # period added so cache invalidates on t
             raw = ch.get("maximum_raw", "0")
             if not raw or float(raw) == 0:
                 continue
-            # Correct conversion: bytes/sec → Mbps
-            mbps = float(raw) / 125000.0
+            # Conversion: assuming maximum_raw is in BITS per second
+            mbps = float(raw) / 1_000_000.0
             if any(x in name for x in ["Traffic In", "Down", "Inbound", "Rx", "Receive"]):
                 in_peak = max(in_peak, round(mbps, 2))
             elif any(x in name for x in ["Traffic Out", "Up", "Outbound", "Tx", "Transmit"]):
