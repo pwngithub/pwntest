@@ -5,6 +5,7 @@ from io import BytesIO
 import urllib3
 import matplotlib.pyplot as plt
 import uuid
+from datetime import datetime, timedelta
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 st.set_page_config(page_title="PRTG Bandwidth", layout="wide", page_icon="Signal")
@@ -13,25 +14,49 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-TOTAL_CAPACITY = 40000  # Mbps – update this to match Pioneer's actual total uplink
+TOTAL_CAPACITY = 40000
+
+# Period to graphid mapping (for PNG graphs)
+graphid_map = {
+    "Live (2 hours)": "0",
+    "Last 48 hours": "1",
+    "Last 7 days": "-7",
+    "Last 30 days": "2",
+    "Last 365 days": "3"
+}
 
 if "period_key" not in st.session_state:
     st.session_state.period_key = f"period_{uuid.uuid4()}"
 
 period = st.selectbox(
     "Time Period",
-    ["Live (2 hours)", "Last 48 hours", "Last 7 days", "Last 30 days", "Last 365 days"],
+    list(graphid_map.keys()),
     index=1,
     key=st.session_state.period_key
 )
 
-graphid = {
-    "Live (2 hours)": "0",
-    "Last 48 hours": "1",
-    "Last 7 days": "-7",
-    "Last 30 days": "2",
-    "Last 365 days": "3"
-}[period]
+graphid = graphid_map[period]
+
+# Time range for historic data API
+now = datetime.utcnow()
+if period == "Live (2 hours)":
+    start = now - timedelta(hours=2)
+    avg_interval = 0   # raw
+elif period == "Last 48 hours":
+    start = now - timedelta(hours=48)
+    avg_interval = 60
+elif period == "Last 7 days":
+    start = now - timedelta(days=7)
+    avg_interval = 900
+elif period == "Last 30 days":
+    start = now - timedelta(days=30)
+    avg_interval = 3600
+else:  # 365 days
+    start = now - timedelta(days=365)
+    avg_interval = 86400
+
+sdate = start.strftime("%Y-%m-%d-%H-%M-%S")
+edate = now.strftime("%Y-%m-%d-%H-%M-%S")
 
 SENSORS = {
     "Firstlight":          "12435",
@@ -40,31 +65,43 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
-@st.cache_data(ttl=300)
-def get_real_peaks(sensor_id, period):
-    url = f"{BASE}/api/table.json"
+@st.cache_data(ttl=180)
+def get_period_peaks(sensor_id, sdate, edate, avg_interval):
+    url = f"{BASE}/api/historicdata.json"
     params = {
-        "content": "channels",
         "id": sensor_id,
-        "columns": "name,maximum_raw",
+        "sdate": sdate,
+        "edate": edate,
+        "avg": avg_interval,
         "username": USER,
         "passhash": PH
     }
     try:
-        data = requests.get(url, params=params, verify=False, timeout=15).json()
-        in_peak = out_peak = 0.0
-        for ch in data.get("channels", []):
-            name = ch.get("name", "").strip()
-            raw = ch.get("maximum_raw", "0")
-            if not raw or float(raw) == 0:
-                continue
-            # Adjusted divisor – most likely correct now
-            mbps = float(raw) / 9_000_000.0
-            if any(x in name for x in ["Traffic In", "Down", "Inbound", "Rx", "Receive"]):
-                in_peak = max(in_peak, round(mbps, 2))
-            elif any(x in name for x in ["Traffic Out", "Up", "Outbound", "Tx", "Transmit"]):
-                out_peak = max(out_peak, round(mbps, 2))
-        return in_peak, out_peak
+        resp = requests.get(url, params=params, verify=False, timeout=20).json()
+        if "histdata" not in resp or not resp["histdata"]:
+            return 0.0, 0.0
+
+        in_max = out_max = 0.0
+        for row in resp["histdata"]:
+            for key, val in row.items():
+                if key.startswith("value") and val and float(val) > 0:
+                    # Convert assuming bits/sec (adjust if needed)
+                    mbps = float(val) / 1_000_000.0
+                    # Try to guess direction from channel name or fallback to order
+                    ch_idx = key.replace("value", "")
+                    ch_name = resp.get(f"item{ch_idx}", {}).get("name", "").lower()
+                    if any(x in ch_name for x in ["in", "down", "rx", "receive", "ingress"]):
+                        in_max = max(in_max, mbps)
+                    elif any(x in ch_name for x in ["out", "up", "tx", "transmit", "egress"]):
+                        out_max = max(out_max, mbps)
+                    else:
+                        # Fallback: odd columns in, even out (common pattern)
+                        if int(ch_idx) % 2 == 0:
+                            in_max = max(in_max, mbps)
+                        else:
+                            out_max = max(out_max, mbps)
+
+        return round(in_max, 2), round(out_max, 2)
     except Exception:
         return 0.0, 0.0
 
@@ -97,7 +134,7 @@ for i in range(0, len(SENSORS), 2):
     pair = list(SENSORS.items())[i:i+2]
     for col, (name, sid) in zip(cols, pair):
         with col:
-            in_peak, out_peak = get_real_peaks(sid, period)
+            in_peak, out_peak = get_period_peaks(sid, sdate, edate, avg_interval)
             total_in  += in_peak
             total_out += out_peak
             st.subheader(name)
