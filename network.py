@@ -15,9 +15,9 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-TOTAL_CAPACITY = 40000  # Mbps – update to your actual capacity
+TOTAL_CAPACITY = 40000  # Mbps – update to your actual uplink
 
-# ── Period settings ──────────────────────────────────────────────────────────
+# Period config
 PERIODS = {
     "Live (2 hours)":    {"hours": 2,   "avg": 0,     "name": "Live (2 hours)"},
     "Last 48 hours":     {"hours": 48,  "avg": 300,   "name": "Last 48 hours"},
@@ -72,27 +72,23 @@ def fetch_historic_data(sensor_id):
         data = r.json()
 
         if "histdata" not in data or not data.get("histdata"):
-            st.warning(f"Sensor {sensor_id}: No historic data available for this period (histdata empty/missing)")
-            return pd.DataFrame(), 0.0, 0.0
+            return pd.DataFrame(), 0.0, 0.0, "No historic data rows available for this period"
 
         hist_list = data["histdata"]
         if not hist_list or not isinstance(hist_list[0], dict):
-            st.warning(f"Sensor {sensor_id}: Invalid histdata format")
-            return pd.DataFrame(), 0.0, 0.0
+            return pd.DataFrame(), 0.0, 0.0, "Invalid historic data format"
 
         df = pd.DataFrame(hist_list)
 
-        # Safely handle datetime_raw
+        # Datetime handling
         if "datetime_raw" in df.columns:
             df["datetime"] = pd.to_datetime(df["datetime_raw"], unit='D', origin='1899-12-30', utc=True)
         elif "datetime" in df.columns:
-            # Fallback if only string datetime present (rare)
             df["datetime"] = pd.to_datetime(df["datetime"], errors='coerce', utc=True)
         else:
-            st.warning(f"Sensor {sensor_id}: No datetime or datetime_raw column in response")
-            df["datetime"] = pd.NaT  # placeholder
+            df["datetime"] = pd.NaT
 
-        # Channel detection (lowercase matching)
+        # Find channel metadata
         channels = {}
         for k in data:
             if k.startswith("item") and isinstance(data[k], dict) and "name" in data[k]:
@@ -100,20 +96,22 @@ def fetch_historic_data(sensor_id):
                 ch_id = k.replace("item", "")
                 channels[ch_id] = ch_name
 
+        if not channels:
+            return df, 0.0, 0.0, "No channel metadata found (possibly no channels or no data recorded)"
+
         in_col = out_col = None
         for ch_id, name in channels.items():
             col_name = f"value{ch_id}"
             if col_name in df.columns:
-                if any(kw in name for kw in ["in", "down", "traffic in", "download", "receive", "ingress"]):
+                if any(kw in name for kw in ["in", "down", "traffic in", "download", "receive", "ingress", "bandwidth in", "downstream", "rx"]):
                     in_col = col_name
-                elif any(kw in name for kw in ["out", "up", "traffic out", "upload", "send", "egress"]):
+                elif any(kw in name for kw in ["out", "up", "traffic out", "upload", "send", "egress", "bandwidth out", "upstream", "tx"]):
                     out_col = col_name
 
         if not in_col and not out_col:
-            st.warning(f"Sensor {sensor_id}: No In/Out channels matched. Available: {list(channels.values())}")
-            return df, 0.0, 0.0
+            return df, 0.0, 0.0, f"No In/Out channels matched. Available names: {list(channels.values())}"
 
-        divisor = 125000.0  # bytes/sec → Mbps (common for PRTG traffic); change to 1.0 if already Mbps
+        divisor = 125000.0  # bytes/sec → Mbps; try 1.0 if already Mbps
 
         df_mbps = df[["datetime"]].copy() if "datetime" in df else pd.DataFrame()
 
@@ -123,26 +121,25 @@ def fetch_historic_data(sensor_id):
             series = pd.to_numeric(df[in_col], errors='coerce') / divisor
             df_mbps["In (Mbps)"] = series
             m = series.max()
-            peak_in = round(float(m), 2) if not pd.isna(m) else 0.0
+            peak_in = round(float(m), 2) if pd.notna(m) else 0.0
 
         if out_col:
             series = pd.to_numeric(df[out_col], errors='coerce') / divisor
             df_mbps["Out (Mbps)"] = series
             m = series.max()
-            peak_out = round(float(m), 2) if not pd.isna(m) else 0.0
+            peak_out = round(float(m), 2) if pd.notna(m) else 0.0
 
-        return df_mbps, peak_in, peak_out
+        return df_mbps, peak_in, peak_out, None  # None = success
 
     except requests.exceptions.RequestException as e:
-        st.error(f"Sensor {sensor_id} – API error: {str(e)}")
-        return pd.DataFrame(), 0.0, 0.0
+        return pd.DataFrame(), 0.0, 0.0, f"API request failed: {str(e)}"
     except Exception as e:
-        st.error(f"Sensor {sensor_id} – Processing error: {str(e)}")
-        return pd.DataFrame(), 0.0, 0.0
+        return pd.DataFrame(), 0.0, 0.0, f"Processing error: {str(e)}"
+
 
 # ────────────────────────────────────────────────────────────────
 st.title("PRTG Bandwidth Dashboard")
-st.caption(f"Period: **{period_label}**  |  Averaging: **{avg_sec if avg_sec > 0 else 'raw'} s**")
+st.caption(f"Period: **{period_label}**  |  Averaging: **{avg_sec if avg_sec > 0 else 'raw'} seconds**")
 
 total_in = total_out = 0.0
 
@@ -154,14 +151,16 @@ for i in range(0, len(SENSORS), 2):
         with col:
             st.subheader(name)
 
-            df, peak_in, peak_out = fetch_historic_data(sid)
+            df, peak_in, peak_out, error_msg = fetch_historic_data(sid)
             total_in += peak_in
             total_out += peak_out
 
             st.metric("Peak In",  f"{peak_in:,.1f} Mbps")
             st.metric("Peak Out", f"{peak_out:,.1f} Mbps")
 
-            if not df.empty and "datetime" in df.columns and df["datetime"].notna().any():
+            if error_msg:
+                st.warning(f"{name}: {error_msg}")
+            elif not df.empty and "datetime" in df.columns and df["datetime"].notna().any():
                 df_long = df.melt(
                     id_vars=["datetime"],
                     var_name="Direction",
@@ -178,7 +177,6 @@ for i in range(0, len(SENSORS), 2):
                         color_discrete_map={"In (Mbps)": "#00c853", "Out (Mbps)": "#d81b60"},
                         labels={"datetime": "Time", "Mbps": "Mbps"}
                     )
-
                     fig.update_layout(
                         height=550,
                         hovermode="x unified",
@@ -190,13 +188,13 @@ for i in range(0, len(SENSORS), 2):
                         paper_bgcolor="rgba(0,0,0,0)",
                     )
                     fig.update_traces(line=dict(width=2.2))
-
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info("No valid numeric data for plotting")
+                    st.info("No numeric values available for plotting")
             else:
-                st.info("No data or time information available for this sensor/period")
+                st.info("No data available for this sensor/period")
 
+# Combined section remains the same
 st.markdown("## Combined Peak Bandwidth Across All Circuits")
 st.markdown("")
 
