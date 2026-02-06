@@ -15,9 +15,9 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-TOTAL_CAPACITY = 40000  # Mbps – update to your actual uplink
+TOTAL_CAPACITY = 40000  # Mbps – adjust to your actual total uplink capacity
 
-# Period config
+# ── Period configuration ─────────────────────────────────────────────────────
 PERIODS = {
     "Live (2 hours)":    {"hours": 2,   "avg": 0,     "name": "Live (2 hours)"},
     "Last 48 hours":     {"hours": 48,  "avg": 300,   "name": "Last 48 hours"},
@@ -72,7 +72,7 @@ def fetch_historic_data(sensor_id):
         data = r.json()
 
         if "histdata" not in data or not data.get("histdata"):
-            return pd.DataFrame(), 0.0, 0.0, "No historic data rows available for this period"
+            return pd.DataFrame(), 0.0, 0.0, "No historic data rows for this period"
 
         hist_list = data["histdata"]
         if not hist_list or not isinstance(hist_list[0], dict):
@@ -80,7 +80,7 @@ def fetch_historic_data(sensor_id):
 
         df = pd.DataFrame(hist_list)
 
-        # Datetime handling
+        # Handle datetime column
         if "datetime_raw" in df.columns:
             df["datetime"] = pd.to_datetime(df["datetime_raw"], unit='D', origin='1899-12-30', utc=True)
         elif "datetime" in df.columns:
@@ -97,44 +97,52 @@ def fetch_historic_data(sensor_id):
                 channels[ch_id] = ch_name
 
         if not channels:
-            return df, 0.0, 0.0, "No channel metadata found (possibly no channels or no data recorded)"
+            return df, 0.0, 0.0, "No channel metadata (most likely no data was recorded in this period)"
 
+        # Match In / Out channels
         in_col = out_col = None
         for ch_id, name in channels.items():
             col_name = f"value{ch_id}"
             if col_name in df.columns:
-                if any(kw in name for kw in ["in", "down", "traffic in", "download", "receive", "ingress", "bandwidth in", "downstream", "rx"]):
+                if any(kw in name for kw in [
+                    "in", "down", "traffic in", "download", "receive", "ingress",
+                    "bandwidth in", "downstream", "rx", "input", "incoming"
+                ]):
                     in_col = col_name
-                elif any(kw in name for kw in ["out", "up", "traffic out", "upload", "send", "egress", "bandwidth out", "upstream", "tx"]):
+                elif any(kw in name for kw in [
+                    "out", "up", "traffic out", "upload", "send", "egress",
+                    "bandwidth out", "upstream", "tx", "output", "outgoing"
+                ]):
                     out_col = col_name
 
         if not in_col and not out_col:
-            return df, 0.0, 0.0, f"No In/Out channels matched. Available names: {list(channels.values())}"
+            return df, 0.0, 0.0, f"No matching In/Out channels. Found: {', '.join(channels.values()) or 'none'}"
 
-        divisor = 125000.0  # bytes/sec → Mbps; try 1.0 if already Mbps
+        # Convert to Mbps – adjust divisor if your channels are already in Mbps (use 1.0)
+        divisor = 125000.0   # bytes/sec → Mbps (most common for SNMP traffic sensors)
 
-        df_mbps = df[["datetime"]].copy() if "datetime" in df else pd.DataFrame()
+        df_mbps = df[["datetime"]].copy() if "datetime" in df.columns else pd.DataFrame()
 
         peak_in = peak_out = 0.0
 
         if in_col:
             series = pd.to_numeric(df[in_col], errors='coerce') / divisor
             df_mbps["In (Mbps)"] = series
-            m = series.max()
-            peak_in = round(float(m), 2) if pd.notna(m) else 0.0
+            if not series.empty:
+                peak_in = round(float(series.max()), 2) if pd.notna(series.max()) else 0.0
 
         if out_col:
             series = pd.to_numeric(df[out_col], errors='coerce') / divisor
             df_mbps["Out (Mbps)"] = series
-            m = series.max()
-            peak_out = round(float(m), 2) if pd.notna(m) else 0.0
+            if not series.empty:
+                peak_out = round(float(series.max()), 2) if pd.notna(series.max()) else 0.0
 
-        return df_mbps, peak_in, peak_out, None  # None = success
+        return df_mbps, peak_in, peak_out, None   # success
 
     except requests.exceptions.RequestException as e:
         return pd.DataFrame(), 0.0, 0.0, f"API request failed: {str(e)}"
     except Exception as e:
-        return pd.DataFrame(), 0.0, 0.0, f"Processing error: {str(e)}"
+        return pd.DataFrame(), 0.0, 0.0, f"Error processing data: {str(e)}"
 
 
 # ────────────────────────────────────────────────────────────────
@@ -151,16 +159,16 @@ for i in range(0, len(SENSORS), 2):
         with col:
             st.subheader(name)
 
-            df, peak_in, peak_out, error_msg = fetch_historic_data(sid)
+            df, peak_in, peak_out, msg = fetch_historic_data(sid)
             total_in += peak_in
             total_out += peak_out
 
             st.metric("Peak In",  f"{peak_in:,.1f} Mbps")
             st.metric("Peak Out", f"{peak_out:,.1f} Mbps")
 
-            if error_msg:
-                st.warning(f"{name}: {error_msg}")
-            elif not df.empty and "datetime" in df.columns and df["datetime"].notna().any():
+            if msg:
+                st.info(f"**{msg}**")
+            elif not df.empty and ("In (Mbps)" in df.columns or "Out (Mbps)" in df.columns):
                 df_long = df.melt(
                     id_vars=["datetime"],
                     var_name="Direction",
@@ -190,11 +198,11 @@ for i in range(0, len(SENSORS), 2):
                     fig.update_traces(line=dict(width=2.2))
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info("No numeric values available for plotting")
+                    st.info("No numeric values to plot (all values NaN or zero)")
             else:
-                st.info("No data available for this sensor/period")
+                st.info("No plottable data after processing")
 
-# Combined section remains the same
+# ────────────────────────────────────────────────────────────────
 st.markdown("## Combined Peak Bandwidth Across All Circuits")
 st.markdown("")
 
@@ -239,7 +247,7 @@ with col1:
 
 with col2:
     cap = TOTAL_CAPACITY if TOTAL_CAPACITY > 0 else 1
-    pct_in = (total_in / cap) * 100
+    pct_in  = (total_in  / cap) * 100
     pct_out = (total_out / cap) * 100
 
     st.metric("**Total Inbound Peak**",  f"{total_in:,.0f} Mbps")
