@@ -16,15 +16,12 @@ BASE = "https://prtg.pioneerbroadband.net"
 
 TOTAL_CAPACITY = 40000  # Mbps – update to match Pioneer's actual total uplink
 
-# Session state initialization
+# Initialize session state
 if "last_period" not in st.session_state:
     st.session_state.last_period = None
 
 if "refresh_counter" not in st.session_state:
     st.session_state.refresh_counter = 0
-
-# Debug toggle at the top
-show_debug = st.checkbox("Show API Debug for all sensors", value=False)
 
 period = st.selectbox(
     "Time Period",
@@ -33,7 +30,7 @@ period = st.selectbox(
     key="period_select"
 )
 
-# Refresh counter logic
+# Refresh on period change
 if st.session_state.last_period != period:
     st.session_state.refresh_counter += 1
     st.session_state.last_period = period
@@ -53,7 +50,7 @@ SENSORS = {
 }
 
 @st.cache_data(ttl=60)
-def get_real_peaks_and_debug(sensor_id, period_str, refresh_counter):
+def get_real_peaks(sensor_id, period_str, refresh_counter):
     url = f"{BASE}/api/table.json"
     params = {
         "content": "channels",
@@ -69,13 +66,15 @@ def get_real_peaks_and_debug(sensor_id, period_str, refresh_counter):
         
         channels = data.get("channels", [])
         
+        # Debug structure
         debug = {
             "sensor_id": sensor_id,
             "period": period_str,
             "raw_channel_count": len(channels),
             "channels_detail": [],
             "final_in_peak": 0.0,
-            "final_out_peak": 0.0
+            "final_out_peak": 0.0,
+            "error": None
         }
         
         in_peak = out_peak = 0.0
@@ -91,7 +90,7 @@ def get_real_peaks_and_debug(sensor_id, period_str, refresh_counter):
             if raw_val <= 0:
                 continue
             
-            mbps = raw_val / 9_000_000.0   # ← your current divisor
+            mbps = raw_val / 9_000_000.0  # current divisor
             
             direction = "unknown"
             if any(kw in name.lower() for kw in ["traffic in", "down", "inbound", "rx", "receive", "in", "ingress"]):
@@ -102,9 +101,9 @@ def get_real_peaks_and_debug(sensor_id, period_str, refresh_counter):
                 direction = "OUT"
             
             debug["channels_detail"].append({
-                "channel_name": name,
+                "name": name,
                 "maximum_raw": raw_str,
-                "calculated_mbps": round(mbps, 2),
+                "mbps": round(mbps, 2),
                 "matched_as": direction
             })
         
@@ -136,7 +135,7 @@ def get_graph_image(sensor_id, graphid):
     except:
         return None
 
-# ── Dashboard ────────────────────────────────────────────────────────────────
+# Main dashboard
 st.title("PRTG Bandwidth Dashboard")
 st.caption(f"Period: **{period}**")
 
@@ -148,7 +147,7 @@ for i in range(0, len(SENSORS), 2):
     
     for col, (name, sid) in zip(cols, pair):
         with col:
-            in_peak, out_peak, debug = get_real_peaks_and_debug(
+            in_peak, out_peak, debug = get_real_peaks(
                 sid,
                 period,
                 st.session_state.refresh_counter
@@ -166,25 +165,19 @@ for i in range(0, len(SENSORS), 2):
             else:
                 st.caption("Graph unavailable")
             
-            # ── Debug section ───────────────────────────────────────────────────
-            if show_debug:
-                st.markdown("---")
-                st.markdown(f"**API Debug for {name}**")
-                
+            # Debug expander for this sensor
+            with st.expander(f"API Debug: {name} (click to see raw PRTG response)", expanded=False):
                 if "error" in debug:
                     st.error(f"API call failed: {debug['error']}")
                 else:
-                    st.write(f"- Channels returned: **{debug['raw_channel_count']}**")
-                    st.write(f"- Matched Peak In: **{debug['final_in_peak']:.2f} Mbps**")
-                    st.write(f"- Matched Peak Out: **{debug['final_out_peak']:.2f} Mbps**")
+                    st.markdown(f"**Channels returned**: {debug['raw_channel_count']}")
+                    st.markdown(f"**Matched peaks**: In = {debug['final_in_peak']:.2f} Mbps | Out = {debug['final_out_peak']:.2f} Mbps")
                     
                     if debug["channels_detail"]:
-                        st.markdown("**Channel details**")
+                        st.markdown("**Channel breakdown**")
                         st.dataframe(debug["channels_detail"])
                     else:
-                        st.info("No channels with non-zero maximum_raw found.")
-                
-                st.markdown("---")
+                        st.info("No channels with non-zero maximum_raw were returned by PRTG.")
 
 st.markdown("## Combined Peak Bandwidth Across All Circuits")
 
