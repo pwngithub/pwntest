@@ -13,7 +13,8 @@ USER = st.secrets["prtg_username"]
 PH   = st.secrets["prtg_passhash"]
 BASE = "https://prtg.pioneerbroadband.net"
 
-TOTAL_CAPACITY = 40000  # Mbps – update to match Pioneer's actual total uplink
+# Total network capacity in Mbps
+TOTAL_CAPACITY = 40000 
 
 if "period_key" not in st.session_state:
     st.session_state.period_key = f"period_{uuid.uuid4()}"
@@ -41,7 +42,7 @@ SENSORS = {
 }
 
 @st.cache_data(ttl=300)
-def get_real_peaks(sensor_id, period):   # ← added period as argument → cache invalidates on change
+def get_real_peaks(sensor_id, period):  # period added so cache invalidates on time change
     url = f"{BASE}/api/table.json"
     params = {
         "content": "channels",
@@ -58,13 +59,14 @@ def get_real_peaks(sensor_id, period):   # ← added period as argument → cach
             raw = ch.get("maximum_raw", "0")
             if not raw or float(raw) == 0:
                 continue
-            mbps = float(raw) / 10_000_000
-            if "Traffic In" in name or "Down" in name:
+            # Correct conversion: bytes/sec → Mbps
+            mbps = float(raw) / 125000.0
+            if any(x in name for x in ["Traffic In", "Down", "Inbound", "Rx", "Receive"]):
                 in_peak = max(in_peak, round(mbps, 2))
-            elif "Traffic Out" in name or "Up" in name:
+            elif any(x in name for x in ["Traffic Out", "Up", "Outbound", "Tx", "Transmit"]):
                 out_peak = max(out_peak, round(mbps, 2))
         return in_peak, out_peak
-    except:
+    except Exception:
         return 0.0, 0.0
 
 @st.cache_data(ttl=300)
@@ -96,7 +98,6 @@ for i in range(0, len(SENSORS), 2):
     pair = list(SENSORS.items())[i:i+2]
     for col, (name, sid) in zip(cols, pair):
         with col:
-            # Now passes period → cache refreshes when period changes
             in_peak, out_peak = get_real_peaks(sid, period)
             total_in  += in_peak
             total_out += out_peak
