@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import uuid
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 st.set_page_config(page_title="PRTG Bandwidth", layout="wide", page_icon="Signal")
 
 USER = st.secrets["prtg_username"]
@@ -15,15 +16,24 @@ BASE = "https://prtg.pioneerbroadband.net"
 
 TOTAL_CAPACITY = 40000  # Mbps – update to match Pioneer's actual total uplink
 
-if "period_key" not in st.session_state:
-    st.session_state.period_key = f"period_{uuid.uuid4()}"
+# Initialize session state variables safely
+if "period_refresh" not in st.session_state:
+    st.session_state.period_refresh = 0
+
+if "last_period" not in st.session_state:
+    st.session_state.last_period = None
 
 period = st.selectbox(
     "Time Period",
     ["Live (2 hours)", "Last 2 days", "Last 30 days", "Last 365 days"],
     index=1,
-    key=st.session_state.period_key
+    key="period_select"
 )
+
+# Detect period change and increment refresh counter
+if st.session_state.last_period != period:
+    st.session_state.period_refresh += 1
+    st.session_state.last_period = period
 
 graphid = {
     "Live (2 hours)": "0",
@@ -39,8 +49,8 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
-@st.cache_data(ttl=300)
-def get_real_peaks(sensor_id, period, refresh_counter):
+@st.cache_data(ttl=60)
+def get_real_peaks(sensor_id, period_str, refresh_counter):
     url = f"{BASE}/api/table.json"
     params = {
         "content": "channels",
@@ -57,7 +67,7 @@ def get_real_peaks(sensor_id, period, refresh_counter):
             raw = ch.get("maximum_raw", "0")
             if not raw or float(raw) == 0:
                 continue
-            # Divisor that worked for 48 hours in your previous test
+            # Divisor that matched your 48-hour expectation earlier
             mbps = float(raw) / 9_000_000.0
             if any(x in name for x in ["Traffic In", "Down", "Inbound", "Rx", "Receive", "in"]):
                 in_peak = max(in_peak, round(mbps, 2))
@@ -87,15 +97,6 @@ def get_graph_image(sensor_id, graphid):
     except:
         return None
 
-# Force refresh when period changes
-if "last_period" not in st.session_state:
-    st.session_state.last_period = None
-    st.session_state.refresh_counter = 0
-
-if st.session_state.last_period != period:
-    st.session_state.refresh_counter += 1
-    st.session_state.last_period = period
-
 st.title("PRTG Bandwidth Dashboard")
 st.caption(f"Period: **{period}**")
 
@@ -107,7 +108,9 @@ for i in range(0, len(SENSORS), 2):
     for col, (name, sid) in zip(cols, pair):
         with col:
             in_peak, out_peak = get_real_peaks(
-                sid, period, st.session_state.refresh_counter
+                sid,
+                period,
+                st.session_state.period_refresh
             )
             total_in  += in_peak
             total_out += out_peak
