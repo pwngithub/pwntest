@@ -5,6 +5,7 @@ from io import BytesIO
 import urllib3
 import matplotlib.pyplot as plt
 import uuid
+import json
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -16,24 +17,16 @@ BASE = "https://prtg.pioneerbroadband.net"
 
 TOTAL_CAPACITY = 40000  # Mbps – update to match Pioneer's actual total uplink
 
-# Initialize session state variables safely
-if "period_refresh" not in st.session_state:
-    st.session_state.period_refresh = 0
-
-if "last_period" not in st.session_state:
-    st.session_state.last_period = None
+# ── Period selection ─────────────────────────────────────────────────────────
+if "period_key" not in st.session_state:
+    st.session_state.period_key = f"period_{uuid.uuid4()}"
 
 period = st.selectbox(
     "Time Period",
     ["Live (2 hours)", "Last 2 days", "Last 30 days", "Last 365 days"],
     index=1,
-    key="period_select"
+    key=st.session_state.period_key
 )
-
-# Detect period change and increment refresh counter
-if st.session_state.last_period != period:
-    st.session_state.period_refresh += 1
-    st.session_state.last_period = period
 
 graphid = {
     "Live (2 hours)": "0",
@@ -42,6 +35,15 @@ graphid = {
     "Last 365 days":  "3"
 }[period]
 
+# Force refresh when period changes
+if "last_period" not in st.session_state:
+    st.session_state.last_period = None
+    st.session_state.refresh_counter = 0
+
+if st.session_state.last_period != period:
+    st.session_state.refresh_counter += 1
+    st.session_state.last_period = period
+
 SENSORS = {
     "Firstlight":          "12435",
     "NNINIX":              "12506",
@@ -49,6 +51,7 @@ SENSORS = {
     "Cogent":              "12340",
 }
 
+# ── Peak calculation with debug output ───────────────────────────────────────
 @st.cache_data(ttl=60)
 def get_real_peaks(sensor_id, period_str, refresh_counter):
     url = f"{BASE}/api/table.json"
@@ -60,24 +63,60 @@ def get_real_peaks(sensor_id, period_str, refresh_counter):
         "passhash": PH
     }
     try:
-        data = requests.get(url, params=params, verify=False, timeout=15).json()
+        resp = requests.get(url, params=params, verify=False, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        # Debug: store raw response for troubleshooting
+        raw_channels = data.get("channels", [])
+        
         in_peak = out_peak = 0.0
-        for ch in data.get("channels", []):
+        debug_lines = []
+        
+        for ch in raw_channels:
             name = ch.get("name", "").strip()
-            raw = ch.get("maximum_raw", "0")
-            if not raw or float(raw) == 0:
+            raw_str = ch.get("maximum_raw", "0")
+            try:
+                raw_val = float(raw_str)
+            except (ValueError, TypeError):
+                raw_val = 0.0
+            
+            if raw_val <= 0:
                 continue
-            # Divisor that matched your 48-hour expectation earlier
-            mbps = float(raw) / 9_000_000.0
-            if any(x in name for x in ["Traffic In", "Down", "Inbound", "Rx", "Receive", "in"]):
+            
+            # The divisor you're currently using
+            mbps = raw_val / 9_000_000.0
+            
+            direction = "unknown"
+            if any(x in name.lower() for x in ["traffic in", "down", "inbound", "rx", "receive", "in"]):
                 in_peak = max(in_peak, round(mbps, 2))
-            elif any(x in name for x in ["Traffic Out", "Up", "Outbound", "Tx", "Transmit", "out"]):
+                direction = "IN"
+            elif any(x in name.lower() for x in ["traffic out", "up", "outbound", "tx", "transmit", "out"]):
                 out_peak = max(out_peak, round(mbps, 2))
-        return in_peak, out_peak
+                direction = "OUT"
+            
+            debug_lines.append({
+                "name": name,
+                "raw": raw_str,
+                "mbps": round(mbps, 2),
+                "matched_as": direction
+            })
+        
+        debug_info = {
+            "sensor_id": sensor_id,
+            "period": period_str,
+            "raw_channel_count": len(raw_channels),
+            "matched_in_peak": in_peak,
+            "matched_out_peak": out_peak,
+            "channels": debug_lines
+        }
+        
+        return in_peak, out_peak, debug_info
+    
     except Exception as e:
-        st.warning(f"Peak fetch error for {sensor_id}: {e}")
-        return 0.0, 0.0
+        return 0.0, 0.0, {"error": str(e)}
 
+# ── Graph image (unchanged) ─────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def get_graph_image(sensor_id, graphid):
     url = f"{BASE}/chart.png"
@@ -93,10 +132,12 @@ def get_graph_image(sensor_id, graphid):
     }
     try:
         resp = requests.get(url, params=params, verify=False, timeout=15)
+        resp.raise_for_status()
         return Image.open(BytesIO(resp.content))
     except:
         return None
 
+# ── Main dashboard ───────────────────────────────────────────────────────────
 st.title("PRTG Bandwidth Dashboard")
 st.caption(f"Period: **{period}**")
 
@@ -105,23 +146,40 @@ total_in = total_out = 0.0
 for i in range(0, len(SENSORS), 2):
     cols = st.columns(2)
     pair = list(SENSORS.items())[i:i+2]
+    
     for col, (name, sid) in zip(cols, pair):
         with col:
-            in_peak, out_peak = get_real_peaks(
-                sid,
-                period,
-                st.session_state.period_refresh
+            in_peak, out_peak, debug_info = get_real_peaks(
+                sid, period, st.session_state.refresh_counter
             )
             total_in  += in_peak
             total_out += out_peak
+            
             st.subheader(name)
             st.metric("Peak In",  f"{in_peak:,.2f} Mbps")
             st.metric("Peak Out", f"{out_peak:,.2f} Mbps")
+            
             img = get_graph_image(sid, graphid)
             if img:
                 st.image(img, use_container_width=True)
             else:
                 st.caption("Graph unavailable")
+            
+            # Troubleshooting expander
+            with st.expander(f"API Debug: {name} (click to see raw data)", expanded=False):
+                if "error" in debug_info:
+                    st.error(f"API Error: {debug_info['error']}")
+                else:
+                    st.markdown("**Summary**")
+                    st.write(f"- Raw channels returned: {debug_info['raw_channel_count']}")
+                    st.write(f"- Matched Peak In: {debug_info['matched_in_peak']:.2f} Mbps")
+                    st.write(f"- Matched Peak Out: {debug_info['matched_out_peak']:.2f} Mbps")
+                    
+                    st.markdown("**Raw channel values & matching**")
+                    if debug_info["channels"]:
+                        st.json(debug_info["channels"])
+                    else:
+                        st.info("No channels with non-zero maximum_raw found")
 
 st.markdown("## Combined Peak Bandwidth Across All Circuits")
 
